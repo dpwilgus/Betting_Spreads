@@ -137,7 +137,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
 
     sheet.merge_cells("A2:J2")
     sheet["A2"] = (
-        f"Kickoff: {game.get('Game Date (ET', game.get('Game Date (ET)', 'Unknown'))} | "
+        f"Kickoff: {game.get('Game Date (ET)', 'Unknown')} | "
         f"ESPN game line: {game.get('Betting Line', 'Unavailable')}"
     )
     sheet["A2"].font = Font(italic=True, color="17365D")
