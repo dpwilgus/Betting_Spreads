@@ -152,9 +152,23 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
     sources = []
     for item in result.get("output", []):
         if item.get("type") == "web_search_call":
-            action = item.get("action", {})\n            source_items = action.get("sources", []) or action.get("search", {}).get("sources", [])\n            for source in source_items:
+            action = item.get("action", {})
+            source_items = action.get("sources", []) or action.get("search", {}).get("sources", [])
+            for source in source_items:
                 url = source.get("url")
-                if url and all(s["url"] != url for s in sources):
+                if url and all(existing["url"] != url for existing in sources):
                     sources.append({"title": source.get("title") or url, "url": url})
+    if len(analysis.get("picks", [])) > 5 or len(analysis.get("touchdown_scorers", [])) > 3:
+        raise RuntimeError("The AI returned more recommendations than the workbook supports.")
+    for pick in analysis.get("picks", []):
+        probability = float(pick.get("estimated_hit_probability", -1))
+        confidence = int(pick.get("confidence", 0))
+        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+            raise RuntimeError("The AI returned an invalid probability or confidence score.")
+    for scorer in analysis.get("touchdown_scorers", []):
+        probability = float(scorer.get("estimated_td_probability", -1))
+        confidence = int(scorer.get("confidence", 0))
+        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+            raise RuntimeError("The AI returned an invalid touchdown probability or confidence score.")
     analysis["sources"] = sources
     return analysis
