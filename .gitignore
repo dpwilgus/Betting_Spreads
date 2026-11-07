@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.spec
+.DS_Store
+NFL_Weekly_Matchups.xlsx
+Betting_Spreads.log
