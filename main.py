@@ -100,6 +100,14 @@ def extract_games(data: dict) -> tuple[list[dict], object, object]:
     return games, season, week
 
 
+
+def game_is_no_longer_pregame(game: dict) -> bool:
+    """Avoid generating pregame bets for games that are live or already finished."""
+    status = str(game.get("Game Status", "")).lower()
+    return any(marker in status for marker in (
+        "final", "completed", "in progress", "halftime", "quarter", "overtime"
+    ))
+
 def _sheet_title(game: dict, used: set[str]) -> str:
     raw = f"{game['Away Team']} @ {game['Home Team']}"
     cleaned = re.sub(r"[\\/*?:\[\]]", "", raw).strip()[:31] or "Matchup"
@@ -364,6 +372,16 @@ def main() -> int:
             for index, game in enumerate(games, 1):
                 matchup = f"{game['Away Team']} at {game['Home Team']}"
                 progress_window.update(index, len(games), matchup)
+                if game_is_no_longer_pregame(game):
+                    analyses.append({
+                        "summary": "This game is already live or completed. Pregame recommendations were intentionally skipped.",
+                        "game_script": "",
+                        "picks": [],
+                        "touchdown_scorers": [],
+                        "data_gaps": ["No pregame betting analysis is generated after kickoff."],
+                        "sources": [],
+                    })
+                    continue
                 if sys.stdout is not None:
                     print(f"Researching {index} of {len(games)}: {matchup}", flush=True)
                 try:
