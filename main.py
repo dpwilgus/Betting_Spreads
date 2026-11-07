@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import traceback
 import urllib.error
@@ -106,7 +105,6 @@ def extract_games(data: dict) -> tuple[list[dict], object, object]:
     if not games:
         raise RuntimeError("The ESPN response contained no usable NFL matchups.")
 
-    games.sort(key=lambda row: row["Game Date (ET)"])
     return games, season, week
 
 
