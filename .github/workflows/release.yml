@@ -41,11 +41,11 @@ jobs:
 
       - name: Build Windows executable
         if: runner.os == 'Windows'
-        run: pyinstaller --noconfirm --clean --onefile --console --collect-all tzdata --name Betting_Spreads main.py
+        run: pyinstaller --noconfirm --clean --onefile --console --collect-all tzdata --collect-data certifi --name Betting_Spreads main.py
 
       - name: Build macOS application
         if: runner.os == 'macOS'
-        run: pyinstaller --noconfirm --clean --windowed --name Betting_Spreads main.py
+        run: pyinstaller --noconfirm --clean --windowed --collect-data certifi --name Betting_Spreads main.py
 
       - name: Package macOS app
         if: runner.os == 'macOS'
