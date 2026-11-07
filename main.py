@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+import ssl
 import sys
 import traceback
 import urllib.error
 import urllib.request
+
+import certifi
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -40,7 +43,8 @@ def application_directory() -> Path:
 def fetch_scoreboard() -> dict:
     request = urllib.request.Request(ESPN_URL, headers=HEADERS)
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+        with urllib.request.urlopen(request, timeout=30, context=ssl_context) as response:
             return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, TimeoutError) as exc:
         raise RuntimeError(f"Could not retrieve NFL data from ESPN: {exc}") from exc
