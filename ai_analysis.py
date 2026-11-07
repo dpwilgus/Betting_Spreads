@@ -103,7 +103,7 @@ def _extract_output_text(response: dict[str, Any]) -> str:
     return "".join(chunks)
 
 def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
-    instructions = (_resource_path("agents/NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")\n                   + "\\n\\nQUALITY REVIEW CHECKLIST\\n"\n                   + _resource_path("agents/PROBABILITY_REVIEW.md").read_text(encoding="utf-8"))
+    instructions = (\n        _resource_path("agents/NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")\n        + "\\n\\nQUALITY REVIEW CHECKLIST\\n"\n        + _resource_path("agents/PROBABILITY_REVIEW.md").read_text(encoding="utf-8")\n    )
     matchup = f"{game['Away Team']} at {game['Home Team']}"
     user_input = (
         f"Analyze this upcoming NFL matchup: {matchup}.\n"
@@ -148,7 +148,7 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
     sources = []
     for item in result.get("output", []):
         if item.get("type") == "web_search_call":
-            for source in item.get("action", {}).get("sources", []):
+            action = item.get("action", {})\n            source_items = action.get("sources", []) or action.get("search", {}).get("sources", [])\n            for source in source_items:
                 url = source.get("url")
                 if url and all(s["url"] != url for s in sources):
                     sources.append({"title": source.get("title") or url, "url": url})
