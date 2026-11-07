@@ -176,13 +176,15 @@ def main() -> int:
             f"Saved to:\n{output}"
         )
         log_path.write_text(message + "\n", encoding="utf-8")
-        print(message)
+        if sys.stdout is not None:
+            print(message)
         show_macos_alert("Betting Spreads updated", message)
         return 0
     except Exception as exc:
         details = f"Update failed: {exc}\n\n{traceback.format_exc()}"
         log_path.write_text(details, encoding="utf-8")
-        print(details, file=sys.stderr)
+        if sys.stderr is not None:
+            print(details, file=sys.stderr)
         show_macos_alert("Betting Spreads — update failed", str(exc))
         return 1
 
