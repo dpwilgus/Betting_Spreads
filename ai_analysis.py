@@ -103,7 +103,7 @@ def _extract_output_text(response: dict[str, Any]) -> str:
     return "".join(chunks)
 
 def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
-    instructions = _resource_path("agents/NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")
+    instructions = (_resource_path("agents/NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")\n                   + "\\n\\nQUALITY REVIEW CHECKLIST\\n"\n                   + _resource_path("agents/PROBABILITY_REVIEW.md").read_text(encoding="utf-8"))
     matchup = f"{game['Away Team']} at {game['Home Team']}"
     user_input = (
         f"Analyze this upcoming NFL matchup: {matchup}.\n"
