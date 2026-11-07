@@ -1,3 +1,4 @@
 openpyxl>=3.1.5,<4.0
 pyinstaller>=6.10,<7.0
 tzdata>=2024.1
+certifi>=2024.2.2,<2027.0
