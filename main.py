@@ -305,6 +305,52 @@ def show_macos_alert(title: str, message: str) -> None:
     subprocess.run(["osascript", "-e", script], check=False)
 
 
+
+class ProgressWindow:
+    """Small macOS progress window so the one-click app does not appear idle."""
+
+    def __init__(self, total: int):
+        self.root = None
+        self.label = None
+        self.bar = None
+        if sys.platform != "darwin" or not getattr(sys, "frozen", False):
+            return
+        try:
+            import tkinter as tk
+            from tkinter import ttk
+            self.root = tk.Tk()
+            self.root.title("Betting Spreads")
+            self.root.geometry("440x105")
+            self.root.resizable(False, False)
+            self.label = tk.Label(
+                self.root, text=f"Preparing research for {total} matchups...",
+                anchor="w", padx=14, pady=12
+            )
+            self.label.pack(fill="x")
+            self.bar = ttk.Progressbar(self.root, maximum=total, mode="determinate")
+            self.bar.pack(fill="x", padx=14, pady=(0, 14))
+            self.root.update()
+        except Exception:
+            self.root = None
+
+    def update(self, index: int, total: int, matchup: str) -> None:
+        if self.root is not None:
+            try:
+                self.label.config(text=f"Researching {index} of {total}: {matchup}")
+                self.bar["value"] = index - 1
+                self.root.update_idletasks()
+                self.root.update()
+            except Exception:
+                self.close()
+
+    def close(self) -> None:
+        if self.root is not None:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+            self.root = None
+
 def main() -> int:
     log_path = application_directory() / "Betting_Spreads.log"
     try:
@@ -313,22 +359,27 @@ def main() -> int:
         api_key = get_api_key()
         analyses = []
         failures = []
-        for index, game in enumerate(games, 1):
-            progress = f"Researching {index} of {len(games)}: {game['Away Team']} at {game['Home Team']}"
-            if sys.stdout is not None:
-                print(progress, flush=True)
-            try:
-                analyses.append(analyze_game(game, api_key))
-            except Exception as exc:
-                failures.append(f"{game['Away Team']} at {game['Home Team']}: {exc}")
-                analyses.append({
-                    "summary": "AI research could not be completed for this matchup.",
-                    "game_script": "",
-                    "picks": [],
-                    "touchdown_scorers": [],
-                    "data_gaps": [str(exc)],
-                    "sources": [],
-                })
+        progress_window = ProgressWindow(len(games))
+        try:
+            for index, game in enumerate(games, 1):
+                matchup = f"{game['Away Team']} at {game['Home Team']}"
+                progress_window.update(index, len(games), matchup)
+                if sys.stdout is not None:
+                    print(f"Researching {index} of {len(games)}: {matchup}", flush=True)
+                try:
+                    analyses.append(analyze_game(game, api_key))
+                except Exception as exc:
+                    failures.append(f"{matchup}: {exc}")
+                    analyses.append({
+                        "summary": "AI research could not be completed for this matchup.",
+                        "game_script": "",
+                        "picks": [],
+                        "touchdown_scorers": [],
+                        "data_gaps": [str(exc)],
+                        "sources": [],
+                    })
+        finally:
+            progress_window.close()
 
         output = write_workbook(games, analyses, season, week)
         success_count = len(games) - len(failures)
