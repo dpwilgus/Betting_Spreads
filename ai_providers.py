@@ -17,6 +17,7 @@ import keyring
 
 SERVICE_NAME = "Betting Spreads"
 PROVIDER_ORDER = ("gemini", "groq", "openrouter", "openai")
+_SKIP_PROVIDER_FOR_RUN: set[str] = set()
 
 
 @dataclass(frozen=True)
@@ -238,9 +239,12 @@ def generate_json(
 ) -> tuple[dict[str, Any], str]:
     """Try configured providers in order; retry transient failures once, then fall back."""
     ensure_configured()
-    configured = _configured_providers()
+    configured = [
+        item for item in _configured_providers()
+        if item[0].name not in _SKIP_PROVIDER_FOR_RUN
+    ]
     if not configured:
-        raise RuntimeError("No usable AI API keys were found in environment variables or credential storage.")
+        raise RuntimeError("No configured AI providers remain available for this run. Check API keys and quotas.")
 
     failures = []
     for provider, key in configured:
@@ -265,18 +269,22 @@ def generate_json(
                     time.sleep(delay or 1)
                     continue
                 failures.append(f"{provider.name}: HTTP {exc.code} {body}")
+                _SKIP_PROVIDER_FOR_RUN.add(provider.name)
                 break
             except (urllib.error.URLError, TimeoutError, ssl.SSLError) as exc:
                 if attempt == 0:
                     time.sleep(1)
                     continue
                 failures.append(f"{provider.name}: connection error: {exc}")
+                _SKIP_PROVIDER_FOR_RUN.add(provider.name)
                 break
             except (ValueError, KeyError, RuntimeError) as exc:
                 failures.append(f"{provider.name}: {exc}")
+                _SKIP_PROVIDER_FOR_RUN.add(provider.name)
                 break
             except Exception as exc:
                 failures.append(f"{provider.name}: unexpected error: {exc}")
+                _SKIP_PROVIDER_FOR_RUN.add(provider.name)
                 break
 
     details = "\n".join(failures)
