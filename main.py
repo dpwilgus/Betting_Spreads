@@ -263,7 +263,20 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(gap_row + 1, 1, "\n".join(f"• {gap}" for gap in gaps) if gaps else "No material data gaps were reported.")
     sheet.cell(gap_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
 
-    source_row = gap_row + 4
+    research_row = gap_row + 4
+    sheet.cell(research_row, 1, "INDEPENDENT LIVE RESEARCH")
+    sheet.cell(research_row, 1).font = white_bold
+    sheet.cell(research_row, 1).fill = navy
+    sheet.merge_cells(start_row=research_row, start_column=1, end_row=research_row, end_column=10)
+    sheet.merge_cells(start_row=research_row + 1, start_column=1, end_row=research_row + 3, end_column=10)
+    sheet.cell(
+        research_row + 1, 1,
+        analysis.get("independent_research", "No independent research text was retained.")
+    )
+    sheet.cell(research_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
+    sheet.row_dimensions[research_row + 1].height = 180
+
+    source_row = research_row + 5
     sheet.cell(source_row, 1, "RESEARCH SOURCES")
     sheet.cell(source_row, 1).font = white_bold
     sheet.cell(source_row, 1).fill = navy
@@ -468,12 +481,20 @@ def main() -> int:
                 except Exception as exc:
                     failures.append(f"{matchup}: {exc}")
                     analyses.append({
-                        "summary": "AI research could not be completed or no cached analysis was available.",
-                        "game_script": "",
+                        "summary": (
+                            "AI analysis was unavailable. Independent NFL research was collected "
+                            "where possible; see the research evidence and source links below."
+                            if research else
+                            "AI research could not be completed and no independent research was available."
+                        ),
+                        "game_script": "No AI-generated game script is available for this matchup.",
                         "picks": [],
                         "touchdown_scorers": [],
                         "data_gaps": [str(exc)],
-                        "sources": [],
+                        "sources": list(research.get("sources", [])) if research else [],
+                        "independent_research": research.get("research_text", "") if research else "",
+                        "ai_provider": "Unavailable",
+                        "research_mode": "independent_research_only" if research else "unavailable",
                     })
         finally:
             progress_window.close()
