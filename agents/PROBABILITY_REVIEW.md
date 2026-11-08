@@ -10,6 +10,7 @@ Review each matchup analysis before workbook export:
 - Hit probability must be distinct from confidence.
 - Recommendations must be supported by measurable evidence, not narrative or star status alone.
 - State uncertainty and downside risks.
-- Return fewer than five recommendations when evidence does not support five.
-- Tie touchdown probabilities to role, red-zone and goal-line usage.
+- Return exactly five ranked recommendations as requested. When later-ranked options have weaker evidence, disclose the limitations and lower confidence; never fabricate supporting facts.
+- Return exactly three touchdown candidates. Tie probabilities to role, red-zone and goal-line usage; clearly lower confidence for weaker candidates.
+- Prefer confidence 7-10 when genuinely supported, but never inflate a score. Confidence measures evidence quality and role/sample stability, not win probability.
 - Reject fabricated lines, statistics, injury claims, sources, and false claims of simulation or backtesting.
