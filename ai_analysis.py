@@ -36,7 +36,7 @@ def get_api_key() -> str:
     root.attributes("-topmost", True)
     Label(
         root,
-        text="Enter your OpenAI API key.\\nIt will be saved securely in your computer's credential store.",
+        text="Enter your OpenAI API key.\nIt will be saved securely in your computer's credential store.",
         wraplength=520
     ).pack(pady=15)
     entry = Entry(root, show="*", width=65)
