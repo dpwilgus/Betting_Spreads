@@ -408,6 +408,7 @@ def main() -> int:
     log_path = application_directory() / "Betting_Spreads.log"
     try:
         reuse_cache = "--reuse-cache" in sys.argv[1:]
+        refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
         api_key = None if reuse_cache else get_api_key()
@@ -433,6 +434,19 @@ def main() -> int:
                 try:
                     if reuse_cache:
                         analysis = _load_cached_analysis(game)
+                    elif refresh_incomplete:
+                        cache_path = _analysis_cache_path(game)
+                        cached = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else None
+                        is_complete = (
+                            cached is not None
+                            and len(cached.get("picks", [])) == 5
+                            and len(cached.get("touchdown_scorers", [])) == 3
+                        )
+                        if is_complete:
+                            analysis = _load_cached_analysis(game)
+                        else:
+                            analysis = analyze_game(game, api_key)
+                            _save_cached_analysis(game, analysis)
                     else:
                         analysis = analyze_game(game, api_key)
                         _save_cached_analysis(game, analysis)
@@ -457,6 +471,7 @@ def main() -> int:
             f"{len(games)} matchups exported.\n"
             f"AI analysis completed for {success_count} of {len(games)} games.\n"
             + ("Cached analysis reused; no OpenAI API calls were made.\n" if reuse_cache else
+               "Only missing/incomplete cache entries were refreshed; complete entries were reused.\n" if refresh_incomplete else
                "Fresh AI research completed; results were saved to the local cache.\n")
             + f"\nSaved to:\n{output}"
         )
