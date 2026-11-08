@@ -70,6 +70,20 @@ macOS:
 pyinstaller --noconfirm --clean --windowed --collect-data certifi --collect-all keyring --collect-data agents --name Betting_Spreads main.py
 ```
 
+## Local development: reuse saved AI analysis
+
+For local testing only, the Python script supports a cache-only workbook refresh:
+
+1. Run a normal update once. Each successful matchup analysis is saved as JSON in the local `analysis_cache/` folder.
+2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling the OpenAI API.
+3. Cached analyses are clearly marked in the workbook because injuries, player availability, weather, usage, and sportsbook markets are not refreshed.
+
+The first run after adding the cache feature still requires API usage to generate new analyses. Existing workbooks created before caching do not contain the complete structured analysis cache. The cache-only option is intended for developers and is not exposed as a feature in the packaged end-user app.
+
+```bash
+python main.py --reuse-cache
+```
+
 ## Publishing a release
 
 Push a version tag (for example, `v2.0.0`) to trigger GitHub Actions. It builds the Windows and macOS downloads and attaches both to a GitHub Release. You can also run the workflow manually from the Actions tab to test builds; manual runs create build artifacts but do not publish a release.
