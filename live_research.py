@@ -48,26 +48,36 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
             data = _get_json(api_url)
             sections.extend(["ESPN GAME SUMMARY (retrieved independently of AI):", _compact_summary(data)])
             sources.append({"title": "ESPN game summary data", "url": api_url})
-            teams = {}
+            teams = {
+                str(game.get("away_team_id", "")): game.get("Away Team", "Away team"),
+                str(game.get("home_team_id", "")): game.get("Home Team", "Home team"),
+            }
+            teams.pop("", None)
             for competition in data.get("header", {}).get("competitions", []):
                 for competitor in competition.get("competitors", []):
                     team = competitor.get("team") or {}
                     if team.get("id"):
                         teams[str(team["id"])] = team.get("displayName", "Team")
             for team_id, team_name in teams.items():
-                injury_url = (
-                    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
-                    f"teams/{team_id}/injuries"
-                )
-                try:
-                    injury_data = _get_json(injury_url, timeout=15)
-                    sections.append(
-                        f"ESPN INJURY REPORT — {team_name}: "
-                        + json.dumps(injury_data, ensure_ascii=False, separators=(",", ":"))[:4500]
+                for endpoint_name in ("injuries", "statistics"):
+                    endpoint_url = (
+                        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                        f"teams/{team_id}/{endpoint_name}"
                     )
-                    sources.append({"title": f"ESPN injury report — {team_name}", "url": injury_url})
-                except Exception as exc:
-                    sections.append(f"Injury endpoint unavailable for {team_name}: {exc}")
+                    try:
+                        team_data = _get_json(endpoint_url, timeout=15)
+                        sections.append(
+                            f"ESPN CURRENT {endpoint_name.upper()} — {team_name}: "
+                            + json.dumps(team_data, ensure_ascii=False, separators=(",", ":"))[:5000]
+                        )
+                        sources.append({
+                            "title": f"ESPN {endpoint_name} — {team_name}",
+                            "url": endpoint_url,
+                        })
+                    except Exception as exc:
+                        sections.append(
+                            f"ESPN {endpoint_name} endpoint unavailable for {team_name}: {exc}"
+                        )
         except Exception as exc:
             sections.append(f"ESPN game-summary request failed: {exc}")
 
