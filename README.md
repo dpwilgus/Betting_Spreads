@@ -53,7 +53,7 @@ NVIDIA NIM is not currently included as a production provider. NVIDIA's Develope
 1. Download the file for your operating system from [Releases](../../releases).
 2. Windows: double-click `Betting_Spreads.exe`.
 3. macOS: unzip the download, then open `Betting_Spreads.app`. On first launch, macOS may require right-clicking the app and choosing **Open** because this app is not signed or notarized.
-4. Enter your OpenAI API key on first run.
+4. Enter one or more provider API keys on first run (Gemini, Groq, or OpenRouter are the recommended free options).
 5. The app retrieves the current ESPN scoreboard week, researches each matchup, and creates or replaces `NFL_Weekly_Matchups.xlsx` beside the executable/app bundle.
 
 ## Workbook contents
@@ -99,7 +99,7 @@ pyinstaller --noconfirm --clean --windowed --collect-data certifi --collect-all 
 For local testing only, the Python script supports a cache-only workbook refresh:
 
 1. Run a normal update once. Each successful matchup analysis is saved as JSON in the local `analysis_cache/` folder.
-2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling the OpenAI API.
+2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling any AI API.
 3. Cached analyses are clearly marked in the workbook because injuries, player availability, weather, usage, and sportsbook markets are not refreshed.
 
 Use `python main.py --refresh-incomplete` to reuse cached analyses that already contain exactly five prop ideas and three touchdown candidates, while making API calls only for missing or incomplete cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
