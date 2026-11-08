@@ -152,6 +152,15 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A2"].font = Font(italic=True, color="17365D")
     sheet["A2"].alignment = Alignment(wrap_text=True)
 
+    if analysis.get("cache_reused"):
+        sheet.merge_cells("A3:J3")
+        sheet["A3"] = (
+            "CACHED ANALYSIS — research has not been refreshed for current injuries, "
+            "player availability, weather, or sportsbook markets."
+        )
+        sheet["A3"].font = Font(italic=True, color="9C6500")
+        sheet["A3"].alignment = Alignment(wrap_text=True)
+
     sheet["A4"] = "MATCHUP SUMMARY"
     sheet["A4"].font = white_bold
     sheet["A4"].fill = navy
