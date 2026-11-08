@@ -20,7 +20,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-from ai_analysis import analyze_game\nfrom live_research import collect_game_research
+from ai_analysis import analyze_game
+from live_research import collect_game_research
 from ai_providers import ensure_configured
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
@@ -456,6 +457,7 @@ def main() -> int:
                     continue
                 if sys.stdout is not None:
                     print(f"Researching {index} of {len(games)}: {matchup}", flush=True)
+                research = None
                 try:
                     if reuse_cache:
                         analysis = _load_cached_analysis(game)
