@@ -33,12 +33,12 @@ PROVIDERS = {
     "gemini": Provider(
         "gemini", "GEMINI_API_KEY", "gemini_api_key",
         "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        "gemini-2.5-flash", "gemini",
+        "gemini-3.8-flash", "gemini",
     ),
     "groq": Provider(
         "groq", "GROQ_API_KEY", "groq_api_key",
         "https://api.groq.com/openai/v1/chat/completions",
-        "openai/gpt-oss-120b", "openai",
+        "openai/gpt-oss-20b", "openai",
     ),
     "openrouter": Provider(
         "openrouter", "OPENROUTER_API_KEY", "openrouter_api_key",
