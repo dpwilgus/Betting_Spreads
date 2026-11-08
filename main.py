@@ -21,6 +21,7 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 from ai_analysis import analyze_game\nfrom live_research import collect_game_research
+from ai_providers import ensure_configured
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
@@ -419,6 +420,8 @@ def main() -> int:
         refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
+        if not reuse_cache:
+            ensure_configured()
         analyses = []
         failures = []
         progress_window = ProgressWindow(len(games))
