@@ -140,6 +140,14 @@ def _configure_keys() -> None:
         )
 
 
+def ensure_configured() -> None:
+    """Prompt once for keys before the progress UI is opened."""
+    if not _configured_providers():
+        _configure_keys()
+    if not _configured_providers():
+        raise RuntimeError("No usable AI API keys are configured.")
+
+
 def _configured_providers() -> list[tuple[Provider, str]]:
     configured = []
     order = os.environ.get("AI_PROVIDER_ORDER", ",".join(PROVIDER_ORDER))
@@ -226,10 +234,8 @@ def _call_provider(
 
 def generate_json(system_prompt: str, user_prompt: str) -> tuple[dict[str, Any], str]:
     """Try configured providers in order; retry transient failures once, then fall back."""
+    ensure_configured()
     configured = _configured_providers()
-    if not configured:
-        _configure_keys()
-        configured = _configured_providers()
     if not configured:
         raise RuntimeError("No usable AI API keys were found in environment variables or credential storage.")
 
