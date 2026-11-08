@@ -213,7 +213,14 @@ def _call_provider(
         if provider.name == "openrouter":
             headers["HTTP-Referer"] = "https://github.com/dpwilgus/Betting_Spreads"
             headers["X-Title"] = "Betting Spreads"
-        result = _request_json(provider.endpoint, payload, headers)
+        try:
+            result = _request_json(provider.endpoint, payload, headers)
+        except urllib.error.HTTPError as exc:
+            # Some free OpenRouter model routes do not support JSON mode.
+            if provider.name != "openrouter" or exc.code != 400:
+                raise
+            payload.pop("response_format", None)
+            result = _request_json(provider.endpoint, payload, headers)
     return json.loads(_response_text(provider, result))
 
 
