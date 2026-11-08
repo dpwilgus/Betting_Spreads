@@ -78,10 +78,13 @@ For local testing only, the Python script supports a cache-only workbook refresh
 2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling the OpenAI API.
 3. Cached analyses are clearly marked in the workbook because injuries, player availability, weather, usage, and sportsbook markets are not refreshed.
 
-The first run after adding the cache feature still requires API usage to generate new analyses. Existing workbooks created before caching do not contain the complete structured analysis cache. The cache-only option is intended for developers and is not exposed as a feature in the packaged end-user app.
+Use `python main.py --refresh-incomplete` to reuse cached analyses that already contain exactly five prop ideas and three touchdown candidates, while making API calls only for missing or incomplete cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
+
+The first run for a new slate may require API usage for games that have no cache entry. Existing workbooks created before caching do not automatically contain the structured cache. These options are intended for developers and are not exposed in the packaged end-user app.
 
 ```bash
 python main.py --reuse-cache
+python main.py --refresh-incomplete
 ```
 
 ## Publishing a release
