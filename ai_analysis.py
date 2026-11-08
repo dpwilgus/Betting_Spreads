@@ -4,7 +4,7 @@ import json, os, ssl, urllib.error, urllib.request
 from pathlib import Path
 from typing import Any
 import certifi, keyring
-from tkinter import Tk, simpledialog
+from tkinter import Tk, Label, Entry, Button
 
 API_URL = "https://api.openai.com/v1/responses"
 MODEL = "gpt-6-astra"
@@ -26,35 +26,54 @@ def get_api_key() -> str:
         stored = None
     if stored:
         return stored.strip()
+
+    # Use a small custom Tk window. tkinter.simpledialog relies on a
+    # MacWindowStyle command that is absent in some Homebrew Tk 9 builds.
     root = Tk()
-    root.withdraw()
+    root.title("Set up Betting Spreads AI")
+    root.geometry("560x170")
+    root.resizable(False, False)
     root.attributes("-topmost", True)
-    try:
-        key = simpledialog.askstring(
-            "Set up Betting Spreads AI",
-            "Enter your OpenAI API key. It will be saved securely in your computer's credential store.",
-            show="*", parent=root
-        )
-        if not key or not key.strip():
-            raise RuntimeError("An OpenAI API key is required to generate matchup analysis.")
-        key = key.strip()
-        try:
-            keyring.set_password(SERVICE_NAME, ACCOUNT_NAME, key)
-        except Exception as exc:
-            raise RuntimeError(
-                "Could not securely save your API key in macOS Keychain or Windows Credential Manager. "
-                f"Details: {exc}"
-            ) from exc
-        return key
-    finally:
+    Label(
+        root,
+        text="Enter your OpenAI API key.\\nIt will be saved securely in your computer's credential store.",
+        wraplength=520
+    ).pack(pady=15)
+    entry = Entry(root, show="*", width=65)
+    entry.pack(pady=5)
+    entry.focus_set()
+    result = {"key": None}
+
+    def submit():
+        result["key"] = entry.get().strip()
         root.destroy()
+
+    def cancel():
+        root.destroy()
+
+    Button(root, text="Save API Key", command=submit).pack(pady=12)
+    root.bind("<Return>", lambda event: submit())
+    root.protocol("WM_DELETE_WINDOW", cancel)
+    root.mainloop()
+
+    key = result["key"]
+    if not key:
+        raise RuntimeError("An OpenAI API key is required to generate matchup analysis.")
+    try:
+        keyring.set_password(SERVICE_NAME, ACCOUNT_NAME, key)
+    except Exception as exc:
+        raise RuntimeError(
+            "Could not securely save your API key in macOS Keychain or Windows Credential Manager. "
+            f"Details: {exc}"
+        ) from exc
+    return key
 
 ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object", "additionalProperties": False,
     "properties": {
         "summary": {"type": "string"},
         "game_script": {"type": "string"},
-        "picks": {"type": "array", "items": {
+        "picks": {"type": "array", "minItems": 5, "maxItems": 5, "items": {
             "type": "object", "additionalProperties": False,
             "properties": {
                 "rank": {"type": "integer"},
@@ -73,7 +92,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
                          "play_threshold", "estimated_hit_probability", "confidence",
                          "statistical_rationale", "risk_factors", "data_quality"]
         }},
-        "touchdown_scorers": {"type": "array", "items": {
+        "touchdown_scorers": {"type": "array", "minItems": 3, "maxItems": 3, "items": {
             "type": "object", "additionalProperties": False,
             "properties": {
                 "rank": {"type": "integer"}, "player": {"type": "string"}, "team": {"type": "string"},
@@ -116,7 +135,12 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
         f"Game status: {game.get('Game Status', 'Not supplied')}.\n\n"
         "Research current season statistics, recent player game logs and usage, injuries/availability, "
         "defensive matchup tendencies, and weather when relevant. Research current player/game prop "
-        "market lines only where publicly verifiable. Return the requested JSON schema. "
+        "market lines only where publicly verifiable. Return exactly five ranked betting opportunities "
+        "and exactly three ranked anytime touchdown candidates, as required by the schema. Prioritize "
+        "the strongest evidence and confidence ratings of 7-10 when genuinely supported. If fewer than "
+        "five or three candidates have strong evidence, include the next-best plausible candidates but "
+        "clearly lower their confidence, mark data quality Limited where appropriate, and disclose "
+        "the uncertainty. Never invent players, statistics, injuries, lines, odds, or sources. "
         "Do not assume an unverified market line is available."
     )
     payload = {
