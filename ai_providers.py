@@ -232,7 +232,10 @@ def _call_provider(
     return json.loads(_response_text(provider, result))
 
 
-def generate_json(\n    system_prompt: str, user_prompt: str,\n    validator: Callable[[dict[str, Any]], None] | None = None,\n) -> tuple[dict[str, Any], str]:
+def generate_json(
+    system_prompt: str, user_prompt: str,
+    validator: Callable[[dict[str, Any]], None] | None = None,
+) -> tuple[dict[str, Any], str]:
     """Try configured providers in order; retry transient failures once, then fall back."""
     ensure_configured()
     configured = _configured_providers()
