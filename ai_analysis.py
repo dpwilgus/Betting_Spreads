@@ -9,22 +9,57 @@ from ai_providers import generate_json
 from live_research import collect_game_research
 
 ANALYSIS_SCHEMA: dict[str, Any] = {
-    "summary": "string",
-    "game_script": "string",
-    "picks": [{
-        "rank": "integer", "market_type": "Player Prop or Game Prop",
-        "player_or_team": "string", "bet_description": "string",
-        "market_line": "string", "play_threshold": "string",
-        "estimated_hit_probability": "number 0-100", "confidence": "integer 1-10",
-        "statistical_rationale": "string", "risk_factors": "string",
-        "data_quality": "Strong, Moderate, or Limited",
-    }],
-    "touchdown_scorers": [{
-        "rank": "integer", "player": "string", "team": "string",
-        "estimated_td_probability": "number 0-100", "confidence": "integer 1-10",
-        "rationale": "string", "risk_factors": "string",
-    }],
-    "data_gaps": ["string"],
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "summary": {"type": "string"},
+        "game_script": {"type": "string"},
+        "picks": {
+            "type": "array", "minItems": 5, "maxItems": 5,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "rank": {"type": "integer"},
+                    "market_type": {"type": "string", "enum": ["Player Prop", "Game Prop"]},
+                    "player_or_team": {"type": "string"},
+                    "bet_description": {"type": "string"},
+                    "market_line": {"type": "string"},
+                    "play_threshold": {"type": "string"},
+                    "estimated_hit_probability": {"type": "number"},
+                    "confidence": {"type": "integer"},
+                    "statistical_rationale": {"type": "string"},
+                    "risk_factors": {"type": "string"},
+                    "data_quality": {"type": "string", "enum": ["Strong", "Moderate", "Limited"]},
+                },
+                "required": [
+                    "rank", "market_type", "player_or_team", "bet_description", "market_line",
+                    "play_threshold", "estimated_hit_probability", "confidence",
+                    "statistical_rationale", "risk_factors", "data_quality",
+                ],
+            },
+        },
+        "touchdown_scorers": {
+            "type": "array", "minItems": 3, "maxItems": 3,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "rank": {"type": "integer"},
+                    "player": {"type": "string"},
+                    "team": {"type": "string"},
+                    "estimated_td_probability": {"type": "number"},
+                    "confidence": {"type": "integer"},
+                    "rationale": {"type": "string"},
+                    "risk_factors": {"type": "string"},
+                },
+                "required": [
+                    "rank", "player", "team", "estimated_td_probability",
+                    "confidence", "rationale", "risk_factors",
+                ],
+            },
+        },
+        "data_gaps": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["summary", "game_script", "picks", "touchdown_scorers", "data_gaps"],
 }
 
 
@@ -42,6 +77,10 @@ def _validate_analysis(data: dict[str, Any]) -> None:
         confidence = int(item.get("confidence", 0))
         if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
             raise RuntimeError("AI returned an invalid pick probability or confidence.")
+        if item.get("market_type") not in ("Player Prop", "Game Prop"):
+            raise RuntimeError("AI returned an unsupported betting market type.")
+        if item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
+            raise RuntimeError("AI returned an unsupported data-quality label.")
         for field in ("market_type", "player_or_team", "bet_description",
                       "market_line", "play_threshold", "statistical_rationale", "risk_factors"):
             if not item.get(field):
