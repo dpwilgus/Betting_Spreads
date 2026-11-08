@@ -10,7 +10,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import certifi
 import keyring
@@ -232,7 +232,7 @@ def _call_provider(
     return json.loads(_response_text(provider, result))
 
 
-def generate_json(system_prompt: str, user_prompt: str) -> tuple[dict[str, Any], str]:
+def generate_json(\n    system_prompt: str, user_prompt: str,\n    validator: Callable[[dict[str, Any]], None] | None = None,\n) -> tuple[dict[str, Any], str]:
     """Try configured providers in order; retry transient failures once, then fall back."""
     ensure_configured()
     configured = _configured_providers()
@@ -246,6 +246,8 @@ def generate_json(system_prompt: str, user_prompt: str) -> tuple[dict[str, Any],
                 result = _call_provider(provider, key, system_prompt, user_prompt)
                 if not isinstance(result, dict):
                     raise RuntimeError("The AI response was not a JSON object.")
+                if validator is not None:
+                    validator(result)
                 return result, provider.name
             except urllib.error.HTTPError as exc:
                 body = exc.read().decode("utf-8", errors="replace")[:600]
