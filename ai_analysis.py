@@ -120,8 +120,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         + str(research.get("research_text", "No independent research was available."))[:24000]
     )
 
-    data, provider_name = generate_json(instructions, user_input)
-    _validate_analysis(data)
+    data, provider_name = generate_json(instructions, user_input, validator=_validate_analysis)
     data["sources"] = list(research.get("sources", []))
     data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
