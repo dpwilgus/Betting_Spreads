@@ -153,14 +153,21 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A2"].font = Font(italic=True, color="17365D")
     sheet["A2"].alignment = Alignment(wrap_text=True)
 
+    sheet.merge_cells("A3:J3")
     if analysis.get("cache_reused"):
-        sheet.merge_cells("A3:J3")
         sheet["A3"] = (
             "CACHED ANALYSIS — research has not been refreshed for current injuries, "
             "player availability, weather, or sportsbook markets."
         )
         sheet["A3"].font = Font(italic=True, color="9C6500")
-        sheet["A3"].alignment = Alignment(wrap_text=True)
+    else:
+        provider = analysis.get("ai_provider", "Unknown provider")
+        sheet["A3"] = (
+            f"AI provider: {provider} | Research: {analysis.get('research_mode', 'Not recorded')} "
+            "| Live sources are listed at the bottom of this sheet."
+        )
+        sheet["A3"].font = Font(italic=True, color="526579")
+    sheet["A3"].alignment = Alignment(wrap_text=True)
 
     sheet["A4"] = "MATCHUP SUMMARY"
     sheet["A4"].font = white_bold
