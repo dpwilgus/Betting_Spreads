@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import ssl
@@ -359,12 +360,48 @@ class ProgressWindow:
                 pass
             self.root = None
 
+def _analysis_cache_path(game: dict) -> Path:
+    """Stable local cache key for a specific matchup and kickoff."""
+    identity = "|".join((
+        str(game.get("Away Team", "")),
+        str(game.get("Home Team", "")),
+        str(game.get("Game Date (ET)", "")),
+    ))
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+    return application_directory() / "analysis_cache" / f"{digest}.json"
+
+
+def _save_cached_analysis(game: dict, analysis: dict) -> None:
+    path = _analysis_cache_path(game)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_cached_analysis(game: dict) -> dict:
+    path = _analysis_cache_path(game)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"No saved AI analysis exists for {game['Away Team']} at {game['Home Team']}. "
+            "Run a normal update once to generate and cache it."
+        )
+    analysis = json.loads(path.read_text(encoding="utf-8"))
+    gaps = list(analysis.get("data_gaps", []))
+    gaps.append(
+        "CACHED ANALYSIS: This research was reused without an OpenAI API call. "
+        "Player availability, injuries, weather, usage, and sportsbook markets have not been refreshed."
+    )
+    analysis["data_gaps"] = gaps
+    analysis["cache_reused"] = True
+    return analysis
+
+
 def main() -> int:
     log_path = application_directory() / "Betting_Spreads.log"
     try:
+        reuse_cache = "--reuse-cache" in sys.argv[1:]
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
-        api_key = get_api_key()
+        api_key = None if reuse_cache else get_api_key()
         analyses = []
         failures = []
         progress_window = ProgressWindow(len(games))
@@ -385,11 +422,16 @@ def main() -> int:
                 if sys.stdout is not None:
                     print(f"Researching {index} of {len(games)}: {matchup}", flush=True)
                 try:
-                    analyses.append(analyze_game(game, api_key))
+                    if reuse_cache:
+                        analysis = _load_cached_analysis(game)
+                    else:
+                        analysis = analyze_game(game, api_key)
+                        _save_cached_analysis(game, analysis)
+                    analyses.append(analysis)
                 except Exception as exc:
                     failures.append(f"{matchup}: {exc}")
                     analyses.append({
-                        "summary": "AI research could not be completed for this matchup.",
+                        "summary": "AI research could not be completed or no cached analysis was available.",
                         "game_script": "",
                         "picks": [],
                         "touchdown_scorers": [],
@@ -404,8 +446,10 @@ def main() -> int:
         message = (
             f"NFL Season {season}, Week {week}\n"
             f"{len(games)} matchups exported.\n"
-            f"AI analysis completed for {success_count} of {len(games)} games.\n\n"
-            f"Saved to:\n{output}"
+            f"AI analysis completed for {success_count} of {len(games)} games.\n"
+            + ("Cached analysis reused; no OpenAI API calls were made.\n" if reuse_cache else
+               "Fresh AI research completed; results were saved to the local cache.\n")
+            + f"\nSaved to:\n{output}"
         )
         if failures:
             message += f"\n\n{len(failures)} matchup analyses failed. See Betting_Spreads.log."
