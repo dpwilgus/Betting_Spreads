@@ -84,6 +84,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     data, provider_name = generate_json(instructions, user_input)
     _validate_analysis(data)
     data["sources"] = list(research.get("sources", []))
+    data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
     data["research_mode"] = "independent_espn_plus_ai"
     return data
