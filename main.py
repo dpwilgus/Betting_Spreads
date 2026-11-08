@@ -20,7 +20,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-from ai_analysis import analyze_game, get_api_key
+from ai_analysis import analyze_game\nfrom live_research import collect_game_research
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
