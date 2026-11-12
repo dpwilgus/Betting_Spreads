@@ -387,6 +387,38 @@ def _compact_summary(data: dict[str, Any], retrieved_at: str) -> str:
 
 
 
+def _extract_roster_names(payload: Any) -> list[str]:
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            name = value.get("fullName") or value.get("displayName")
+            if name and isinstance(value.get("position"), (dict, str)):
+                cleaned = str(name).strip()
+                if cleaned and cleaned.casefold() not in seen:
+                    seen.add(cleaned.casefold())
+                    names.append(cleaned)
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    return names
+
+
+@lru_cache(maxsize=32)
+def _team_roster(team_id: str) -> list[str]:
+    url = (
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+        f"teams/{team_id}/roster"
+    )
+    return _extract_roster_names(_get_json(url, timeout=15))
+
+
 @lru_cache(maxsize=32)
 def _team_statistics(team_id: str) -> dict[str, Any]:
     """Fetch and compact team statistics once per team during a slate run."""
@@ -400,6 +432,7 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
 def reset_research_cache() -> None:
     """Clear per-slate ESPN caches so a later run never reuses stale data."""
     _team_statistics.cache_clear()
+    _team_roster.cache_clear()
     _core_team_injuries.cache_clear()
 
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
@@ -426,6 +459,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
 
     team_stat_sections: list[str] = []
     injury_sections: list[str] = []
+    rosters: dict[str, list[str]] = {}
 
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
@@ -454,6 +488,22 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     team = competitor.get("team") or {}
                     if team.get("id"):
                         teams[str(team["id"])] = team.get("displayName", "Team")
+
+            for team_id, team_name in teams.items():
+                try:
+                    roster_names = _team_roster(team_id)
+                    if roster_names:
+                        rosters[team_name] = roster_names
+                        sections.append(
+                            f"CURRENT ESPN ACTIVE TEAM ROSTER — {team_name}: "
+                            + ", ".join(roster_names)
+                        )
+                    else:
+                        sections.append(f"ESPN roster returned no player names for {team_name}.")
+                except Exception as exc:
+                    sections.append(
+                        f"ESPN roster unavailable for {team_name}: {type(exc).__name__}"
+                    )
 
             for team_id, team_name in teams.items():
                 endpoint_name = "statistics"
@@ -537,4 +587,5 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     return {
         "research_text": "\n\n".join(sections),
         "sources": unique,
+        "rosters": rosters,
     }
