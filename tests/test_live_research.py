@@ -129,7 +129,7 @@ class LiveResearchTests(unittest.TestCase):
             {
                 "status": "Questionable",
                 "date": "2026-11-11",
-                "shortComment": "Full participant in practice",
+                "shortComment": "Full participant in practice " + ("detail " * 80),
                 "athlete": {"$ref": "athlete-url"},
                 "details": {"type": "Hamstring", "location": "Leg"},
             },
@@ -150,6 +150,7 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(result[0]["position"], "WR")
         self.assertEqual(result[0]["status"], "Questionable")
         self.assertTrue(result[0]["practice_status_conflict"])
+        self.assertEqual(len(result[0]["comment"]), 180)
         self.assertEqual(get_json.call_count, 3)
 
         _core_team_injuries.cache_clear()
