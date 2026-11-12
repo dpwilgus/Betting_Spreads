@@ -277,8 +277,8 @@ def _call_provider(
             ],
             "temperature": 0.2,
             "max_completion_tokens": int(
-                os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "4096")
-                if provider.name == "groq" else "1800"
+                os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")
+                if provider.name == "groq" else "1400"
             ),
             "response_format": {"type": "json_object"},
         }
@@ -320,7 +320,7 @@ def generate_json(
 
     failures = []
     for provider, key in configured:
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 result = _call_provider(provider, key, system_prompt, user_prompt)
                 if not isinstance(result, dict):
@@ -332,28 +332,37 @@ def generate_json(
                 body = exc.read().decode("utf-8", errors="replace")[:600]
                 # 429 may be a short per-minute throttle or a depleted daily quota.
                 retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
+                wait_match = re.search(
+                    r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*s",
+                    body,
+                    flags=re.I,
+                )
                 try:
-                    delay = min(max(float(retry_after), 0), 3)
+                    delay = float(retry_after) if retry_after else (
+                        float(wait_match.group(1)) if wait_match else 1.0
+                    )
                 except ValueError:
-                    delay = 0
+                    delay = 1.0
                 quota_exhausted = exc.code == 429 and any(
                     marker in body.lower()
                     for marker in ("quota", "insufficient_quota", "resource_exhausted",
                                    "daily limit", "billing")
                 )
                 transient = exc.code >= 500 or (exc.code == 429 and not quota_exhausted)
-                if transient and attempt == 0:
-                    time.sleep(delay or 1)
+                if transient and attempt < 2:
+                    # Respect provider-supplied retry windows instead of retrying too early.
+                    time.sleep(min(max(delay, 0.5), 60))
                     continue
                 failures.append(f"{provider.name}: HTTP {exc.code} {body}")
-                _SKIP_PROVIDER_FOR_RUN.add(provider.name)
+                # Temporary TPM/5xx failures apply to this request, not the whole slate.
+                if quota_exhausted or exc.code in (401, 403, 404):
+                    _SKIP_PROVIDER_FOR_RUN.add(provider.name)
                 break
             except (urllib.error.URLError, TimeoutError, ssl.SSLError) as exc:
                 if attempt == 0:
                     time.sleep(1)
                     continue
                 failures.append(f"{provider.name}: connection error: {exc}")
-                _SKIP_PROVIDER_FOR_RUN.add(provider.name)
                 break
             except (ValueError, KeyError, RuntimeError) as exc:
                 failures.append(f"{provider.name}: {exc}")
