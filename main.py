@@ -529,8 +529,11 @@ def main() -> int:
                         cached = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else None
                         is_complete = (
                             cached is not None
-                            and len(cached.get("picks", [])) == 5
-                            and len(cached.get("touchdown_scorers", [])) == 3
+                            and isinstance(cached.get("picks"), list)
+                            and len(cached["picks"]) <= 5
+                            and isinstance(cached.get("touchdown_scorers"), list)
+                            and len(cached["touchdown_scorers"]) <= 3
+                            and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
                             analysis = _load_cached_analysis(game)
