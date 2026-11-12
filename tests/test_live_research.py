@@ -8,6 +8,7 @@ from live_research import (
     _compact_tree,
     _core_team_injuries,
     collect_game_research,
+    reset_research_cache,
 )
 
 
@@ -137,6 +138,24 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(first["team"], "Example Team")
         get_json.assert_called_once()
         _team_statistics.cache_clear()
+
+    def test_reset_research_cache_clears_team_and_injury_data(self):
+        from live_research import _team_statistics
+
+        with patch("live_research._get_json", side_effect=[
+            {"results": {"stats": {"displayName": "Team", "categories": []}}},
+            {"items": []},
+        ]):
+            _team_statistics("123")
+            _core_team_injuries("123")
+
+        self.assertEqual(_team_statistics.cache_info().currsize, 1)
+        self.assertEqual(_core_team_injuries.cache_info().currsize, 1)
+
+        reset_research_cache()
+
+        self.assertEqual(_team_statistics.cache_info().currsize, 0)
+        self.assertEqual(_core_team_injuries.cache_info().currsize, 0)
 
     def test_summary_injuries_are_retained_when_only_one_team_has_core_injuries(self):
         summary = {
