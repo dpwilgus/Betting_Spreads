@@ -22,7 +22,7 @@ from openpyxl.utils import get_column_letter
 
 from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
-from ai_providers import ensure_configured, reset_provider_run_state
+from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
@@ -567,6 +567,21 @@ def main() -> int:
                "Fresh AI research completed with provider fallback; results were saved to the local cache.\n")
             + f"\nSaved to:\n{output}"
         )
+        provider_usage = get_provider_usage_stats()
+        usage_lines = []
+        for provider_name, stats in sorted(provider_usage.items()):
+            usage_line = (
+                f"{provider_name}: {stats['requests']} request(s), "
+                f"{stats['prompt_characters']:,} prompt characters"
+            )
+            if stats["prompt_tokens"] or stats["completion_tokens"]:
+                usage_line += (
+                    f", {stats['prompt_tokens']:,} input tokens, "
+                    f"{stats['completion_tokens']:,} output tokens"
+                )
+            usage_lines.append(usage_line)
+        usage_report = "\\n".join(usage_lines) or "No AI provider requests were made."
+        message += f"\\n\\nProvider API usage:\\n{usage_report}"
         if failures:
             message += f"\n\n{len(failures)} matchup analyses failed. See Betting_Spreads.log."
         log_path.write_text(message + ("\n\n" + "\n".join(failures) if failures else "") + "\n", encoding="utf-8")
