@@ -182,7 +182,7 @@ def _core_team_injuries(team_id: str) -> list[dict[str, Any]]:
             else:
                 details = {}
 
-            comment = str(record.get("shortComment") or "")
+            comment = str(record.get("shortComment") or "")[:180]
             practice_status_conflict = (
                 status.casefold() != "active"
                 and "full participant" in comment.casefold()
@@ -417,9 +417,19 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         f"Research retrieved (UTC): {retrieved_at}",
     ]
 
+    sections.append(
+        "MARKET DATA RULE: Pickcenter quotes are ESPN-displayed sportsbook snapshots. "
+        "Use the named provider and retrieval timestamp. Do not describe them as guaranteed "
+        "current prices. If no pickcenter quote is supplied, market prices are unverified. "
+        "No player-prop market is claimed unless an actual prop line and price appear in the evidence."
+    )
+
+    team_stat_sections: list[str] = []
+    injury_sections: list[str] = []
+
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
-    else:
+    else
         api_url = ESPN_SUMMARY.format(event_id=event_id)
         sources.insert(0, {
             "title": "ESPN matchup game page",
@@ -453,7 +463,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                 )
                 try:
                     compact_team_data = _team_statistics(team_id)
-                    sections.append(
+                    team_stat_sections.append(
                         f"ESPN CURRENT-SEASON TEAM STATISTICS — {team_name}: "
                         + json.dumps(
                             compact_team_data,
@@ -480,7 +490,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     team_injuries = _core_team_injuries(team_id)
                     if team_injuries:
                         core_injuries_found = True
-                        sections.append(
+                        injury_sections.append(
                             f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
                             + json.dumps(
                                 team_injuries,
@@ -501,7 +511,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
             # the Core API returns injuries for only one of the two teams.
             summary_injuries = _compact_injuries(data.get("injuries", []))
             if summary_injuries:
-                sections.append(
+                injury_sections.append(
                     "ESPN GAME SUMMARY INJURY DATA: "
                     + json.dumps(
                         summary_injuries,
@@ -513,12 +523,10 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             sections.append(f"ESPN game-summary request failed: {exc}")
 
-    sections.append(
-        "MARKET DATA RULE: Pickcenter quotes are ESPN-displayed sportsbook snapshots. "
-        "Use the named provider and retrieval timestamp. Do not describe them as guaranteed "
-        "current prices. If no pickcenter quote is supplied, market prices are unverified. "
-        "No player-prop market is claimed unless an actual prop line and price appear in the evidence."
-    )
+    # Injury evidence is more time-sensitive than season aggregates. Place it
+    # before team statistics because the AI prompt has a hard research-text ceiling.
+    sections.extend(injury_sections)
+    sections.extend(team_stat_sections)
 
     seen, unique = set(), []
     for source in sources:
