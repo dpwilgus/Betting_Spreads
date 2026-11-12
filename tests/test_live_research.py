@@ -242,7 +242,7 @@ class LiveResearchTests(unittest.TestCase):
             _team_statistics("123")
             _core_team_injuries("123")
 
-        from live_research import _player_gamelog, _team_roster_players
+        from live_research import _player_gamelog, _team_depth_chart, _team_roster_players
 
         self.assertEqual(_team_statistics.cache_info().currsize, 1)
         self.assertEqual(_core_team_injuries.cache_info().currsize, 1)
@@ -251,6 +251,7 @@ class LiveResearchTests(unittest.TestCase):
 
         self.assertEqual(_team_statistics.cache_info().currsize, 0)
         self.assertEqual(_team_roster_players.cache_info().currsize, 0)
+        self.assertEqual(_team_depth_chart.cache_info().currsize, 0)
         self.assertEqual(_player_gamelog.cache_info().currsize, 0)
         self.assertEqual(_core_team_injuries.cache_info().currsize, 0)
 
@@ -341,6 +342,8 @@ class LiveResearchTests(unittest.TestCase):
             "live_research._team_roster_players",
             side_effect=[roster, home_roster],
         ), patch(
+            "live_research._team_depth_chart", return_value={}
+        ), patch(
             "live_research._player_gamelog",
             return_value={"events": [{"name": "Week 10", "stats": [250, 2]}]},
         ), patch(
@@ -392,6 +395,8 @@ class LiveResearchTests(unittest.TestCase):
             "live_research._team_roster_players",
             side_effect=[roster, roster],
         ), patch(
+            "live_research._team_depth_chart", return_value={}
+        ), patch(
             "live_research._player_gamelog",
             side_effect=RuntimeError("ESPN player log unavailable"),
         ) as get_gamelog, patch(
@@ -412,6 +417,72 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(get_gamelog.call_count, PLAYER_GAMELOG_FAILURE_LIMIT)
         self.assertIn("skipped after repeated ESPN player-log errors", result["research_text"])
         reset_research_cache()
+
+
+    def test_depth_chart_extractor_orders_players_by_position_rank(self):
+        from live_research import _extract_depth_chart_ids
+
+        result = _extract_depth_chart_ids({
+            "depthCharts": [{
+                "positions": {
+                    "quarterback": {
+                        "position": {"abbreviation": "QB"},
+                        "athletes": [
+                            {"rank": 2, "athlete": {"id": "qb2"}},
+                            {"rank": 1, "athlete": {"id": "qb1"}},
+                        ],
+                    },
+                    "runningBack": {
+                        "position": {"abbreviation": "RB"},
+                        "athletes": [
+                            {"rank": 1, "athlete": {"id": "rb1"}},
+                        ],
+                    },
+                },
+            }],
+        })
+        self.assertEqual(result, {"QB": ["qb1", "qb2"], "RB": ["rb1"]})
+
+    def test_player_selection_uses_depth_chart_and_current_roster_ids(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id": "qb2", "name": "Backup QB", "position": "QB"},
+            {"id": "rb1", "name": "Starting RB", "position": "RB"},
+            {"id": "qb1", "name": "Starting QB", "position": "QB"},
+            {"id": "wr1", "name": "Starting WR", "position": "WR"},
+            {"id": "te1", "name": "Starting TE", "position": "TE"},
+        ]
+        chart = {
+            "depthCharts": [{
+                "positions": {
+                    "quarterback": {
+                        "position": {"abbreviation": "QB"},
+                        "athletes": [
+                            {"rank": 1, "athlete": {"id": "qb1"}},
+                            {"rank": 2, "athlete": {"id": "qb2"}},
+                        ],
+                    },
+                    "runningBack": {
+                        "position": {"abbreviation": "RB"},
+                        "athletes": [{"rank": 1, "athlete": {"id": "rb1"}}],
+                    },
+                    "wideReceiver": {
+                        "position": {"abbreviation": "WR"},
+                        "athletes": [{"rank": 1, "athlete": {"id": "wr1"}}],
+                    },
+                    "tightEnd": {
+                        "position": {"abbreviation": "TE"},
+                        "athletes": [{"rank": 1, "athlete": {"id": "te1"}}],
+                    },
+                },
+            }],
+        }
+        selected = _select_research_players(roster, chart)
+        self.assertEqual(
+            [player["name"] for player in selected],
+            ["Starting QB", "Starting RB", "Starting WR", "Starting TE"],
+        )
 
     def test_summary_injuries_are_retained_when_only_one_team_has_core_injuries(self):
         summary = {
