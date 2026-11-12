@@ -401,12 +401,12 @@ def _extract_roster_players(payload: Any) -> list[dict[str, str]]:
                 position = str(raw_position or "")
             name = value.get("fullName") or value.get("displayName")
             athlete_id = value.get("id")
-            if name and athlete_id and position:
-                key = str(athlete_id)
+            if name and position:
+                key = str(athlete_id or str(name).strip().casefold())
                 if key not in seen:
                     seen.add(key)
                     players.append({
-                        "id": key,
+                        "id": str(athlete_id or ""),
                         "name": str(name).strip(),
                         "position": position.upper(),
                     })
@@ -498,7 +498,7 @@ def _select_research_players(players: list[dict[str, str]]) -> list[dict[str, st
     counts = {position: 0 for position in limits}
     for player in players:
         position = player.get("position", "").upper()
-        if position in limits and counts[position] < limits[position]:
+        if player.get("id") and position in limits and counts[position] < limits[position]:
             selected.append(player)
             counts[position] += 1
     return selected
@@ -622,7 +622,8 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 })
                         if player_records:
                             player_stat_sections.append(
-                                f"ESPN CURRENT-SEASON PLAYER PRODUCTION AND GAME LOGS — {team_name}: "
+                                f"ESPN CURRENT-SEASON PLAYER PRODUCTION AND GAME LOGS — {team_name} "
+                                f"(retrieved {retrieved_at}; regular season): "
                                 + json.dumps(
                                     player_records,
                                     ensure_ascii=False,
