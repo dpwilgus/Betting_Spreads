@@ -362,7 +362,26 @@ def _compact_summary(data: dict[str, Any], retrieved_at: str) -> str:
     if state in {"in", "post"} and data.get("boxscore"):
         selected["boxscore"] = _compact_tree(data["boxscore"])
 
-    return json.dumps(selected, ensure_ascii=False, separators=(",", ":"))
+    # Keep high-value matchup/market context while bounding bulky historical
+    # trees. Injury feeds and team statistics are appended as separate sections,
+    # so they are not sacrificed when recent-game payloads are unusually large.
+    omitted = []
+    def serialize() -> str:
+        return json.dumps(selected, ensure_ascii=False, separators=(",", ":"))
+
+    if len(serialize()) > 12000 and "recent_games" in selected:
+        selected.pop("recent_games")
+        omitted.append("recent_games")
+    if len(serialize()) > 12000 and "against_the_spread" in selected:
+        selected.pop("against_the_spread")
+        omitted.append("against_the_spread")
+    if len(serialize()) > 12000 and "boxscore" in selected:
+        selected.pop("boxscore")
+        omitted.append("boxscore")
+    if omitted:
+        selected["omitted_oversized_sections"] = omitted
+
+    return serialize()
 
 
 
