@@ -315,6 +315,60 @@ class LiveResearchTests(unittest.TestCase):
             ["QB", "RB1", "WR", "TE"],
         )
 
+
+    def test_collect_research_adds_player_game_logs_and_source_links(self):
+        summary = {
+            "header": {
+                "competitions": [{
+                    "competitors": [
+                        {"team": {"id": "1", "displayName": "Away"}},
+                        {"team": {"id": "2", "displayName": "Home"}},
+                    ]
+                }]
+            }
+        }
+        roster = (
+            {"id": "101", "name": "Away QB", "position": "QB"},
+            {"id": "102", "name": "Away RB", "position": "RB"},
+            {"id": "103", "name": "Away WR", "position": "WR"},
+            {"id": "104", "name": "Away TE", "position": "TE"},
+        )
+        home_roster = tuple(
+            {**player, "id": str(int(player["id"]) + 100), "name": player["name"].replace("Away", "Home")}
+            for player in roster
+        )
+        with patch("live_research._get_json", return_value=summary), patch(
+            "live_research._team_roster_players",
+            side_effect=[roster, home_roster],
+        ), patch(
+            "live_research._player_gamelog",
+            return_value={"events": [{"name": "Week 10", "stats": [250, 2]}]},
+        ), patch(
+            "live_research._team_statistics",
+            side_effect=[{"team": "Away"}, {"team": "Home"}],
+        ), patch(
+            "live_research._core_team_injuries",
+            return_value=[],
+        ):
+            result = collect_game_research({
+                "event_id": "event-1",
+                "Away Team": "Away",
+                "Home Team": "Home",
+                "away_team_id": "1",
+                "home_team_id": "2",
+                "Game Date (ET)": "Sunday",
+            })
+
+        self.assertIn("ESPN CURRENT-SEASON PLAYER PRODUCTION AND GAME LOGS", result["research_text"])
+        self.assertIn("Away QB", result["research_text"])
+        self.assertIn("Home TE", result["research_text"])
+        player_sources = [
+            source for source in result["sources"]
+            if source["title"].startswith("ESPN player game log")
+        ]
+        self.assertEqual(len(player_sources), 8)
+        self.assertTrue(all("/gamelog?season=2026" in item["url"] for item in player_sources))
+
     def test_summary_injuries_are_retained_when_only_one_team_has_core_injuries(self):
         summary = {
             "header": {
