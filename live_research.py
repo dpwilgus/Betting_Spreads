@@ -399,6 +399,12 @@ def _extract_roster_players(payload: Any) -> list[dict[str, str]]:
                 position = str(raw_position.get("abbreviation") or raw_position.get("name") or "")
             else:
                 position = str(raw_position or "")
+            position = {
+                "QUARTERBACK": "QB",
+                "RUNNING BACK": "RB",
+                "WIDE RECEIVER": "WR",
+                "TIGHT END": "TE",
+            }.get(position.strip().upper(), position.strip().upper())
             name = value.get("fullName") or value.get("displayName")
             athlete_id = value.get("id")
             if name and position:
@@ -492,7 +498,7 @@ def _compact_player_data(value: Any, depth: int = 0) -> Any:
 
 
 def _select_research_players(players: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Select one current-roster QB, RB, WR and TE to bound per-slate API usage."""
+    """Select one listed current-roster QB, RB, WR and TE to bound API usage."""
     limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
     selected = []
     counts = {position: 0 for position in limits}
@@ -622,13 +628,13 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 })
                         if player_records:
                             player_stat_sections.append(
-                                f"ESPN CURRENT-SEASON PLAYER PRODUCTION AND GAME LOGS — {team_name} "
+                                f"ESPN CURRENT-SEASON PLAYER GAME LOGS — {team_name} "
                                 f"(retrieved {retrieved_at}; regular season): "
                                 + json.dumps(
                                     player_records,
                                     ensure_ascii=False,
                                     separators=(",", ":"),
-                                )[:5200]
+                                )
                             )
                     else:
                         sections.append(f"ESPN roster returned no player names for {team_name}.")
