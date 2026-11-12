@@ -548,6 +548,67 @@ class LiveResearchTests(unittest.TestCase):
             ["Starting QB", "Starting RB", "Starting WR", "Starting TE"],
         )
 
+    def test_player_selection_includes_multiple_running_backs_and_receivers(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id": "qb1", "name": "QB1", "position": "QB"},
+            {"id": "rb1", "name": "RB1", "position": "RB"},
+            {"id": "rb2", "name": "RB2", "position": "RB"},
+            {"id": "rb3", "name": "RB3", "position": "RB"},
+            {"id": "wr1", "name": "WR1", "position": "WR"},
+            {"id": "wr2", "name": "WR2", "position": "WR"},
+            {"id": "wr3", "name": "WR3", "position": "WR"},
+            {"id": "te1", "name": "TE1", "position": "TE"},
+        ]
+        positions = {}
+        for position, ids in {
+            "QB": ["qb1"], "RB": ["rb1", "rb2", "rb3"],
+            "WR": ["wr1", "wr2", "wr3"], "TE": ["te1"],
+        }.items():
+            positions[position.lower()] = {
+                "position": {"abbreviation": position},
+                "athletes": [
+                    {"rank": rank, "athlete": {"id": athlete_id}}
+                    for rank, athlete_id in enumerate(ids, 1)
+                ],
+            }
+        selected = _select_research_players(
+            roster, {"depthCharts": [{"positions": positions}]}
+        )
+        self.assertEqual(
+            [player["name"] for player in selected],
+            ["QB1", "RB1", "RB2", "WR1", "WR2", "TE1"],
+        )
+
+    def test_player_gamelog_compaction_keeps_role_relevant_usage_only(self):
+        from live_research import _compact_player_gamelog
+
+        compact = _compact_player_gamelog({
+            "games_available": 5,
+            "season_totals": {"Regular Season Stats": {
+                "receivingTargets": "42", "receptions": "31",
+                "receivingYards": "390", "receivingTouchdowns": "3",
+                "rushingAttempts": "2", "rushingYards": "8",
+                "passingAttempts": "0", "interceptions": "0",
+                "longReception": "55",
+            }},
+            "recent_games": [
+                {"week": week, "date": f"2026-11-{week:02d}",
+                 "opponent": "Opponent", "result": "W",
+                 "stats": {"receivingTargets": "8", "receptions": "6",
+                           "receivingYards": "75", "receivingTouchdowns": "1",
+                           "longReception": "30"}}
+                for week in range(1, 6)
+            ],
+        }, "WR")
+        self.assertEqual(compact["usage_status"], "established_volume")
+        self.assertEqual(compact["season"]["receivingTargets"], "42")
+        self.assertNotIn("passingAttempts", compact["season"])
+        self.assertNotIn("longReception", compact["recent"][0]["stats"])
+        self.assertEqual(len(compact["recent"]), 3)
+
+
     def test_summary_injuries_are_retained_when_only_one_team_has_core_injuries(self):
         summary = {
             "header": {
