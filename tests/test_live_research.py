@@ -155,6 +155,53 @@ class LiveResearchTests(unittest.TestCase):
 
         _core_team_injuries.cache_clear()
 
+    def test_current_injuries_precede_team_stats_in_research_prompt(self):
+        summary = {
+            "header": {
+                "id": "event-1",
+                "competitions": [{
+                    "date": "2026-11-15T18:00Z",
+                    "competitors": [
+                        {"team": {"id": "1", "displayName": "Away"}},
+                        {"team": {"id": "2", "displayName": "Home"}},
+                    ],
+                }],
+            },
+            "injuries": [{
+                "athlete": {"displayName": "Injured Player"},
+                "status": "Questionable",
+                "details": {"type": "Ankle"},
+            }],
+        }
+        with patch("live_research._get_json", return_value=summary), patch(
+            "live_research._team_statistics",
+            side_effect=[{"team": "Away"}, {"team": "Home"}],
+        ), patch(
+            "live_research._core_team_injuries",
+            side_effect=[
+                [{"player": "Away Player", "status": "Out"}],
+                [{"player": "Home Player", "status": "Questionable"}],
+            ],
+        ):
+            result = collect_game_research({
+                "event_id": "event-1",
+                "Away Team": "Away",
+                "Home Team": "Home",
+                "away_team_id": "1",
+                "home_team_id": "2",
+            })
+
+        research = result["research_text"]
+        self.assertLess(
+            research.index("ESPN CURRENT PLAYER INJURIES"),
+            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
+        )
+        self.assertLess(
+            research.index("ESPN GAME SUMMARY INJURY DATA"),
+            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
+        )
+        self.assertIn("MARKET DATA RULE", research)
+
     def test_team_statistics_are_cached_across_matchups(self):
         from live_research import _team_statistics
 
