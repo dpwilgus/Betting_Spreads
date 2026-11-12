@@ -14,6 +14,9 @@ import certifi
 HEADERS = {"User-Agent": "Betting-Spreads/3.0 (independent NFL research)"}
 
 SUMMARY_MAX_CHARS = 12000
+PLAYER_GAMELOG_FAILURE_LIMIT = 4
+_player_gamelog_failures = 0
+_player_gamelogs_disabled = False
 
 ESPN_SUMMARY = (
     "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
@@ -522,10 +525,13 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
 
 def reset_research_cache() -> None:
     """Clear per-slate ESPN caches so a later run never reuses stale data."""
+    global _player_gamelog_failures, _player_gamelogs_disabled
     _team_statistics.cache_clear()
     _team_roster_players.cache_clear()
     _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
+    _player_gamelog_failures = 0
+    _player_gamelogs_disabled = False
 
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     event_id = str(game.get("event_id", "")).strip()
@@ -603,6 +609,14 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         selected_players = _select_research_players(roster_players)
                         player_records = []
                         for player in selected_players:
+                            global _player_gamelog_failures, _player_gamelogs_disabled
+                            if _player_gamelogs_disabled:
+                                player_records.append({
+                                    "player": player["name"],
+                                    "position": player["position"],
+                                    "game_log_unavailable": "skipped after repeated ESPN player-log errors",
+                                })
+                                continue
                             gamelog_url = (
                                 "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
                                 f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
@@ -616,11 +630,15 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                     "position": player["position"],
                                     "season_game_log": gamelog,
                                 })
+                                _player_gamelog_failures = 0
                                 sources.append({
                                     "title": f"ESPN player game log — {player['name']}",
                                     "url": gamelog_url,
                                 })
                             except Exception as exc:
+                                _player_gamelog_failures += 1
+                                if _player_gamelog_failures >= PLAYER_GAMELOG_FAILURE_LIMIT:
+                                    _player_gamelogs_disabled = True
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
