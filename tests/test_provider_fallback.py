@@ -106,13 +106,13 @@ class ProviderFallbackTests(unittest.TestCase):
             "ai_providers.time.sleep"
         ) as sleep, patch(
             "ai_providers._call_provider",
-            side_effect=[server_error, server_error, {"summary": "ok"}],
+            side_effect=[server_error, server_error, server_error, {"summary": "ok"}],
         ) as call:
             result, provider = generate_json("system", "user")
 
         self.assertEqual(result["summary"], "ok")
         self.assertEqual(provider, "groq")
-        self.assertEqual(call.call_count, 3)
+        self.assertEqual(call.call_count, 4)
         self.assertEqual(sleep.call_count, 2)
 
 
@@ -194,7 +194,7 @@ class ProviderFallbackTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "not found on the current ESPN roster"):
             _validate_analysis(
                 data,
-                rosters={"Washington Commanders": ["Jayden Daniels"],
+                rosters={"Washington Commanders": ["Jayden Daniels", "Player A"],
                          "New York Giants": ["Daniel Jones"]},
                 team_names=("Washington Commanders", "New York Giants"),
             )
