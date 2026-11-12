@@ -16,7 +16,7 @@ import certifi
 import keyring
 
 SERVICE_NAME = "Betting Spreads"
-PROVIDER_ORDER = ("groq", "openrouter", "gemini")
+PROVIDER_ORDER = ("gemini", "groq", "openrouter")
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
 
 
