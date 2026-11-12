@@ -281,6 +281,70 @@ class LiveResearchTests(unittest.TestCase):
             ],
         )
 
+    def test_player_gamelog_joins_stat_arrays_to_recent_game_metadata(self):
+        from live_research import _normalize_player_gamelog
+
+        payload = {
+            "names": ["passingYards", "passingTouchdowns", "rushingYards"],
+            "labels": ["YDS", "TD", "RUSH YDS"],
+            "displayNames": ["Passing Yards", "Passing TD", "Rushing Yards"],
+            "events": {
+                "g1": {
+                    "week": 9, "gameDate": "2026-11-08", "atVs": "vs",
+                    "gameResult": "W", "score": "24-17",
+                    "opponent": {"displayName": "Rams"},
+                },
+                "g2": {
+                    "week": 8, "gameDate": "2026-11-01", "atVs": "@",
+                    "gameResult": "L", "score": "20-27",
+                    "opponent": {"displayName": "Eagles"},
+                },
+            },
+            "seasonTypes": [{
+                "categories": [{
+                    "displayName": "Regular Season Stats",
+                    "events": [
+                        {"eventId": "g1", "stats": ["274", "2", "35"]},
+                        {"eventId": "g2", "stats": ["217", "1", "23"]},
+                    ],
+                    "totals": ["491", "3", "58"],
+                }],
+            }],
+            "filters": [{"unneeded": "metadata"}],
+        }
+        result = _normalize_player_gamelog(payload)
+        self.assertEqual(result["games_available"], 2)
+        self.assertEqual(result["recent_games"][0]["opponent"], "Rams")
+        self.assertEqual(result["recent_games"][0]["stats"]["passingYards"], "274")
+        self.assertEqual(
+            result["season_totals"]["Regular Season Stats"]["passingTouchdowns"],
+            "3",
+        )
+        self.assertNotIn("filters", result)
+
+    def test_player_gamelog_keeps_only_five_most_recent_games(self):
+        from live_research import _normalize_player_gamelog
+
+        events = {
+            f"g{i}": {"week": i, "gameDate": f"2026-10-{i:02d}", "opponent": {"displayName": f"Team {i}"}}
+            for i in range(1, 9)
+        }
+        payload = {
+            "names": ["receivingYards"], "labels": ["YDS"],
+            "displayNames": ["Receiving Yards"], "events": events,
+            "seasonTypes": [{
+                "categories": [{
+                    "displayName": "Regular Season Stats",
+                    "events": [{"eventId": f"g{i}", "stats": [str(i * 10)]} for i in range(1, 9)],
+                    "totals": ["360"],
+                }],
+            }],
+        }
+        result = _normalize_player_gamelog(payload)
+        self.assertEqual(len(result["recent_games"]), 5)
+        self.assertEqual(result["recent_games"][0]["week"], 8)
+        self.assertEqual(result["games_available"], 8)
+
     def test_player_gamelog_is_compacted_and_cached(self):
         from live_research import _player_gamelog
 
