@@ -27,7 +27,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
         kept.append(section)
         used += separator + len(section)
 
-    marker = "[Research truncated at a section boundary to preserve complete evidence.]"
+    marker = "[Research truncated.]"
     while kept and used + 2 + len(marker) > MAX_RESEARCH_PROMPT_CHARS:
         removed = kept.pop()
         used -= len(removed) + (2 if kept else 0)
