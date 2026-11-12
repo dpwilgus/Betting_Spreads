@@ -252,7 +252,7 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_provider_usage_tracks_requests_and_reported_tokens(self):
         provider = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         response = {
-            "choices": [{"message": {"content": "{\\"ok\\": true}"}}],
+            "choices": [{"message": {"content": '{"ok": true}'}}],
             "usage": {"prompt_tokens": 123, "completion_tokens": 45},
         }
 
