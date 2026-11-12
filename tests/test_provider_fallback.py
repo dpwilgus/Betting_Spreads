@@ -6,7 +6,7 @@ from unittest.mock import patch
 from ai_analysis import _bounded_research_text, _validate_analysis, analyze_game
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
                           get_provider_usage_stats, reset_provider_run_state)
-from live_research import collect_game_research
+from live_research import collect_game_research, _extract_roster_names
 
 
 def valid_analysis():
@@ -175,11 +175,58 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_analysis_schema_validation(self):
         _validate_analysis(valid_analysis())
 
-    def test_analysis_rejects_missing_recommendations(self):
+    def test_analysis_rejects_more_than_five_recommendations(self):
         data = valid_analysis()
-        data["picks"] = data["picks"][:2]
+        data["picks"].append(dict(data["picks"][0], rank=6))
         with self.assertRaises(RuntimeError):
             _validate_analysis(data)
+
+    def test_analysis_allows_fewer_evidence_supported_recommendations(self):
+        data = valid_analysis()
+        data["picks"] = data["picks"][:2]
+        data["touchdown_scorers"] = data["touchdown_scorers"][:1]
+        _validate_analysis(data)
+
+    def test_touchdown_scorers_must_belong_to_matchup_roster(self):
+        data = valid_analysis()
+        data["touchdown_scorers"][0]["player"] = "Eli Manning"
+        data["touchdown_scorers"][0]["team"] = "New York Giants"
+        with self.assertRaisesRegex(RuntimeError, "not found on the current ESPN roster"):
+            _validate_analysis(
+                data,
+                rosters={"Washington Commanders": ["Jayden Daniels"],
+                         "New York Giants": ["Daniel Jones"]},
+                team_names=("Washington Commanders", "New York Giants"),
+            )
+
+    def test_touchdown_scorer_team_must_be_one_of_matchup_teams(self):
+        data = valid_analysis()
+        data["touchdown_scorers"][0]["team"] = "Dallas Cowboys"
+        with self.assertRaisesRegex(RuntimeError, "outside this matchup"):
+            _validate_analysis(
+                data,
+                rosters={"Team A": ["Player A"], "Team B": ["Player B"]},
+                team_names=("Team A", "Team B"),
+            )
+
+    def test_player_prop_must_name_a_current_roster_player(self):
+        data = valid_analysis()
+        data["picks"][0]["player_or_team"] = "Eli Manning"
+        with self.assertRaisesRegex(RuntimeError, "not found on either current ESPN roster"):
+            _validate_analysis(
+                data,
+                rosters={"Team A": ["Player A"], "Team B": ["Player B"]},
+                team_names=("Team A", "Team B"),
+            )
+
+    def test_roster_extractor_reads_nested_espn_athletes(self):
+        names = _extract_roster_names({
+            "athletes": [
+                {"fullName": "Player One", "position": {"abbreviation": "QB"}},
+                {"items": [{"displayName": "Player Two", "position": "WR"}]},
+            ]
+        })
+        self.assertEqual(names, ["Player One", "Player Two"])
 
     def test_research_is_available_without_event_id_or_ai_key(self):
         result = collect_game_research({
