@@ -359,7 +359,7 @@ class LiveResearchTests(unittest.TestCase):
                 "Game Date (ET)": "Sunday",
             })
 
-        self.assertIn("ESPN CURRENT-SEASON PLAYER PRODUCTION AND GAME LOGS", result["research_text"])
+        self.assertIn("ESPN CURRENT-SEASON PLAYER GAME LOGS", result["research_text"])
         self.assertIn("Away QB", result["research_text"])
         self.assertIn("Home TE", result["research_text"])
         player_sources = [
