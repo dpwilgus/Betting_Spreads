@@ -365,6 +365,16 @@ def _compact_summary(data: dict[str, Any], retrieved_at: str) -> str:
     return json.dumps(selected, ensure_ascii=False, separators=(",", ":"))
 
 
+
+@lru_cache(maxsize=32)
+def _team_statistics(team_id: str) -> dict[str, Any]:
+    """Fetch and compact team statistics once per team during a slate run."""
+    endpoint_url = (
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+        f"teams/{team_id}/statistics"
+    )
+    return _compact_team_stats(_get_json(endpoint_url, timeout=15))
+
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     event_id = str(game.get("event_id", "")).strip()
     retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -409,44 +419,29 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         teams[str(team["id"])] = team.get("displayName", "Team")
 
             for team_id, team_name in teams.items():
-                for endpoint_name in ("statistics",):
-                    endpoint_url = (
-                        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
-                        f"teams/{team_id}/{endpoint_name}"
-                    )
-                    try:
-                        team_data = _get_json(endpoint_url, timeout=15)
-                        if endpoint_name == "statistics":
-                            compact_team_data = _compact_team_stats(team_data)
-                            sections.append(
-                                f"ESPN CURRENT-SEASON TEAM STATISTICS — {team_name}: "
-                                + json.dumps(
-                                    compact_team_data,
-                                    ensure_ascii=False,
-                                    separators=(",", ":"),
-                                )
-                            )
-                        else:
-                            compact_injuries = _compact_injuries(team_data)
-                            if compact_injuries:
-                                sections.append(
-                                    f"ESPN TEAM INJURY DATA — {team_name}: "
-                                    + json.dumps(
-                                        compact_injuries,
-                                        ensure_ascii=False,
-                                        separators=(",", ":"),
-                                    )
-                                )
-                            # An empty team endpoint is not proof that the
-                            # team has no injuries; the game summary may have them.
-                        sources.append({
-                            "title": f"ESPN {endpoint_name} — {team_name}",
-                            "url": endpoint_url,
-                        })
-                    except Exception as exc:
-                        sections.append(
-                            f"ESPN {endpoint_name} endpoint unavailable for {team_name}: {exc}"
+                endpoint_name = "statistics"
+                endpoint_url = (
+                    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                    f"teams/{team_id}/{endpoint_name}"
+                )
+                try:
+                    compact_team_data = _team_statistics(team_id)
+                    sections.append(
+                        f"ESPN CURRENT-SEASON TEAM STATISTICS — {team_name}: "
+                        + json.dumps(
+                            compact_team_data,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
                         )
+                    )
+                    sources.append({
+                        "title": f"ESPN {endpoint_name} — {team_name}",
+                        "url": endpoint_url,
+                    })
+                except Exception as exc:
+                    sections.append(
+                        f"ESPN {endpoint_name} endpoint unavailable for {team_name}: {exc}"
+                    )
             core_injuries_found = False
             # Core API includes current reports and older injured-reserve records.
             for team_id, team_name in teams.items():
