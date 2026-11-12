@@ -19,7 +19,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
 
     kept: list[str] = []
     used = 0
-    for section in text.split("\\n\\n"):
+    for section in text.split("\n\n"):
         separator = 2 if kept else 0
         remaining = MAX_RESEARCH_PROMPT_CHARS - used - separator
         if len(section) > remaining:
@@ -33,7 +33,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
         used -= len(removed) + (2 if kept else 0)
     if not kept:
         return marker[:MAX_RESEARCH_PROMPT_CHARS], True
-    return "\\n\\n".join(kept) + "\\n\\n" + marker, True
+    return "\n\n".join(kept) + "\n\n" + marker, True
 ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
