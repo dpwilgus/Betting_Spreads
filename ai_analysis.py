@@ -225,6 +225,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         + (base / "PROBABILITY_REVIEW.md").read_text(encoding="utf-8")
     )
     matchup = f"{game['Away Team']} at {game['Home Team']}"
+    team_names = (str(game["Away Team"]), str(game["Home Team"]))
     prompt_research, research_truncated = _bounded_research_text(
         research.get("research_text", "No independent research was available.")
     )
@@ -264,7 +265,6 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     )
 
     rosters = research.get("rosters")
-    team_names = (str(game["Away Team"]), str(game["Home Team"]))
     data, provider_name = generate_json(
         instructions,
         user_input,
