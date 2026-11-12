@@ -608,23 +608,26 @@ def _select_research_players(
     players: list[dict[str, str]],
     depth_chart: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
-    """Select depth-chart No. 1 QB/RB/WR/TE, matching IDs to the current roster."""
+    """Select a bounded set of likely offensive contributors from current depth charts."""
     roster_by_id = {player.get("id"): player for player in players if player.get("id")}
     depth_ids = _extract_depth_chart_ids(depth_chart or {})
-    selected = []
-    for position in ("QB", "RB", "WR", "TE"):
-        ranked_ids = depth_ids.get(position, [])
-        player = next(
-            (roster_by_id[athlete_id] for athlete_id in ranked_ids if athlete_id in roster_by_id),
-            None,
-        )
-        if player is not None:
-            selected.append(player)
+    # More than one RB/WR is intentional: usage is often split, and the listed
+    # No. 1 player is not necessarily the team's leading fantasy/prop producer.
+    limits = {"QB": 1, "RB": 2, "WR": 2, "TE": 1}
+    selected: list[dict[str, str]] = []
+    for position, limit in limits.items():
+        added = 0
+        for athlete_id in depth_ids.get(position, []):
+            player = roster_by_id.get(athlete_id)
+            if player is not None:
+                selected.append(player)
+                added += 1
+                if added >= limit:
+                    break
     if selected:
         return selected
 
     # Explicit fallback for ESPN depth-chart outages or unexpected response formats.
-    limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
     counts = {position: 0 for position in limits}
     for player in players:
         position = player.get("position", "").upper()
@@ -632,6 +635,73 @@ def _select_research_players(
             selected.append(player)
             counts[position] += 1
     return selected
+
+
+def _compact_player_gamelog(
+    gamelog: dict[str, Any],
+    position: str,
+    recent_limit: int = 3,
+) -> dict[str, Any]:
+    """Keep only role-relevant volume/production stats and recent game evidence."""
+    stat_keys = {
+        "QB": (
+            "passingAttempts", "passingYards", "passingTouchdowns", "interceptions",
+            "rushingAttempts", "rushingYards", "rushingTouchdowns",
+        ),
+        "RB": (
+            "rushingAttempts", "rushingYards", "rushingTouchdowns",
+            "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
+        ),
+        "WR": (
+            "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
+            "rushingAttempts", "rushingYards",
+        ),
+        "TE": (
+            "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
+        ),
+    }.get(position.upper(), (
+        "rushingAttempts", "rushingYards", "rushingTouchdowns",
+        "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
+    ))
+
+    totals_by_category = gamelog.get("season_totals", {})
+    totals = next(iter(totals_by_category.values()), {}) if isinstance(totals_by_category, dict) else {}
+    usage = {key: totals.get(key) for key in stat_keys if key in totals}
+    def as_number(value: Any) -> float:
+        try:
+            return float(str(value).replace(",", ""))
+        except (TypeError, ValueError):
+            return 0.0
+
+    opportunities = as_number(totals.get("passingAttempts")) if position.upper() == "QB" else (
+        as_number(totals.get("rushingAttempts")) + as_number(totals.get("receivingTargets"))
+    )
+    games_available = int(gamelog.get("games_available") or 0)
+    if not games_available:
+        status = "no_game_log"
+    elif opportunities >= 20:
+        status = "established_volume"
+    elif opportunities > 0:
+        status = "some_recorded_usage"
+    else:
+        status = "no_recorded_usage"
+
+    recent = []
+    for game in gamelog.get("recent_games", [])[:recent_limit]:
+        stats = game.get("stats", {})
+        recent.append({
+            key: game.get(key)
+            for key in ("week", "date", "opponent", "home_away", "result", "score")
+            if game.get(key) is not None
+        } | {
+            "stats": {key: stats[key] for key in stat_keys if key in stats}
+        })
+    return {
+        "games_available": games_available,
+        "usage_status": status,
+        "season": usage,
+        "recent": recent,
+    }
 
 
 @lru_cache(maxsize=32)
@@ -741,11 +811,11 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             selected_players = _select_research_players(
                                 roster_players, depth_chart
                             )
-                            selection_basis = "ESPN depth-chart No. 1 at position"
+                            selection_basis = "ESPN depth-chart candidates; usage status assessed from game logs"
                         except Exception as exc:
                             selected_players = _select_research_players(roster_players)
                             selection_basis = (
-                                f"roster-order fallback; depth chart unavailable "
+                                f"roster-order fallback candidates; depth chart unavailable "
                                 f"({type(exc).__name__})"
                             )
                         player_records = []
@@ -769,7 +839,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
-                                    "season_game_log": gamelog,
+                                    "usage_and_recent_stats": _compact_player_gamelog(gamelog, player["position"]),
                                 })
                                 _player_gamelog_failures = 0
                                 sources.append({
