@@ -3,7 +3,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from ai_analysis import _validate_analysis, analyze_game
+from ai_analysis import _bounded_research_text, _validate_analysis, analyze_game
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
                           get_provider_usage_stats, reset_provider_run_state)
 from live_research import collect_game_research
@@ -248,6 +248,24 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(payload["max_completion_tokens"], 4096)
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
+
+    def test_research_prompt_truncates_only_between_complete_sections(self):
+        research = "HEADER\n\nINJURIES: complete\n\nTEAM STATS: " + ("x" * 200)
+        with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 100):
+            result, truncated = _bounded_research_text(research)
+
+        self.assertTrue(truncated)
+        self.assertIn("HEADER", result)
+        self.assertIn("INJURIES: complete", result)
+        self.assertNotIn("TEAM STATS:", result)
+        self.assertIn("Research truncated at a section boundary", result)
+        self.assertLessEqual(len(result), 100)
+
+    def test_short_research_prompt_is_not_changed(self):
+        research = "HEADER\n\nINJURIES: complete"
+        result, truncated = _bounded_research_text(research)
+        self.assertEqual(result, research)
+        self.assertFalse(truncated)
 
     def test_analysis_prompt_uses_compact_contract_and_keeps_research(self):
         game = {
