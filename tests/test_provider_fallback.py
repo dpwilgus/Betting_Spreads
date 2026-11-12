@@ -115,6 +115,56 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(call.call_count, 3)
         self.assertEqual(sleep.call_count, 1)
 
+
+    def test_groq_tpm_retry_honors_provider_wait_and_keeps_provider_available(self):
+        first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        rate_error = urllib.error.HTTPError(
+            "https://example.test", 429, "rate limit", {},
+            io.BytesIO(b"Rate limit reached. Please try again in 11.445s.")
+        )
+        skipped = set()
+        with patch(
+            "ai_providers.ensure_configured", return_value=[(first, "key-one")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", skipped
+        ), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[rate_error, {"summary": "recovered"}],
+        ) as call:
+            result, provider = generate_json("system", "user")
+        self.assertEqual(result["summary"], "recovered")
+        self.assertEqual(provider, "groq")
+        sleep.assert_called_once_with(11.445)
+        self.assertNotIn("groq", skipped)
+        self.assertEqual(call.call_count, 2)
+
+    def test_temporary_tpm_failure_does_not_disable_provider_for_next_game(self):
+        first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        rate_error = urllib.error.HTTPError(
+            "https://example.test", 429, "rate limit", {},
+            io.BytesIO(b"tokens per minute limit; try again in 45s")
+        )
+        skipped = set()
+        with patch(
+            "ai_providers.ensure_configured", return_value=[(first, "key-one")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", skipped
+        ), patch(
+            "ai_providers.time.sleep"
+        ), patch(
+            "ai_providers._call_provider",
+            side_effect=[rate_error, rate_error, rate_error, {"summary": "next game"}],
+        ) as call:
+            with self.assertRaises(RuntimeError):
+                generate_json("system", "first game")
+            self.assertNotIn("groq", skipped)
+            result, provider = generate_json("system", "second game")
+        self.assertEqual(result["summary"], "next game")
+        self.assertEqual(provider, "groq")
+        self.assertEqual(call.call_count, 4)
+
     def test_openai_compatible_response_extracts_json(self):
         provider = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         result = _response_text(provider, {
@@ -245,7 +295,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIs(payload["include_reasoning"], False)
         self.assertNotIn("reasoning_format", payload)
         self.assertEqual(payload["reasoning_effort"], "low")
-        self.assertEqual(payload["max_completion_tokens"], 4096)
+        self.assertEqual(payload["max_completion_tokens"], 1600)
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
 
