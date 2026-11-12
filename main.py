@@ -21,7 +21,7 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 from ai_analysis import analyze_game
-from live_research import collect_game_research
+from live_research import collect_game_research, reset_research_cache
 from ai_providers import ensure_configured, reset_provider_run_state
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
@@ -484,6 +484,7 @@ def _load_cached_analysis(game: dict) -> dict:
 
 def main() -> int:
     reset_provider_run_state()
+    reset_research_cache()
     log_path = application_directory() / "Betting_Spreads.log"
     try:
         reuse_cache = "--reuse-cache" in sys.argv[1:]
