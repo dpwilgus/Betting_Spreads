@@ -387,36 +387,101 @@ def _compact_summary(data: dict[str, Any], retrieved_at: str) -> str:
 
 
 
-def _extract_roster_names(payload: Any) -> list[str]:
-    names: list[str] = []
+def _extract_roster_players(payload: Any) -> list[dict[str, str]]:
+    """Extract named roster athletes with ESPN IDs and position abbreviations."""
+    players: list[dict[str, str]] = []
     seen: set[str] = set()
 
-    def walk(value: Any) -> None:
+    def walk(value: Any, inherited_position: str = "") -> None:
         if isinstance(value, dict):
+            raw_position = value.get("position", inherited_position)
+            if isinstance(raw_position, dict):
+                position = str(raw_position.get("abbreviation") or raw_position.get("name") or "")
+            else:
+                position = str(raw_position or "")
             name = value.get("fullName") or value.get("displayName")
-            if name and isinstance(value.get("position"), (dict, str)):
-                cleaned = str(name).strip()
-                if cleaned and cleaned.casefold() not in seen:
-                    seen.add(cleaned.casefold())
-                    names.append(cleaned)
+            athlete_id = value.get("id")
+            if name and athlete_id and position:
+                key = str(athlete_id)
+                if key not in seen:
+                    seen.add(key)
+                    players.append({
+                        "id": key,
+                        "name": str(name).strip(),
+                        "position": position.upper(),
+                    })
             for child in value.values():
                 if isinstance(child, (dict, list)):
-                    walk(child)
+                    walk(child, position)
         elif isinstance(value, list):
             for child in value:
-                walk(child)
+                walk(child, inherited_position)
 
     walk(payload)
-    return names
+    return players
+
+
+def _extract_roster_names(payload: Any) -> list[str]:
+    return [player["name"] for player in _extract_roster_players(payload)]
 
 
 @lru_cache(maxsize=32)
-def _team_roster(team_id: str) -> list[str]:
+def _team_roster_players(team_id: str) -> tuple[dict[str, str], ...]:
     url = (
         "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
         f"teams/{team_id}/roster"
     )
-    return _extract_roster_names(_get_json(url, timeout=15))
+    return tuple(_extract_roster_players(_get_json(url, timeout=15)))
+
+
+@lru_cache(maxsize=128)
+def _player_gamelog(athlete_id: str, season: int) -> dict[str, Any]:
+    """Fetch one player's current-season game log; shared across matchup sheets."""
+    url = (
+        "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
+        f"athletes/{athlete_id}/gamelog?season={season}&seasontype=2"
+    )
+    return _compact_player_data(_get_json(url, timeout=15))
+
+
+def _compact_player_data(value: Any, depth: int = 0) -> Any:
+    """Bound player game-log payloads while retaining labels, dates, opponents and stats."""
+    if depth > 6:
+        return None
+    if isinstance(value, dict):
+        result = {}
+        for key, item in list(value.items())[:45]:
+            if key.casefold() in {"links", "images", "videos", "news", "headlines", "notes"}:
+                continue
+            compacted = _compact_player_data(item, depth + 1)
+            if compacted not in (None, {}, []):
+                result[str(key)[:60]] = compacted
+        return result
+    if isinstance(value, list):
+        return [
+            item for item in (
+                _compact_player_data(entry, depth + 1) for entry in value[:6]
+            )
+            if item not in (None, {}, [])
+        ]
+    if isinstance(value, str):
+        return value[:140]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:140]
+
+
+def _select_research_players(players: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Select one current-roster QB, RB, WR and TE to bound per-slate API usage."""
+    limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
+    selected = []
+    counts = {position: 0 for position in limits}
+    for player in players:
+        position = player.get("position", "").upper()
+        if position in limits and counts[position] < limits[position]:
+            selected.append(player)
+            counts[position] += 1
+    return selected
 
 
 @lru_cache(maxsize=32)
@@ -432,7 +497,8 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
 def reset_research_cache() -> None:
     """Clear per-slate ESPN caches so a later run never reuses stale data."""
     _team_statistics.cache_clear()
-    _team_roster.cache_clear()
+    _team_roster_players.cache_clear()
+    _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
 
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
@@ -458,6 +524,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     )
 
     team_stat_sections: list[str] = []
+    player_stat_sections: list[str] = []
     injury_sections: list[str] = []
     rosters: dict[str, list[str]] = {}
 
@@ -491,20 +558,57 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
 
             for team_id, team_name in teams.items():
                 try:
-                    roster_names = _team_roster(team_id)
+                    roster_players = list(_team_roster_players(team_id))
+                    roster_names = [player["name"] for player in roster_players]
                     if roster_names:
                         rosters[team_name] = roster_names
+                        roster_url = (
+                            "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                            f"teams/{team_id}/roster"
+                        )
                         sources.append({
                             "title": f"ESPN current roster — {team_name}",
-                            "url": (
-                                "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
-                                f"teams/{team_id}/roster"
-                            ),
+                            "url": roster_url,
                         })
                         sections.append(
                             f"CURRENT ESPN ACTIVE TEAM ROSTER — {team_name}: "
                             + ", ".join(roster_names)
                         )
+                        selected_players = _select_research_players(roster_players)
+                        player_records = []
+                        for player in selected_players:
+                            gamelog_url = (
+                                "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
+                                f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
+                            )
+                            try:
+                                gamelog = _player_gamelog(
+                                    player["id"], datetime.now(timezone.utc).year
+                                )
+                                player_records.append({
+                                    "player": player["name"],
+                                    "position": player["position"],
+                                    "season_game_log": gamelog,
+                                })
+                                sources.append({
+                                    "title": f"ESPN player game log — {player['name']}",
+                                    "url": gamelog_url,
+                                })
+                            except Exception as exc:
+                                player_records.append({
+                                    "player": player["name"],
+                                    "position": player["position"],
+                                    "game_log_unavailable": type(exc).__name__,
+                                })
+                        if player_records:
+                            player_stat_sections.append(
+                                f"ESPN CURRENT-SEASON PLAYER PRODUCTION AND GAME LOGS — {team_name}: "
+                                + json.dumps(
+                                    player_records,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                )[:5200]
+                            )
                     else:
                         sections.append(f"ESPN roster returned no player names for {team_name}.")
                 except Exception as exc:
@@ -583,6 +687,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     # Injury evidence is more time-sensitive than season aggregates. Place it
     # before team statistics because the AI prompt has a hard research-text ceiling.
     sections.extend(injury_sections)
+    sections.extend(player_stat_sections)
     sections.extend(team_stat_sections)
 
     seen, unique = set(), []
