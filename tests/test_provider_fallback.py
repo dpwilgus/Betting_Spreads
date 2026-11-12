@@ -113,7 +113,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(result["summary"], "ok")
         self.assertEqual(provider, "groq")
         self.assertEqual(call.call_count, 3)
-        self.assertEqual(sleep.call_count, 1)
+        self.assertEqual(sleep.call_count, 2)
 
 
     def test_groq_tpm_retry_honors_provider_wait_and_keeps_provider_available(self):
