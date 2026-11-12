@@ -52,6 +52,10 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(result[0]["retrieved_at_utc"], "2026-11-12T04:00:00+00:00")
 
     def test_summary_drops_oversized_historical_sections_before_market_data(self):
+        with patch("live_research.SUMMARY_MAX_CHARS", 500):
+            self._assert_oversized_summary_is_compacted()
+
+    def _assert_oversized_summary_is_compacted(self):
         nested = {"name": "x" * 220}
         for _ in range(4):
             nested = {"name": "Recent game", "items": [nested.copy() for _ in range(8)]}
