@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "summary": {"type": "string"},
         "game_script": {"type": "string"},
         "picks": {
-            "type": "array", "minItems": 5, "maxItems": 5,
+            "type": "array", "minItems": 0, "maxItems": 5,
             "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {
@@ -65,7 +66,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
             },
         },
         "touchdown_scorers": {
-            "type": "array", "minItems": 3, "maxItems": 3,
+            "type": "array", "minItems": 0, "maxItems": 3,
             "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {
@@ -121,15 +122,23 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
 }
 
 
-def _validate_analysis(data: dict[str, Any]) -> None:
+def _normalize_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value).casefold())
+
+
+def _validate_analysis(
+    data: dict[str, Any],
+    rosters: dict[str, list[str]] | None = None,
+    team_names: tuple[str, str] | None = None,
+) -> None:
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
         raise RuntimeError("AI response is missing the matchup summary or game script.")
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
-    if not isinstance(picks, list) or len(picks) != 5:
-        raise RuntimeError("AI response must contain exactly five betting opportunities.")
-    if not isinstance(scorers, list) or len(scorers) != 3:
-        raise RuntimeError("AI response must contain exactly three touchdown candidates.")
+    if not isinstance(picks, list) or len(picks) > 5:
+        raise RuntimeError("AI response may contain at most five betting opportunities.")
+    if not isinstance(scorers, list) or len(scorers) > 3:
+        raise RuntimeError("AI response may contain at most three touchdown candidates.")
     for item in picks:
         probability = float(item.get("estimated_hit_probability", -1))
         confidence = int(item.get("confidence", 0))
@@ -143,11 +152,45 @@ def _validate_analysis(data: dict[str, Any]) -> None:
                       "market_line", "play_threshold", "statistical_rationale", "risk_factors"):
             if not item.get(field):
                 raise RuntimeError(f"AI response is missing a required pick field: {field}")
+        if rosters is not None and item.get("market_type") == "Player Prop":
+            known_players = {
+                _normalize_name(player)
+                for roster in rosters.values()
+                for player in roster
+            }
+            if not known_players or _normalize_name(item.get("player_or_team", "")) not in known_players:
+                raise RuntimeError(
+                    "AI suggested a player prop for someone not found on either current ESPN roster: "
+                    + str(item.get("player_or_team", ""))
+                )
     for item in scorers:
         probability = float(item.get("estimated_td_probability", -1))
         confidence = int(item.get("confidence", 0))
         if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
             raise RuntimeError("AI returned an invalid touchdown probability or confidence.")
+        if team_names is not None:
+            normalized_team = _normalize_name(item.get("team", ""))
+            matching_team = next(
+                (name for name in team_names if _normalize_name(name) == normalized_team),
+                None,
+            )
+            if matching_team is None:
+                raise RuntimeError(
+                    "AI assigned a touchdown candidate to a team outside this matchup: "
+                    + str(item.get("team", ""))
+                )
+            if rosters is not None:
+                roster = next(
+                    (players for name, players in rosters.items()
+                     if _normalize_name(name) == _normalize_name(matching_team)),
+                    [],
+                )
+                roster_names = {_normalize_name(player) for player in roster}
+                if not roster_names or _normalize_name(item.get("player", "")) not in roster_names:
+                    raise RuntimeError(
+                        "AI suggested a touchdown scorer not found on the current ESPN roster: "
+                        + str(item.get("player", ""))
+                    )
     injury_impacts = data.get("injury_impact")
     if not isinstance(injury_impacts, list):
         raise RuntimeError("AI injury_impact must be a list.")
@@ -197,13 +240,17 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "If a current prop line is not in the evidence, label it Not verified. Never fabricate "
         "injuries, player statistics, market prices, sources, or source timestamps.\n\n"
         "Return one JSON object only, with exactly these top-level keys: "
-        "summary (string), game_script (string), picks (array of exactly 5), "
-        "touchdown_scorers (array of exactly 3), injury_impact (array), "
+        "summary (string), game_script (string), picks (array of up to 5), "
+        "touchdown_scorers (array of up to 3), injury_impact (array), "
         "data_gaps (array of strings). Each pick object must contain: rank (integer), "
         "market_type (Player Prop or Game Prop), player_or_team, bet_description, "
         "market_line, play_threshold, estimated_hit_probability (number 0-100), "
         "confidence (integer 1-10), statistical_rationale, risk_factors, "
-        "data_quality (Strong, Moderate, or Limited). Each touchdown_scorer must "
+        "data_quality (Strong, Moderate, or Limited). Only include evidence-supported picks. "
+        "Each Player Prop must name a player exactly as listed on one of the supplied current ESPN rosters. "
+        "Each touchdown_scorer must name a player exactly as listed on the roster for the stated team. "
+        "If the roster does not support a player or evidence is inadequate, omit that candidate; "
+        "shorter arrays are acceptable. Each touchdown_scorer must "
         "contain: rank, player, team, estimated_td_probability (number 0-100), "
         "confidence (integer 1-10), rationale, risk_factors. Each injury_impact "
         "must contain: injured_player, team, availability, affected_player, "
@@ -214,7 +261,15 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         + prompt_research
     )
 
-    data, provider_name = generate_json(instructions, user_input, validator=_validate_analysis)
+    rosters = research.get("rosters")
+    team_names = (str(game["Away Team"]), str(game["Home Team"]))
+    data, provider_name = generate_json(
+        instructions,
+        user_input,
+        validator=lambda result: _validate_analysis(
+            result, rosters=rosters, team_names=team_names
+        ),
+    )
     data["sources"] = list(research.get("sources", []))
     data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
