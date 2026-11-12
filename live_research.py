@@ -13,6 +13,8 @@ import certifi
 
 HEADERS = {"User-Agent": "Betting-Spreads/3.0 (independent NFL research)"}
 
+SUMMARY_MAX_CHARS = 12000
+
 ESPN_SUMMARY = (
     "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
     "summary?event={event_id}"
@@ -369,7 +371,7 @@ def _compact_summary(data: dict[str, Any], retrieved_at: str) -> str:
     def serialize() -> str:
         return json.dumps(selected, ensure_ascii=False, separators=(",", ":"))
 
-    if len(serialize()) > 12000 and "recent_games" in selected:
+    if len(serialize()) > SUMMARY_MAX_CHARS and "recent_games" in selected:
         selected.pop("recent_games")
         omitted.append("recent_games")
     if len(serialize()) > 12000 and "against_the_spread" in selected:
