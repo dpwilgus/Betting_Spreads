@@ -505,8 +505,389 @@ def _extract_depth_chart_ids(payload: Any) -> dict[str, list[str]]:
     }
 
 
+def _normalize_player_gamelog(payload: dict[str, Any], recent_limit: int = 5) -> dict[str, Any]:
+    """Join ESPN's split stat arrays to event metadata and emit concise player evidence."""
+    names = payload.get("names", [])
+    labels = payload.get("labels", [])
+    display_names = payload.get("displayNames", [])
+    definitions = []
+    for index, name in enumerate(names):
+        definitions.append({
+            "name": str(name),
+            "label": str(labels[index]) if index < len(labels) else str(name),
+            "display": str(display_names[index]) if index < len(display_names) else str(name),
+        })
+
+    event_metadata = payload.get("events", {})
+    if not isinstance(event_metadata, dict):
+        event_metadata = {}
+    season_totals = {}
+    recent_games = []
+    season_types = payload.get("seasonTypes", [])
+    for season_type in season_types if isinstance(season_types, list) else []:
+        for category in season_type.get("categories", []):
+            if not isinstance(category, dict):
+                continue
+            totals = category.get("totals", [])
+            if totals:
+                season_totals[category.get("displayName", "Season totals")] = {
+                    definitions[i]["name"]: totals[i]
+                    for i in range(min(len(totals), len(definitions)))
+                }
+            for event_stats in category.get("events", []):
+                if not isinstance(event_stats, dict):
+                    continue
+                event_id = str(event_stats.get("eventId", ""))
+                metadata = event_metadata.get(event_id, {})
+                values = event_stats.get("stats", [])
+                stats = {
+                    definitions[i]["name"]: values[i]
+                    for i in range(min(len(values), len(definitions)))
+                }
+                opponent = metadata.get("opponent") or {}
+                recent_games.append({
+                    "week": metadata.get("week"),
+                    "date": metadata.get("gameDate"),
+                    "opponent": opponent.get("displayName"),
+                    "home_away": metadata.get("atVs"),
+                    "result": metadata.get("gameResult"),
+                    "score": metadata.get("score"),
+                    "stats": stats,
+                })
+    recent_games.sort(key=lambda game: str(game.get("date") or ""), reverse=True)
+    if recent_games or season_totals:
+        return {
+            "stat_definitions": definitions,
+            "season_totals": season_totals,
+            "recent_games": recent_games[:recent_limit],
+            "games_available": len(recent_games),
+        }
+
+    # Retain compatibility with incomplete/unexpected ESPN payloads, but keep bounded.
+    return _compact_player_data(payload)
+
+
 @lru_cache(maxsize=128)
 def _player_gamelog(athlete_id: str, season: int) -> dict[str, Any]:
+    """Fetch one player's current-season game log; shared across matchup sheets."""
+    url = (
+        "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
+        f"athletes/{athlete_id}/gamelog?season={season}&seasontype=2"
+    )
+    return _normalize_player_gamelog(_get_json(url, timeout=15))
+
+
+def _compact_player_data(value: Any, depth: int = 0) -> Any:
+    """Bound player game-log payloads while retaining labels, dates, opponents and stats."""
+    if depth > 6:
+        return None
+    if isinstance(value, dict):
+        result = {}
+        for key, item in list(value.items())[:45]:
+            if key.casefold() in {"links", "images", "videos", "news", "headlines", "notes"}:
+                continue
+            compacted = _compact_player_data(item, depth + 1)
+            if compacted not in (None, {}, []):
+                result[str(key)[:60]] = compacted
+        return result
+    if isinstance(value, list):
+        return [
+            item for item in (
+                _compact_player_data(entry, depth + 1) for entry in value[:6]
+            )
+            if item not in (None, {}, [])
+        ]
+    if isinstance(value, str):
+        return value[:140]
+    if isinstance(value, (int, float, bool)) or value is None:
+        return value
+    return str(value)[:140]
+
+
+def _select_research_players(
+    players: list[dict[str, str]],
+    depth_chart: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    """Select depth-chart No. 1 QB/RB/WR/TE, matching IDs to the current roster."""
+    roster_by_id = {player.get("id"): player for player in players if player.get("id")}
+    depth_ids = _extract_depth_chart_ids(depth_chart or {})
+    selected = []
+    for position in ("QB", "RB", "WR", "TE"):
+        ranked_ids = depth_ids.get(position, [])
+        player = next(
+            (roster_by_id[athlete_id] for athlete_id in ranked_ids if athlete_id in roster_by_id),
+            None,
+        )
+        if player is not None:
+            selected.append(player)
+    if selected:
+        return selected
+
+    # Explicit fallback for ESPN depth-chart outages or unexpected response formats.
+    limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
+    counts = {position: 0 for position in limits}
+    for player in players:
+        position = player.get("position", "").upper()
+        if player.get("id") and position in limits and counts[position] < limits[position]:
+            selected.append(player)
+            counts[position] += 1
+    return selected
+
+
+@lru_cache(maxsize=32)
+def _team_statistics(team_id: str) -> dict[str, Any]:
+    """Fetch and compact team statistics once per team during a slate run."""
+    endpoint_url = (
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+        f"teams/{team_id}/statistics"
+    )
+    return _compact_team_stats(_get_json(endpoint_url, timeout=15))
+
+
+def reset_research_cache() -> None:
+    """Clear per-slate ESPN caches so a later run never reuses stale data."""
+    global _player_gamelog_failures, _player_gamelogs_disabled
+    _team_statistics.cache_clear()
+    _team_roster_players.cache_clear()
+    _team_depth_chart.cache_clear()
+    _player_gamelog.cache_clear()
+    _core_team_injuries.cache_clear()
+    _player_gamelog_failures = 0
+    _player_gamelogs_disabled = False
+
+def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
+    event_id = str(game.get("event_id", "")).strip()
+    retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    sources = [{
+        "title": "ESPN NFL scoreboard",
+        "url": "https://www.espn.com/nfl/scoreboard",
+    }]
+    sections = [
+        "INDEPENDENT LIVE NFL RESEARCH",
+        f"Matchup: {game.get('Away Team', 'Away')} at {game.get('Home Team', 'Home')}",
+        f"Kickoff (ET): {game.get('Game Date (ET)', 'Unknown')}",
+        f"Scoreboard line: {game.get('Betting Line', 'Unavailable')}",
+        f"Research retrieved (UTC): {retrieved_at}",
+    ]
+
+    sections.append(
+        "MARKET DATA RULE: Pickcenter quotes are ESPN-displayed sportsbook snapshots. "
+        "Use the named provider and retrieval timestamp. Do not describe them as guaranteed "
+        "current prices. If no pickcenter quote is supplied, market prices are unverified. "
+        "No player-prop market is claimed unless an actual prop line and price appear in the evidence."
+    )
+
+    team_stat_sections: list[str] = []
+    player_stat_sections: list[str] = []
+    injury_sections: list[str] = []
+    rosters: dict[str, list[str]] = {}
+
+    if not event_id:
+        sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
+    else:
+        api_url = ESPN_SUMMARY.format(event_id=event_id)
+        sources.insert(0, {
+            "title": "ESPN matchup game page",
+            "url": f"https://www.espn.com/nfl/game/_/gameId/{event_id}",
+        })
+        try:
+            data = _get_json(api_url)
+            compact = _compact_summary(data, retrieved_at)
+            sections.extend([
+                "ESPN MATCHUP, PLAYER, INJURY, MARKET AND RECENT-GAME DATA:",
+                compact,
+            ])
+            sources.append({"title": "ESPN game summary data", "url": api_url})
+
+            teams = {
+                str(game.get("away_team_id", "")): game.get("Away Team", "Away team"),
+                str(game.get("home_team_id", "")): game.get("Home Team", "Home team"),
+            }
+            teams.pop("", None)
+            for competition in data.get("header", {}).get("competitions", []):
+                for competitor in competition.get("competitors", []):
+                    team = competitor.get("team") or {}
+                    if team.get("id"):
+                        teams[str(team["id"])] = team.get("displayName", "Team")
+
+            for team_id, team_name in teams.items():
+                try:
+                    roster_players = list(_team_roster_players(team_id))
+                    roster_names = [player["name"] for player in roster_players]
+                    if roster_names:
+                        rosters[team_name] = roster_names
+                        roster_url = (
+                            "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                            f"teams/{team_id}/roster"
+                        )
+                        sources.append({
+                            "title": f"ESPN current roster — {team_name}",
+                            "url": roster_url,
+                        })
+                        sections.append(
+                            f"CURRENT ESPN ACTIVE TEAM ROSTER — {team_name}: "
+                            + ", ".join(roster_names)
+                        )
+                        try:
+                            depth_chart = _team_depth_chart(team_id)
+                            depth_chart_url = (
+                                "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                                f"teams/{team_id}/depthcharts"
+                            )
+                            sources.append({
+                                "title": f"ESPN offensive depth chart — {team_name}",
+                                "url": depth_chart_url,
+                            })
+                            selected_players = _select_research_players(
+                                roster_players, depth_chart
+                            )
+                            selection_basis = "ESPN depth-chart No. 1 at position"
+                        except Exception as exc:
+                            selected_players = _select_research_players(roster_players)
+                            selection_basis = (
+                                f"roster-order fallback; depth chart unavailable "
+                                f"({type(exc).__name__})"
+                            )
+                        player_records = []
+                        for player in selected_players:
+                            global _player_gamelog_failures, _player_gamelogs_disabled
+                            if _player_gamelogs_disabled:
+                                player_records.append({
+                                    "player": player["name"],
+                                    "position": player["position"],
+                                    "game_log_unavailable": "skipped after repeated ESPN player-log errors",
+                                })
+                                continue
+                            gamelog_url = (
+                                "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
+                                f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
+                            )
+                            try:
+                                gamelog = _player_gamelog(
+                                    player["id"], datetime.now(timezone.utc).year
+                                )
+                                player_records.append({
+                                    "player": player["name"],
+                                    "position": player["position"],
+                                    "season_game_log": gamelog,
+                                })
+                                _player_gamelog_failures = 0
+                                sources.append({
+                                    "title": f"ESPN player game log — {player['name']}",
+                                    "url": gamelog_url,
+                                })
+                            except Exception as exc:
+                                _player_gamelog_failures += 1
+                                if _player_gamelog_failures >= PLAYER_GAMELOG_FAILURE_LIMIT:
+                                    _player_gamelogs_disabled = True
+                                player_records.append({
+                                    "player": player["name"],
+                                    "position": player["position"],
+                                    "game_log_unavailable": type(exc).__name__,
+                                })
+                        if player_records:
+                            player_stat_sections.append(
+                                f"ESPN CURRENT-SEASON PLAYER GAME LOGS — {team_name} "
+                                f"(selected by {selection_basis}; retrieved {retrieved_at}; regular season): "
+                                + json.dumps(
+                                    player_records,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                )
+                            )
+                    else:
+                        sections.append(f"ESPN roster returned no player names for {team_name}.")
+                except Exception as exc:
+                    sections.append(
+                        f"ESPN roster unavailable for {team_name}: {type(exc).__name__}"
+                    )
+
+            for team_id, team_name in teams.items():
+                endpoint_name = "statistics"
+                endpoint_url = (
+                    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                    f"teams/{team_id}/{endpoint_name}"
+                )
+                try:
+                    compact_team_data = _team_statistics(team_id)
+                    team_stat_sections.append(
+                        f"ESPN CURRENT-SEASON TEAM STATISTICS — {team_name}: "
+                        + json.dumps(
+                            compact_team_data,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                    )
+                    sources.append({
+                        "title": f"ESPN {endpoint_name} — {team_name}",
+                        "url": endpoint_url,
+                    })
+                except Exception as exc:
+                    sections.append(
+                        f"ESPN {endpoint_name} endpoint unavailable for {team_name}: {exc}"
+                    )
+            core_injuries_found = False
+            # Core API includes current reports and older injured-reserve records.
+            for team_id, team_name in teams.items():
+                core_url = (
+                    "https://sports.core.api.espn.com/v2/sports/football/"
+                    f"leagues/nfl/teams/{team_id}/injuries?limit=100"
+                )
+                try:
+                    team_injuries = _core_team_injuries(team_id)
+                    if team_injuries:
+                        core_injuries_found = True
+                        injury_sections.append(
+                            f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
+                            + json.dumps(
+                                team_injuries,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            )
+                        )
+                    sources.append({
+                        "title": f"ESPN Core API player injuries — {team_name}",
+                        "url": core_url,
+                    })
+                except Exception as exc:
+                    sections.append(
+                        f"ESPN Core API injury data unavailable for {team_name}: "
+                        f"{type(exc).__name__}"
+                    )
+            # Keep game-summary injuries as supplemental evidence even when
+            # the Core API returns injuries for only one of the two teams.
+            summary_injuries = _compact_injuries(data.get("injuries", []))
+            if summary_injuries:
+                injury_sections.append(
+                    "ESPN GAME SUMMARY INJURY DATA: "
+                    + json.dumps(
+                        summary_injuries,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                )
+
+        except Exception as exc:
+            sections.append(f"ESPN game-summary request failed: {exc}")
+
+    # Injury evidence is more time-sensitive than season aggregates. Place it
+    # before team statistics because the AI prompt has a hard research-text ceiling.
+    sections.extend(injury_sections)
+    sections.extend(player_stat_sections)
+    sections.extend(team_stat_sections)
+
+    seen, unique = set(), []
+    for source in sources:
+        if source["url"] not in seen:
+            seen.add(source["url"])
+            unique.append(source)
+
+    return {
+        "research_text": "\n\n".join(sections),
+        "sources": unique,
+        "rosters": rosters,
+    }
+
     """Fetch one player's current-season game log; shared across matchup sheets."""
     url = (
         "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
