@@ -258,7 +258,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("HEADER", result)
         self.assertIn("INJURIES: complete", result)
         self.assertNotIn("TEAM STATS:", result)
-        self.assertIn("Research truncated at a section boundary", result)
+        self.assertIn("[Research truncated.]", result)
         self.assertLessEqual(len(result), 100)
 
     def test_short_research_prompt_is_not_changed(self):
