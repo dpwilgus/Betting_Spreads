@@ -248,5 +248,34 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
 
+    def test_provider_credentials_are_cached_for_one_run(self):
+        provider = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+        configured = [(provider, "test-key")]
+
+        with patch("ai_providers._CONFIGURED_PROVIDERS_CACHE", None), patch(
+            "ai_providers._configured_providers", return_value=configured
+        ) as load:
+            first = __import__("ai_providers").ensure_configured()
+            second = __import__("ai_providers").ensure_configured()
+
+        self.assertEqual(first, configured)
+        self.assertEqual(second, configured)
+        load.assert_called_once()
+
+    def test_reset_provider_run_state_clears_cached_credentials(self):
+        provider = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+        configured = [(provider, "test-key")]
+
+        with patch("ai_providers._CONFIGURED_PROVIDERS_CACHE", None), patch(
+            "ai_providers._configured_providers", return_value=configured
+        ) as load:
+            module = __import__("ai_providers")
+            module.ensure_configured()
+            module.reset_provider_run_state()
+            module.ensure_configured()
+
+        self.assertEqual(load.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
