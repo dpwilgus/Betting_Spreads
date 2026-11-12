@@ -22,7 +22,7 @@ from openpyxl.utils import get_column_letter
 
 from ai_analysis import analyze_game
 from live_research import collect_game_research
-from ai_providers import ensure_configured
+from ai_providers import ensure_configured, reset_provider_run_state
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
@@ -254,7 +254,60 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 cell.fill = light
         sheet.row_dimensions[row_num].height = 65
 
-    gap_row = td_start + max(len(scorers), 1) + 4
+    injury_start = td_start + max(len(scorers), 1) + 4
+    sheet.cell(injury_start, 1, "INJURY IMPACT ANALYSIS")
+    sheet.cell(injury_start, 1).font = white_bold
+    sheet.cell(injury_start, 1).fill = navy
+    sheet.merge_cells(
+        start_row=injury_start, start_column=1,
+        end_row=injury_start, end_column=10,
+    )
+
+    injury_headers = [
+        "Injured Player", "Team", "Availability", "Affected Player",
+        "Affected Team", "Impact", "Statistical Effect", "Prop Market",
+        "Evidence / Confidence", "Conditions",
+    ]
+    for col, value in enumerate(injury_headers, 1):
+        _style_header(sheet.cell(injury_start + 1, col, value))
+
+    impacts = analysis.get("injury_impact", [])
+    if not impacts:
+        sheet.merge_cells(
+            start_row=injury_start + 2, start_column=1,
+            end_row=injury_start + 2, end_column=10,
+        )
+        sheet.cell(
+            injury_start + 2, 1,
+            "No meaningful, evidence-supported downstream injury impacts identified.",
+        )
+        sheet.cell(injury_start + 2, 1).alignment = Alignment(wrap_text=True)
+
+    for row_num, impact in enumerate(impacts, injury_start + 2):
+        values = [
+            impact.get("injured_player", ""),
+            impact.get("team", ""),
+            impact.get("availability", ""),
+            impact.get("affected_player", ""),
+            impact.get("affected_team", ""),
+            impact.get("impact_direction", ""),
+            impact.get("statistical_effect", ""),
+            impact.get("prop_market", ""),
+            (
+                f"{impact.get('evidence', '')} "
+                f"(Confidence: {impact.get('confidence', '')}/10)"
+            ),
+            impact.get("conditions", ""),
+        ]
+        for col, value in enumerate(values, 1):
+            cell = sheet.cell(row=row_num, column=col, value=value)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = Border(bottom=thin_gray)
+            if row_num % 2 == 0:
+                cell.fill = light
+        sheet.row_dimensions[row_num].height = 78
+
+    gap_row = injury_start + max(len(impacts), 1) + 4
     sheet.cell(gap_row, 1, "DATA LIMITATIONS")
     sheet.cell(gap_row, 1).font = white_bold
     sheet.cell(gap_row, 1).fill = navy
@@ -430,6 +483,7 @@ def _load_cached_analysis(game: dict) -> dict:
 
 
 def main() -> int:
+    reset_provider_run_state()
     log_path = application_directory() / "Betting_Spreads.log"
     try:
         reuse_cache = "--reuse-cache" in sys.argv[1:]

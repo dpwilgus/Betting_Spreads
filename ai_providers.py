@@ -16,8 +16,13 @@ import certifi
 import keyring
 
 SERVICE_NAME = "Betting Spreads"
-PROVIDER_ORDER = ("gemini", "groq", "openrouter", "openai")
+PROVIDER_ORDER = ("groq", "openrouter", "gemini")
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
+
+
+def reset_provider_run_state() -> None:
+    """Allow all configured providers to be tried in a new analysis run."""
+    _SKIP_PROVIDER_FOR_RUN.clear()
 
 
 @dataclass(frozen=True)
@@ -141,19 +146,26 @@ def _configure_keys() -> None:
         )
 
 
-def ensure_configured() -> None:
-    """Prompt once for keys before the progress UI is opened."""
-    if not _configured_providers():
+def ensure_configured() -> list[tuple[Provider, str]]:
+    """Return configured providers, reading saved credentials only once."""
+    configured = _configured_providers()
+    if not configured:
         _configure_keys()
-    if not _configured_providers():
-        raise RuntimeError("No usable AI API keys are configured.")
-
+        configured = _configured_providers()
+    if not configured:
+        raise RuntimeError(
+            "No AI API keys are configured. Set GEMINI_API_KEY, GROQ_API_KEY, "
+            "or OPENROUTER_API_KEY, then restart the app."
+        )
+    return configured
 
 def _configured_providers() -> list[tuple[Provider, str]]:
     configured = []
     order = os.environ.get("AI_PROVIDER_ORDER", ",".join(PROVIDER_ORDER))
     names = [part.strip().lower() for part in order.split(",") if part.strip()]
     for name in names:
+        if name == "openai" and os.environ.get("AI_ALLOW_PAID", "").strip().lower() not in {"1", "true", "yes"}:
+            continue
         provider = PROVIDERS.get(name)
         if provider:
             key = _saved_key(provider)
@@ -205,7 +217,7 @@ def _call_provider(
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2, "maxOutputTokens": 3500},
         }
         result = _request_json(url, payload, {})
     else:
@@ -216,8 +228,19 @@ def _call_provider(
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.2,
+            "max_completion_tokens": int(
+                os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "4096")
+                if provider.name == "groq" else "1800"
+            ),
             "response_format": {"type": "json_object"},
         }
+        if provider.name == "groq":
+            if model.startswith("openai/gpt-oss"):
+                payload["include_reasoning"] = False
+                payload["reasoning_effort"] = "low"
+            else:
+                payload["reasoning_format"] = "hidden"
+
         headers = {"Authorization": f"Bearer {key}"}
         if provider.name == "openrouter":
             headers["HTTP-Referer"] = "https://github.com/dpwilgus/Betting_Spreads"
@@ -238,9 +261,8 @@ def generate_json(
     validator: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Try configured providers in order; retry transient failures once, then fall back."""
-    ensure_configured()
     configured = [
-        item for item in _configured_providers()
+        item for item in ensure_configured()
         if item[0].name not in _SKIP_PROVIDER_FOR_RUN
     ]
     if not configured:
@@ -264,7 +286,12 @@ def generate_json(
                     delay = min(max(float(retry_after), 0), 3)
                 except ValueError:
                     delay = 0
-                transient = exc.code >= 500 or (exc.code == 429 and delay > 0)
+                quota_exhausted = exc.code == 429 and any(
+                    marker in body.lower()
+                    for marker in ("quota", "insufficient_quota", "resource_exhausted",
+                                   "daily limit", "billing")
+                )
+                transient = exc.code >= 500 or (exc.code == 429 and not quota_exhausted)
                 if transient and attempt == 0:
                     time.sleep(delay or 1)
                     continue

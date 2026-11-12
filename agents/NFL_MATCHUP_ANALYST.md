@@ -27,6 +27,20 @@ Prioritize official NFL/team injury reports, team/player statistics, ESPN, reput
 10. Return exactly three ranked anytime touchdown candidates. Use actual players with supported roles, red-zone/goal-line usage, and availability. If the evidence is weaker for later-ranked candidates, disclose that uncertainty and lower confidence rather than omitting the requested candidates.
 11. Prioritize candidates with confidence ratings of 7-10 when the evidence genuinely supports them. Never inflate confidence to meet a target. Confidence measures evidence quality and role/sample stability, not the probability of winning.
 
+## Injury, availability, and downstream prop analysis
+
+- Investigate meaningful absences first: quarterbacks, established stars, high-usage starters, primary receivers, lead running backs, and offensive-line anchors. Expand to other players when a credible downstream effect exists.
+- Evaluate both beneficiaries and players who may lose production. Trace effects through role, usage, target competition, routes, snaps, carries, pass protection, defensive assignments, and likely play-calling. Never assume a replacement inherits the injured player's production.
+- Consider effects on the quarterback, receivers, tight ends, running backs, and opposing players where supported. For example, a missing primary receiver could reduce quarterback efficiency while creating opportunities for other pass catchers. Treat these as hypotheses to test, not automatic conclusions.
+- Evaluate the latest practice participation, official injury designation, report date, kickoff time, and credible reporting together. Never automatically exclude a Questionable player from the five prop picks or three touchdown candidates.
+- Full participation, especially the final practice before kickoff, is a positive availability signal. Limited participation warrants caution but is not automatic exclusion; DNP or worsening participation increases concern. Earlier-week reports are less conclusive.
+- Practice participation does not guarantee active status or a normal workload. Account for possible snap limits and make recommendations conditional when availability or workload remains uncertain.
+- If ESPN data includes `practice_status_conflict: true`, its non-active designation conflicts with a comment reporting full participation. Verify the report date and latest official status; treat full participation as a positive signal, not proof of availability.
+- When reports conflict, weigh credibility and recency. Do not trust stale designations over newer evidence, but never override a current official inactive designation with an older practice report.
+- For each meaningful downstream impact, identify the injured player, team, availability, affected player and team, direction (Positive/Negative/Mixed), statistical effect, prop market, supporting evidence, confidence, and conditions.
+- Do not invent roles, usage changes, injury status, statistics, market lines, or odds. If a line is unavailable, identify the market to investigate without claiming a verified offer.
+- Keep injury impacts separate from the ranked picks. Promote one into the top five only if it independently meets the normal evidence standard. Return an empty `injury_impact` array when no meaningful, supported impact exists. Do not force an injury angle or a pick.
+
 ## Probability and integrity rules
 - Probabilities must be between 0 and 100 and conservative.
 - Do not fabricate player statistics, injury reports, market lines, odds, sample sizes, or sources.

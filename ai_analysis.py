@@ -57,9 +57,41 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
                 ],
             },
         },
+        "injury_impact": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "injured_player": {"type": "string"},
+                    "team": {"type": "string"},
+                    "availability": {"type": "string"},
+                    "affected_player": {"type": "string"},
+                    "affected_team": {"type": "string"},
+                    "impact_direction": {
+                        "type": "string",
+                        "enum": ["Positive", "Negative", "Mixed"],
+                    },
+                    "statistical_effect": {"type": "string"},
+                    "prop_market": {"type": "string"},
+                    "evidence": {"type": "string"},
+                    "confidence": {"type": "integer"},
+                    "conditions": {"type": "string"},
+                },
+                "required": [
+                    "injured_player", "team", "availability",
+                    "affected_player", "affected_team", "impact_direction",
+                    "statistical_effect", "prop_market", "evidence",
+                    "confidence", "conditions",
+                ],
+            },
+        },
         "data_gaps": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["summary", "game_script", "picks", "touchdown_scorers", "data_gaps"],
+    "required": [
+        "summary", "game_script", "picks", "touchdown_scorers",
+        "injury_impact", "data_gaps",
+    ],
 }
 
 
@@ -90,6 +122,26 @@ def _validate_analysis(data: dict[str, Any]) -> None:
         confidence = int(item.get("confidence", 0))
         if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
             raise RuntimeError("AI returned an invalid touchdown probability or confidence.")
+    injury_impacts = data.get("injury_impact")
+    if not isinstance(injury_impacts, list):
+        raise RuntimeError("AI injury_impact must be a list.")
+
+    for item in injury_impacts:
+        if item.get("impact_direction") not in ("Positive", "Negative", "Mixed"):
+            raise RuntimeError("AI returned an unsupported injury-impact direction.")
+        confidence = int(item.get("confidence", 0))
+        if not 1 <= confidence <= 10:
+            raise RuntimeError("AI returned an invalid injury-impact confidence.")
+        for field in (
+            "injured_player", "team", "availability", "affected_player",
+            "affected_team", "statistical_effect", "prop_market",
+            "evidence", "conditions",
+        ):
+            if not item.get(field):
+                raise RuntimeError(
+                    f"AI injury impact is missing a required field: {field}"
+                )
+
     if not isinstance(data.get("data_gaps", []), list):
         raise RuntimeError("AI data_gaps must be a list.")
 
