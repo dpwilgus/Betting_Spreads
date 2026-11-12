@@ -365,8 +365,12 @@ def generate_json(
                 failures.append(f"{provider.name}: connection error: {exc}")
                 break
             except (ValueError, KeyError, RuntimeError) as exc:
+                # Invalid model output is not evidence that the provider is offline.
+                # Retry once for this matchup, then allow the next matchup to try again.
+                if attempt == 0:
+                    time.sleep(1)
+                    continue
                 failures.append(f"{provider.name}: {exc}")
-                _SKIP_PROVIDER_FOR_RUN.add(provider.name)
                 break
             except Exception as exc:
                 failures.append(f"{provider.name}: unexpected error: {exc}")
