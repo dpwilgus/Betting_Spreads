@@ -3,7 +3,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from ai_analysis import _validate_analysis
+from ai_analysis import _validate_analysis, analyze_game
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
                           get_provider_usage_stats, reset_provider_run_state)
 from live_research import collect_game_research
@@ -248,6 +248,32 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(payload["max_completion_tokens"], 4096)
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
+
+    def test_analysis_prompt_uses_compact_contract_and_keeps_research(self):
+        game = {
+            "Away Team": "Away", "Home Team": "Home",
+            "Game Date (ET)": "Sunday", "Betting Line": "Unavailable",
+        }
+        research = {
+            "research_text": "CURRENT INJURY EVIDENCE: Example player is questionable.",
+            "sources": [{"title": "ESPN", "url": "https://example.test"}],
+        }
+
+        with patch(
+            "ai_analysis.generate_json",
+            return_value=(valid_analysis(), "gemini"),
+        ) as generate:
+            result = analyze_game(game, research=research)
+
+        system_prompt, user_prompt = generate.call_args.args[:2]
+        self.assertIn("exactly five ranked betting opportunities", system_prompt)
+        self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
+        self.assertIn("statistical_rationale", user_prompt)
+        self.assertIn("touchdown_scorers", user_prompt)
+        self.assertNotIn('"additionalProperties"', user_prompt)
+        self.assertLess(len(system_prompt) + len(user_prompt), 10000)
+        self.assertEqual(result["ai_provider"], "gemini")
+        self.assertEqual(result["sources"], research["sources"])
 
     def test_provider_usage_tracks_requests_and_reported_tokens(self):
         provider = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
