@@ -422,7 +422,27 @@ def _extract_roster_players(payload: Any) -> list[dict[str, str]]:
 
 
 def _extract_roster_names(payload: Any) -> list[str]:
-    return [player["name"] for player in _extract_roster_players(payload)]
+    """Extract roster names even when a partial roster response omits athlete IDs."""
+    names: list[str] = []
+    seen: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            name = value.get("fullName") or value.get("displayName")
+            if name and isinstance(value.get("position"), (dict, str)):
+                cleaned = str(name).strip()
+                if cleaned and cleaned.casefold() not in seen:
+                    seen.add(cleaned.casefold())
+                    names.append(cleaned)
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    return names
 
 
 @lru_cache(maxsize=32)
