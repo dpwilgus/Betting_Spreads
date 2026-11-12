@@ -52,6 +52,9 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(result[0]["retrieved_at_utc"], "2026-11-12T04:00:00+00:00")
 
     def test_summary_drops_oversized_historical_sections_before_market_data(self):
+        nested = {"name": "x" * 220}
+        for _ in range(4):
+            nested = {"name": "Recent game", "items": [nested.copy() for _ in range(8)]}
         payload = {
             "header": {
                 "id": "event-1",
@@ -63,10 +66,7 @@ class LiveResearchTests(unittest.TestCase):
                     ],
                 }],
             },
-            "lastFiveGames": [
-                {"name": "Recent game", "summary": "x" * 220}
-                for _ in range(8)
-            ],
+            "lastFiveGames": [nested.copy() for _ in range(8)],
             "againstTheSpread": [
                 {"name": "ATS record", "summary": "y" * 220}
                 for _ in range(8)
@@ -78,16 +78,12 @@ class LiveResearchTests(unittest.TestCase):
                 },
             }],
         }
-        # Force the bounded serializer to prune the historical sections.
-        payload["lastFiveGames"] = [
-            {"name": "Recent game", "summary": "x" * 220}
-            for _ in range(8)
-        ]
         result = json.loads(_compact_summary(payload, "2026-11-12T23:00:00+00:00"))
 
         self.assertIn("header", result)
         self.assertIn("pickcenter_markets", result)
         self.assertEqual(result["pickcenter_markets"][0]["provider"], "Verified Book")
+        self.assertIn("recent_games", result["omitted_oversized_sections"])
         self.assertLessEqual(
             len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))),
             12000,
