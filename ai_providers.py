@@ -19,6 +19,7 @@ SERVICE_NAME = "Betting Spreads"
 PROVIDER_ORDER = ("gemini", "groq", "openrouter")
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
 _CONFIGURED_PROVIDERS_CACHE: list[tuple["Provider", str]] | None = None
+_PROVIDER_USAGE: dict[str, dict[str, int]] = {}
 
 
 def reset_provider_run_state() -> None:
@@ -26,6 +27,7 @@ def reset_provider_run_state() -> None:
     global _CONFIGURED_PROVIDERS_CACHE
     _SKIP_PROVIDER_FOR_RUN.clear()
     _CONFIGURED_PROVIDERS_CACHE = None
+    _PROVIDER_USAGE.clear()
 
 
 @dataclass(frozen=True)
@@ -215,10 +217,48 @@ def _response_text(provider: Provider, result: dict[str, Any]) -> str:
     return text
 
 
+
+def get_provider_usage_stats() -> dict[str, dict[str, int]]:
+    """Return a copy of per-run provider request and token usage counters."""
+    return {name: dict(values) for name, values in _PROVIDER_USAGE.items()}
+
+
+def _record_provider_request(provider: Provider, system_prompt: str, user_prompt: str) -> None:
+    usage = _PROVIDER_USAGE.setdefault(provider.name, {
+        "requests": 0,
+        "successful_responses": 0,
+        "prompt_characters": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    })
+    usage["requests"] += 1
+    usage["prompt_characters"] += len(system_prompt) + len(user_prompt)
+
+
+def _record_provider_response(provider: Provider, result: dict[str, Any]) -> None:
+    usage = _PROVIDER_USAGE.setdefault(provider.name, {
+        "requests": 0,
+        "successful_responses": 0,
+        "prompt_characters": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+    })
+    usage["successful_responses"] += 1
+    metadata = result.get("usage") or result.get("usageMetadata") or {}
+    prompt_tokens = metadata.get("prompt_tokens", metadata.get("promptTokenCount", 0))
+    completion_tokens = metadata.get(
+        "completion_tokens", metadata.get("candidatesTokenCount", 0)
+    )
+    if isinstance(prompt_tokens, (int, float)):
+        usage["prompt_tokens"] += int(prompt_tokens)
+    if isinstance(completion_tokens, (int, float)):
+        usage["completion_tokens"] += int(completion_tokens)
+
 def _call_provider(
     provider: Provider, key: str, system_prompt: str, user_prompt: str
 ) -> dict[str, Any]:
     model = os.environ.get(f"{provider.name.upper()}_MODEL", provider.default_model)
+    _record_provider_request(provider, system_prompt, user_prompt)
     if provider.style == "gemini":
         url = provider.endpoint.format(model=urllib.parse.quote(model, safe=""))
         url += "?key=" + urllib.parse.quote(key, safe="")
@@ -260,7 +300,9 @@ def _call_provider(
             if provider.name != "openrouter" or exc.code != 400:
                 raise
             payload.pop("response_format", None)
+            _record_provider_request(provider, system_prompt, user_prompt)
             result = _request_json(provider.endpoint, payload, headers)
+    _record_provider_response(provider, result)
     return json.loads(_response_text(provider, result))
 
 
