@@ -369,6 +369,50 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(len(player_sources), 8)
         self.assertTrue(all("/gamelog?season=2026" in item["url"] for item in player_sources))
 
+
+    def test_repeated_player_log_errors_stop_extra_requests_for_the_slate(self):
+        from live_research import PLAYER_GAMELOG_FAILURE_LIMIT
+
+        reset_research_cache()
+        summary = {
+            "header": {
+                "competitions": [{
+                    "competitors": [
+                        {"team": {"id": "1", "displayName": "Away"}},
+                        {"team": {"id": "2", "displayName": "Home"}},
+                    ]
+                }]
+            }
+        }
+        roster = tuple(
+            {"id": str(i), "name": f"Player {i}", "position": pos}
+            for i, pos in enumerate(("QB", "RB", "WR", "TE"), 1)
+        )
+        with patch("live_research._get_json", return_value=summary), patch(
+            "live_research._team_roster_players",
+            side_effect=[roster, roster],
+        ), patch(
+            "live_research._player_gamelog",
+            side_effect=RuntimeError("ESPN player log unavailable"),
+        ) as get_gamelog, patch(
+            "live_research._team_statistics",
+            return_value={"team": "Team"},
+        ), patch(
+            "live_research._core_team_injuries",
+            return_value=[],
+        ):
+            result = collect_game_research({
+                "event_id": "event-1",
+                "Away Team": "Away",
+                "Home Team": "Home",
+                "away_team_id": "1",
+                "home_team_id": "2",
+            })
+
+        self.assertEqual(get_gamelog.call_count, PLAYER_GAMELOG_FAILURE_LIMIT)
+        self.assertIn("skipped after repeated ESPN player-log errors", result["research_text"])
+        reset_research_cache()
+
     def test_summary_injuries_are_retained_when_only_one_team_has_core_injuries(self):
         summary = {
             "header": {
