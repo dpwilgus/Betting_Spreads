@@ -429,7 +429,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
 
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
-    else
+    else:
         api_url = ESPN_SUMMARY.format(event_id=event_id)
         sources.insert(0, {
             "title": "ESPN matchup game page",
