@@ -463,6 +463,48 @@ def _team_roster_players(team_id: str) -> tuple[dict[str, str], ...]:
     return tuple(_extract_roster_players(_get_json(url, timeout=15)))
 
 
+@lru_cache(maxsize=32)
+def _team_depth_chart(team_id: str) -> dict[str, Any]:
+    """Fetch the team's published depth chart once per run."""
+    url = (
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+        f"teams/{team_id}/depthcharts"
+    )
+    return _get_json(url, timeout=15)
+
+
+def _extract_depth_chart_ids(payload: Any) -> dict[str, list[str]]:
+    """Return ESPN depth-chart athlete IDs ordered by listed rank."""
+    result: dict[str, list[tuple[int, str]]] = {}
+    charts = payload.get("depthCharts", []) if isinstance(payload, dict) else []
+    for chart in charts:
+        positions = chart.get("positions", {}) if isinstance(chart, dict) else {}
+        for position_data in positions.values():
+            if not isinstance(position_data, dict):
+                continue
+            position = position_data.get("position") or {}
+            abbreviation = (
+                position.get("abbreviation", "")
+                if isinstance(position, dict) else ""
+            )
+            abbreviation = str(abbreviation).upper()
+            if abbreviation not in {"QB", "RB", "WR", "TE"}:
+                continue
+            for item in position_data.get("athletes", []):
+                athlete = item.get("athlete") or {}
+                athlete_id = str(athlete.get("id") or "")
+                if athlete_id:
+                    try:
+                        rank = int(item.get("rank", 999))
+                    except (TypeError, ValueError):
+                        rank = 999
+                    result.setdefault(abbreviation, []).append((rank, athlete_id))
+    return {
+        position: [athlete_id for _, athlete_id in sorted(entries)]
+        for position, entries in result.items()
+    }
+
+
 @lru_cache(maxsize=128)
 def _player_gamelog(athlete_id: str, season: int) -> dict[str, Any]:
     """Fetch one player's current-season game log; shared across matchup sheets."""
@@ -500,10 +542,27 @@ def _compact_player_data(value: Any, depth: int = 0) -> Any:
     return str(value)[:140]
 
 
-def _select_research_players(players: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Select one listed current-roster QB, RB, WR and TE to bound API usage."""
-    limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
+def _select_research_players(
+    players: list[dict[str, str]],
+    depth_chart: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    """Select depth-chart No. 1 QB/RB/WR/TE, matching IDs to the current roster."""
+    roster_by_id = {player.get("id"): player for player in players if player.get("id")}
+    depth_ids = _extract_depth_chart_ids(depth_chart or {})
     selected = []
+    for position in ("QB", "RB", "WR", "TE"):
+        ranked_ids = depth_ids.get(position, [])
+        player = next(
+            (roster_by_id[athlete_id] for athlete_id in ranked_ids if athlete_id in roster_by_id),
+            None,
+        )
+        if player is not None:
+            selected.append(player)
+    if selected:
+        return selected
+
+    # Explicit fallback for ESPN depth-chart outages or unexpected response formats.
+    limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
     counts = {position: 0 for position in limits}
     for player in players:
         position = player.get("position", "").upper()
@@ -528,6 +587,7 @@ def reset_research_cache() -> None:
     global _player_gamelog_failures, _player_gamelogs_disabled
     _team_statistics.cache_clear()
     _team_roster_players.cache_clear()
+    _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
     _player_gamelog_failures = 0
@@ -606,7 +666,26 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             f"CURRENT ESPN ACTIVE TEAM ROSTER — {team_name}: "
                             + ", ".join(roster_names)
                         )
-                        selected_players = _select_research_players(roster_players)
+                        try:
+                            depth_chart = _team_depth_chart(team_id)
+                            depth_chart_url = (
+                                "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                                f"teams/{team_id}/depthcharts"
+                            )
+                            sources.append({
+                                "title": f"ESPN offensive depth chart — {team_name}",
+                                "url": depth_chart_url,
+                            })
+                            selected_players = _select_research_players(
+                                roster_players, depth_chart
+                            )
+                            selection_basis = "ESPN depth-chart No. 1 at position"
+                        except Exception as exc:
+                            selected_players = _select_research_players(roster_players)
+                            selection_basis = (
+                                f"roster-order fallback; depth chart unavailable "
+                                f"({type(exc).__name__})"
+                            )
                         player_records = []
                         for player in selected_players:
                             global _player_gamelog_failures, _player_gamelogs_disabled
@@ -647,7 +726,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         if player_records:
                             player_stat_sections.append(
                                 f"ESPN CURRENT-SEASON PLAYER GAME LOGS — {team_name} "
-                                f"(retrieved {retrieved_at}; regular season): "
+                                f"(selected by {selection_basis}; retrieved {retrieved_at}; regular season): "
                                 + json.dumps(
                                     player_records,
                                     ensure_ascii=False,
