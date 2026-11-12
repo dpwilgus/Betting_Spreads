@@ -4,7 +4,8 @@ import urllib.error
 from unittest.mock import patch
 
 from ai_analysis import _validate_analysis
-from ai_providers import Provider, _call_provider, _response_text, generate_json, reset_provider_run_state
+from ai_providers import (Provider, _call_provider, _response_text, generate_json,
+                          get_provider_usage_stats, reset_provider_run_state)
 from live_research import collect_game_research
 
 
@@ -247,6 +248,25 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(payload["max_completion_tokens"], 4096)
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
+
+    def test_provider_usage_tracks_requests_and_reported_tokens(self):
+        provider = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        response = {
+            "choices": [{"message": {"content": "{\\"ok\\": true}"}}],
+            "usage": {"prompt_tokens": 123, "completion_tokens": 45},
+        }
+
+        reset_provider_run_state()
+        with patch("ai_providers._request_json", return_value=response):
+            result = _call_provider(provider, "test-key", "system prompt", "user prompt")
+
+        stats = get_provider_usage_stats()["groq"]
+        self.assertTrue(result["ok"])
+        self.assertEqual(stats["requests"], 1)
+        self.assertEqual(stats["successful_responses"], 1)
+        self.assertEqual(stats["prompt_characters"], len("system promptuser prompt"))
+        self.assertEqual(stats["prompt_tokens"], 123)
+        self.assertEqual(stats["completion_tokens"], 45)
 
     def test_provider_credentials_are_cached_for_one_run(self):
         provider = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
