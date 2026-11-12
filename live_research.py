@@ -375,6 +375,12 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
     )
     return _compact_team_stats(_get_json(endpoint_url, timeout=15))
 
+
+def reset_research_cache() -> None:
+    """Clear per-slate ESPN caches so a later run never reuses stale data."""
+    _team_statistics.cache_clear()
+    _core_team_injuries.cache_clear()
+
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     event_id = str(game.get("event_id", "")).strip()
     retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
