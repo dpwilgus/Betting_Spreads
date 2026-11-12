@@ -177,6 +177,8 @@ class LiveResearchTests(unittest.TestCase):
             "live_research._team_statistics",
             side_effect=[{"team": "Away"}, {"team": "Home"}],
         ), patch(
+            "live_research._team_roster_players", return_value=tuple()
+        ), patch(
             "live_research._core_team_injuries",
             side_effect=[
                 [{"player": "Away Player", "status": "Out"}],
@@ -240,13 +242,78 @@ class LiveResearchTests(unittest.TestCase):
             _team_statistics("123")
             _core_team_injuries("123")
 
+        from live_research import _player_gamelog, _team_roster_players
+
         self.assertEqual(_team_statistics.cache_info().currsize, 1)
         self.assertEqual(_core_team_injuries.cache_info().currsize, 1)
 
         reset_research_cache()
 
         self.assertEqual(_team_statistics.cache_info().currsize, 0)
+        self.assertEqual(_team_roster_players.cache_info().currsize, 0)
+        self.assertEqual(_player_gamelog.cache_info().currsize, 0)
         self.assertEqual(_core_team_injuries.cache_info().currsize, 0)
+
+
+    def test_roster_player_extractor_keeps_ids_and_inherited_positions(self):
+        from live_research import _extract_roster_players
+
+        players = _extract_roster_players({
+            "athletes": [{
+                "position": {"abbreviation": "WR"},
+                "items": [
+                    {"id": "101", "fullName": "Receiver One"},
+                    {"id": "102", "displayName": "Receiver Two"},
+                ],
+            }, {
+                "position": {"abbreviation": "QB"},
+                "items": [{"id": "201", "fullName": "Quarterback One"}],
+            }],
+        })
+
+        self.assertEqual(
+            players,
+            [
+                {"id": "101", "name": "Receiver One", "position": "WR"},
+                {"id": "102", "name": "Receiver Two", "position": "WR"},
+                {"id": "201", "name": "Quarterback One", "position": "QB"},
+            ],
+        )
+
+    def test_player_gamelog_is_compacted_and_cached(self):
+        from live_research import _player_gamelog
+
+        _player_gamelog.cache_clear()
+        payload = {
+            "labels": ["OPP", "PASS YDS", "RUSH YDS"],
+            "events": [{"name": f"Week {week}", "stats": [250, 12]} for week in range(10)],
+            "news": [{"headline": "Discarded"}],
+        }
+        with patch("live_research._get_json", return_value=payload) as get_json:
+            first = _player_gamelog("12345", 2026)
+            second = _player_gamelog("12345", 2026)
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(first["events"]), 6)
+        self.assertNotIn("news", first)
+        get_json.assert_called_once()
+        _player_gamelog.cache_clear()
+
+    def test_select_research_players_limits_to_skill_position_leaders(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id": "1", "name": "QB", "position": "QB"},
+            {"id": "2", "name": "RB1", "position": "RB"},
+            {"id": "3", "name": "RB2", "position": "RB"},
+            {"id": "4", "name": "WR", "position": "WR"},
+            {"id": "5", "name": "TE", "position": "TE"},
+            {"id": "6", "name": "K", "position": "K"},
+        ]
+        self.assertEqual(
+            [player["name"] for player in _select_research_players(roster)],
+            ["QB", "RB1", "WR", "TE"],
+        )
 
     def test_summary_injuries_are_retained_when_only_one_team_has_core_injuries(self):
         summary = {
@@ -276,6 +343,8 @@ class LiveResearchTests(unittest.TestCase):
                 {"results": {"stats": {"displayName": "Away", "categories": []}}},
                 {"results": {"stats": {"displayName": "Home", "categories": []}}},
             ],
+        ), patch(
+            "live_research._team_roster_players", return_value=tuple()
         ), patch(
             "live_research._core_team_injuries",
             side_effect=[core_injury, []],
