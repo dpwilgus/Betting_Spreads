@@ -110,6 +110,34 @@ class LiveResearchTests(unittest.TestCase):
 
         _core_team_injuries.cache_clear()
 
+    def test_team_statistics_are_cached_across_matchups(self):
+        from live_research import _team_statistics
+
+        _team_statistics.cache_clear()
+        payload = {
+            "results": {
+                "stats": {
+                    "displayName": "Example Team",
+                    "categories": [{
+                        "name": "passing",
+                        "stats": [{
+                            "name": "passingYardsPerGame",
+                            "displayValue": "240",
+                        }],
+                    }],
+                }
+            }
+        }
+
+        with patch("live_research._get_json", return_value=payload) as get_json:
+            first = _team_statistics("123")
+            second = _team_statistics("123")
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["team"], "Example Team")
+        get_json.assert_called_once()
+        _team_statistics.cache_clear()
+
     def test_summary_injuries_are_retained_when_only_one_team_has_core_injuries(self):
         summary = {
             "header": {
