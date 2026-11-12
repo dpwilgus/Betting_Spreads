@@ -8,6 +8,32 @@ from typing import Any
 from ai_providers import generate_json
 from live_research import collect_game_research
 
+MAX_RESEARCH_PROMPT_CHARS = 24000
+
+
+def _bounded_research_text(research_text: str) -> tuple[str, bool]:
+    """Keep complete, priority-ordered research sections within the prompt budget."""
+    text = str(research_text or "")
+    if len(text) <= MAX_RESEARCH_PROMPT_CHARS:
+        return text, False
+
+    kept: list[str] = []
+    used = 0
+    for section in text.split("\\n\\n"):
+        separator = 2 if kept else 0
+        remaining = MAX_RESEARCH_PROMPT_CHARS - used - separator
+        if len(section) > remaining:
+            break
+        kept.append(section)
+        used += separator + len(section)
+
+    marker = "[Research truncated at a section boundary to preserve complete evidence.]"
+    while kept and used + 2 + len(marker) > MAX_RESEARCH_PROMPT_CHARS:
+        removed = kept.pop()
+        used -= len(removed) + (2 if kept else 0)
+    if not kept:
+        return marker[:MAX_RESEARCH_PROMPT_CHARS], True
+    return "\\n\\n".join(kept) + "\\n\\n" + marker, True
 ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -156,6 +182,10 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         + (base / "PROBABILITY_REVIEW.md").read_text(encoding="utf-8")
     )
     matchup = f"{game['Away Team']} at {game['Home Team']}"
+    prompt_research, research_truncated = _bounded_research_text(
+        research.get("research_text", "No independent research was available.")
+    )
+
     user_input = (
         f"Analyze this upcoming NFL matchup: {matchup}.\n"
         f"Kickoff: {game.get('Game Date (ET)', 'Not supplied')}.\n"
@@ -181,7 +211,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "statistical_effect, prop_market, evidence, confidence (integer 1-10), "
         "conditions. Include every listed field; use empty arrays when appropriate.\n"
         "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n"
-        + str(research.get("research_text", "No independent research was available."))[:24000]
+        + prompt_research
     )
 
     data, provider_name = generate_json(instructions, user_input, validator=_validate_analysis)
@@ -189,4 +219,6 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
     data["research_mode"] = "independent_espn_plus_ai"
+    data["research_truncated_for_prompt"] = research_truncated
+    data["research_prompt_characters"] = len(prompt_research)
     return data
