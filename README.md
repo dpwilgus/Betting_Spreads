@@ -42,7 +42,7 @@ You can also configure environment variables before launching:
 - `OPENROUTER_API_KEY`
 - `OPENAI_API_KEY` (optional; paid)
 
-The default fallback order is Gemini → Groq → OpenRouter → OpenAI. Override it with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, and `OPENAI_MODEL`.
+The default free-provider order is Gemini → Groq → OpenRouter. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, and `OPENAI_MODEL`.
 
 ### NVIDIA NIM
 
