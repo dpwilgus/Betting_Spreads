@@ -18,11 +18,14 @@ import keyring
 SERVICE_NAME = "Betting Spreads"
 PROVIDER_ORDER = ("gemini", "groq", "openrouter")
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
+_CONFIGURED_PROVIDERS_CACHE: list[tuple["Provider", str]] | None = None
 
 
 def reset_provider_run_state() -> None:
     """Allow all configured providers to be tried in a new analysis run."""
+    global _CONFIGURED_PROVIDERS_CACHE
     _SKIP_PROVIDER_FOR_RUN.clear()
+    _CONFIGURED_PROVIDERS_CACHE = None
 
 
 @dataclass(frozen=True)
@@ -147,7 +150,11 @@ def _configure_keys() -> None:
 
 
 def ensure_configured() -> list[tuple[Provider, str]]:
-    """Return configured providers, reading saved credentials only once."""
+    """Return providers with credentials cached for the current analysis run."""
+    global _CONFIGURED_PROVIDERS_CACHE
+    if _CONFIGURED_PROVIDERS_CACHE is not None:
+        return list(_CONFIGURED_PROVIDERS_CACHE)
+
     configured = _configured_providers()
     if not configured:
         _configure_keys()
@@ -157,7 +164,8 @@ def ensure_configured() -> list[tuple[Provider, str]]:
             "No AI API keys are configured. Set GEMINI_API_KEY, GROQ_API_KEY, "
             "or OPENROUTER_API_KEY, then restart the app."
         )
-    return configured
+    _CONFIGURED_PROVIDERS_CACHE = list(configured)
+    return list(_CONFIGURED_PROVIDERS_CACHE)
 
 def _configured_providers() -> list[tuple[Provider, str]]:
     configured = []
