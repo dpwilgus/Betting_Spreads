@@ -580,8 +580,8 @@ def main() -> int:
                     f"{stats['completion_tokens']:,} output tokens"
                 )
             usage_lines.append(usage_line)
-        usage_report = "\\n".join(usage_lines) or "No AI provider requests were made."
-        message += f"\\n\\nProvider API usage:\\n{usage_report}"
+        usage_report = "\n".join(usage_lines) or "No AI provider requests were made."
+        message += f"\n\nProvider API usage:\n{usage_report}"
         if failures:
             message += f"\n\n{len(failures)} matchup analyses failed. See Betting_Spreads.log."
         log_path.write_text(message + ("\n\n" + "\n".join(failures) if failures else "") + "\n", encoding="utf-8")
