@@ -166,9 +166,21 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "not claim to have browsed or verified anything that is not in the supplied evidence. "
         "If a current prop line is not in the evidence, label it Not verified. Never fabricate "
         "injuries, player statistics, market prices, sources, or source timestamps.\n\n"
-        "Return JSON matching this structure exactly (no Markdown):\n"
-        + json.dumps(ANALYSIS_SCHEMA, ensure_ascii=False)
-        + "\n\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n"
+        "Return one JSON object only, with exactly these top-level keys: "
+        "summary (string), game_script (string), picks (array of exactly 5), "
+        "touchdown_scorers (array of exactly 3), injury_impact (array), "
+        "data_gaps (array of strings). Each pick object must contain: rank (integer), "
+        "market_type (Player Prop or Game Prop), player_or_team, bet_description, "
+        "market_line, play_threshold, estimated_hit_probability (number 0-100), "
+        "confidence (integer 1-10), statistical_rationale, risk_factors, "
+        "data_quality (Strong, Moderate, or Limited). Each touchdown_scorer must "
+        "contain: rank, player, team, estimated_td_probability (number 0-100), "
+        "confidence (integer 1-10), rationale, risk_factors. Each injury_impact "
+        "must contain: injured_player, team, availability, affected_player, "
+        "affected_team, impact_direction (Positive, Negative, or Mixed), "
+        "statistical_effect, prop_market, evidence, confidence (integer 1-10), "
+        "conditions. Include every listed field; use empty arrays when appropriate.\n"
+        "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n"
         + str(research.get("research_text", "No independent research was available."))[:24000]
     )
 
