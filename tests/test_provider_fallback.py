@@ -312,6 +312,7 @@ class ProviderFallbackTests(unittest.TestCase):
             "ai_providers._call_provider",
             side_effect=[
                 {"valid": False},
+                {"valid": False},
                 {"valid": True, "summary": "accepted"},
             ],
         ) as call:
@@ -319,7 +320,7 @@ class ProviderFallbackTests(unittest.TestCase):
 
         self.assertEqual(result["summary"], "accepted")
         self.assertEqual(provider, "groq")
-        self.assertEqual(call.call_count, 2)
+        self.assertEqual(call.call_count, 3)
 
 
     def test_groq_gpt_oss_uses_supported_reasoning_parameter(self):
