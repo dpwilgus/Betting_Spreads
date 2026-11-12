@@ -381,7 +381,7 @@ class ProviderFallbackTests(unittest.TestCase):
             result = analyze_game(game, research=research)
 
         system_prompt, user_prompt = generate.call_args.args[:2]
-        self.assertIn("exactly five ranked betting opportunities", system_prompt)
+        self.assertIn("up to five ranked betting opportunities", system_prompt)
         self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
         self.assertIn("statistical_rationale", user_prompt)
         self.assertIn("touchdown_scorers", user_prompt)
