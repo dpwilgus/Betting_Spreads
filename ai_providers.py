@@ -310,7 +310,7 @@ def generate_json(
     system_prompt: str, user_prompt: str,
     validator: Callable[[dict[str, Any]], None] | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Try configured providers in order; retry transient failures once, then fall back."""
+    """Try configured providers in order; retry transient failures with bounded waits, then fall back."""
     configured = [
         item for item in ensure_configured()
         if item[0].name not in _SKIP_PROVIDER_FOR_RUN
