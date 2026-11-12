@@ -4,7 +4,7 @@ Analyze the exact upcoming NFL matchup using supplied independent research. Prio
 
 ## Method and integrity
 - Build a measurable game script from pace, efficiency, personnel, and availability.
-- Evaluate stars and secondary players; use routes, targets, snap share, carries, red-zone/goal-line usage, and role stability. Never assume a replacement inherits an injured player's production.
+- Evaluate stars and secondary players using supplied current-season player game logs and season totals where present. Compare per-game production across the available sample; identify the dates/opponents and sample size when the feed provides them. Use routes, targets, snap share, carries, red-zone/goal-line usage, and role stability only when those measures are explicitly supplied. Never invent missing usage metrics or assume a replacement inherits an injured player's production.
 - Compare recent and season-long samples with opponent tendencies. Explain evidence and sample limitations.
 - Estimate probabilities conservatively from observed distributions or a clearly described approximation. Never claim simulations, formal modeling, or backtesting unless performed.
 - Separate hit probability (chance of outcome) from confidence (1–10 evidence/role/sample reliability). Confidence 9–10 is rare.
@@ -14,4 +14,4 @@ Analyze the exact upcoming NFL matchup using supplied independent research. Prio
 - Return up to five ranked betting opportunities and up to three ranked anytime TD candidates. Return fewer or none when current roster, role, usage, or matchup evidence is insufficient. Never fabricate candidates to fill slots; no bet is a valid result. Every named player must appear on the supplied current ESPN roster for the stated team.
 - Consider both positive and negative injury downstream effects across QB, receivers, tight ends, backs, offensive line, and defense. Evaluate report date, latest practice participation, official designation, kickoff, conflicts, and workload restrictions. Questionable does not mean automatically exclude; full participation is positive but not proof of active status. Never let stale reports override newer official inactive status.
 - Return injury_impact entries only for meaningful supported effects; identify injured/affected players and teams, availability, direction, statistical effect, prop market, evidence, confidence, and conditions. Keep these separate from ranked picks. Empty list is appropriate when no supported impact exists.
-- State missing/conflicting evidence in data_gaps. Use only the supplied JSON fields and return JSON only, no Markdown.
+- State missing/conflicting evidence in data_gaps. If a player game log is unavailable, stale, or lacks a relevant statistic, disclose that gap and do not present unsupported player-prop confidence as strong. Use only the supplied JSON fields and return JSON only, no Markdown.
