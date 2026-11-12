@@ -494,6 +494,13 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     roster_names = _team_roster(team_id)
                     if roster_names:
                         rosters[team_name] = roster_names
+                        sources.append({
+                            "title": f"ESPN current roster — {team_name}",
+                            "url": (
+                                "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                                f"teams/{team_id}/roster"
+                            ),
+                        })
                         sections.append(
                             f"CURRENT ESPN ACTIVE TEAM ROSTER — {team_name}: "
                             + ", ".join(roster_names)
