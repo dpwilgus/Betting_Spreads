@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from live_research import (
     _compact_pickcenter,
+    _compact_summary,
     _compact_team_stats,
     _compact_tree,
     _core_team_injuries,
@@ -49,6 +50,48 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(result[0]["spread"]["away"]["open"]["line"], -3.5)
         self.assertEqual(result[0]["spread"]["away"]["close"]["line"], -4)
         self.assertEqual(result[0]["retrieved_at_utc"], "2026-11-12T04:00:00+00:00")
+
+    def test_summary_drops_oversized_historical_sections_before_market_data(self):
+        payload = {
+            "header": {
+                "id": "event-1",
+                "competitions": [{
+                    "date": "2026-11-15T18:00Z",
+                    "competitors": [
+                        {"team": {"id": "1", "displayName": "Away"}},
+                        {"team": {"id": "2", "displayName": "Home"}},
+                    ],
+                }],
+            },
+            "lastFiveGames": [
+                {"name": "Recent game", "summary": "x" * 220}
+                for _ in range(8)
+            ],
+            "againstTheSpread": [
+                {"name": "ATS record", "summary": "y" * 220}
+                for _ in range(8)
+            ],
+            "pickcenter": [{
+                "provider": {"name": "Verified Book"},
+                "pointSpread": {
+                    "away": {"close": {"line": -3.5, "odds": -110}}
+                },
+            }],
+        }
+        # Force the bounded serializer to prune the historical sections.
+        payload["lastFiveGames"] = [
+            {"name": "Recent game", "summary": "x" * 220}
+            for _ in range(8)
+        ]
+        result = json.loads(_compact_summary(payload, "2026-11-12T23:00:00+00:00"))
+
+        self.assertIn("header", result)
+        self.assertIn("pickcenter_markets", result)
+        self.assertEqual(result["pickcenter_markets"][0]["provider"], "Verified Book")
+        self.assertLessEqual(
+            len(json.dumps(result, ensure_ascii=False, separators=(",", ":"))),
+            12000,
+        )
 
     def test_team_stats_keep_relevant_current_season_fields(self):
         result = _compact_team_stats({
