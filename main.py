@@ -166,11 +166,19 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         sheet["A3"].font = Font(italic=True, color="9C6500")
     else:
         provider = analysis.get("ai_provider", "Unknown provider")
+        research_truncated = analysis.get("research_truncated_for_prompt")
+        research_chars = analysis.get("research_prompt_characters")
+        if research_truncated is True:
+            prompt_status = f"TRUNCATED ({research_chars:,} chars)" if isinstance(research_chars, int) else "TRUNCATED"
+        elif research_truncated is False:
+            prompt_status = f"complete ({research_chars:,} chars)" if isinstance(research_chars, int) else "complete"
+        else:
+            prompt_status = "not recorded"
         sheet["A3"] = (
             f"AI provider: {provider} | Research: {analysis.get('research_mode', 'Not recorded')} "
-            "| Live sources are listed at the bottom of this sheet."
+            f"| AI research prompt: {prompt_status} | Live sources are listed at the bottom of this sheet."
         )
-        sheet["A3"].font = Font(italic=True, color="526579")
+        sheet["A3"].font = Font(italic=True, color="9C6500" if research_truncated is True else "526579")
     sheet["A3"].alignment = Alignment(wrap_text=True)
 
     sheet["A4"] = "MATCHUP SUMMARY"
