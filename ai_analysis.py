@@ -380,7 +380,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "If a current prop line is not in the evidence, label it Not verified. Never fabricate "
         "injuries, player statistics, market prices, sources, or source timestamps.\n\n"
         "Return one JSON object only, with exactly these top-level keys: "
-        summary (string), game_script (string), picks (array), 
+        "summary (string), game_script (string), picks (array), "
         "touchdown_scorers (array of up to 3), injury_impact (array), "
         "data_gaps (array of strings). Each pick object must contain: rank (integer), "
         "market_type (Player Prop or Game Prop), player_or_team, bet_description, "
@@ -438,6 +438,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     if injury_gaps:
         existing_gaps = data.setdefault("data_gaps", [])
         existing_gaps.extend(injury_gaps[:max(0, 6 - len(existing_gaps))])
+    for rank, scorer in enumerate(data.get("touchdown_scorers", []), 1):
+        scorer["rank"] = rank
     picks, removed_correlated = _deduplicate_correlated_game_picks(
         data.get("picks", []), team_names
     )
