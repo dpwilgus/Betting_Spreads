@@ -201,41 +201,55 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.row_dimensions[9].height = 40
     sheet.row_dimensions[10].height = 25
 
-    sheet["A12"] = "TOP BETTING OPPORTUNITIES"
-    sheet["A12"].font = white_bold
-    sheet["A12"].fill = navy
-    sheet.merge_cells("A12:J12")
     headers = [
-        "Rank", "Type", "Player / Team", "Recommended Bet", "Verified Market Line",
+        "Rank", "Player / Team", "Recommended Bet", "Verified Market Line",
         "Model Play Threshold", "Estimated Hit Probability", "Confidence (1–10)",
-        "Statistical Rationale", "Risk Factors",
+        "Statistical Rationale", "Risk Factors", "Data Quality",
     ]
-    for col, value in enumerate(headers, 1):
-        cell = sheet.cell(row=13, column=col, value=value)
-        _style_header(cell)
     picks = analysis.get("picks", [])
-    if not picks:
-        sheet.merge_cells("A14:J14")
-        sheet["A14"] = "No bets met the analyst's evidence threshold for this matchup."
-        sheet["A14"].alignment = Alignment(wrap_text=True)
-    for row_num, pick in enumerate(picks, 14):
-        values = [
-            pick.get("rank", row_num - 13), pick.get("market_type", ""),
-            pick.get("player_or_team", ""), pick.get("bet_description", ""),
-            pick.get("market_line", "Not verified"), pick.get("play_threshold", ""),
-            f"{pick.get('estimated_hit_probability', 0):.1f}%",
-            pick.get("confidence", ""), pick.get("statistical_rationale", ""),
-            pick.get("risk_factors", ""),
-        ]
-        for col, value in enumerate(values, 1):
-            cell = sheet.cell(row=row_num, column=col, value=value)
-            cell.alignment = Alignment(wrap_text=True, vertical="top")
-            cell.border = Border(bottom=thin_gray)
-            if row_num % 2 == 0:
-                cell.fill = light
-        sheet.row_dimensions[row_num].height = 82
+    player_props = [pick for pick in picks if pick.get("market_type") == "Player Prop"]
+    game_picks = [pick for pick in picks if pick.get("market_type") == "Game Prop"]
 
-    td_start = max(16, 14 + len(picks) + 2)
+    def write_pick_section(start_row, title, items, empty_message):
+        sheet.cell(start_row, 1, title)
+        sheet.cell(start_row, 1).font = white_bold
+        sheet.cell(start_row, 1).fill = navy
+        sheet.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=10)
+        for col, value in enumerate(headers, 1):
+            _style_header(sheet.cell(start_row + 1, col, value))
+        if not items:
+            sheet.merge_cells(start_row=start_row + 2, start_column=1, end_row=start_row + 2, end_column=10)
+            sheet.cell(start_row + 2, 1, empty_message)
+            sheet.cell(start_row + 2, 1).alignment = Alignment(wrap_text=True)
+            return start_row + 4
+        for offset, pick in enumerate(items):
+            row_num = start_row + 2 + offset
+            values = [
+                offset + 1, pick.get("player_or_team", ""),
+                pick.get("bet_description", ""), pick.get("market_line", "Not verified"),
+                pick.get("play_threshold", ""),
+                f"{pick.get('estimated_hit_probability', 0):.1f}%",
+                pick.get("confidence", ""), pick.get("statistical_rationale", ""),
+                pick.get("risk_factors", ""), pick.get("data_quality", ""),
+            ]
+            for col, value in enumerate(values, 1):
+                cell = sheet.cell(row=row_num, column=col, value=value)
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell.border = Border(bottom=thin_gray)
+                if row_num % 2 == 0:
+                    cell.fill = light
+            sheet.row_dimensions[row_num].height = 82
+        return start_row + len(items) + 3
+
+    next_pick_row = write_pick_section(
+        12, "TOP PLAYER PROPS (TARGET: 5; AIM FOR AT LEAST 3)", player_props,
+        "No player props met the evidence threshold for this matchup."
+    )
+    next_pick_row = write_pick_section(
+        next_pick_row, "GAME-LEVEL BETS", game_picks,
+        "No game-level bets met the evidence threshold for this matchup."
+    )
+    td_start = max(16, next_pick_row + 1)
     sheet.cell(td_start, 1, "ANYTIME TOUCHDOWN SCORERS")
     sheet.cell(td_start, 1).font = white_bold
     sheet.cell(td_start, 1).fill = navy
@@ -577,9 +591,9 @@ def main() -> int:
                         is_complete = (
                             cached is not None
                             and isinstance(cached.get("picks"), list)
-                            and len(cached["picks"]) <= 5
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
+                            and cached.get("analysis_version") == 2
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
