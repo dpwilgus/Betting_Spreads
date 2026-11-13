@@ -93,8 +93,8 @@ def _configure_keys() -> None:
         from tkinter import messagebox
     except Exception as exc:
         raise RuntimeError(
-            "No AI API keys are configured. Set GEMINI_API_KEY, GROQ_API_KEY, "
-            "or OPENROUTER_API_KEY, then restart the app."
+            "No AI API keys are configured for the selected providers. Set the relevant "
+            "provider key (for example NVIDIA_API_KEY) and AI_PROVIDER_ORDER, then restart."
         ) from exc
 
     root = tk.Tk()
