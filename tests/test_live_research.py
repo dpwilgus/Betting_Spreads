@@ -678,5 +678,33 @@ class LiveResearchTests(unittest.TestCase):
         _core_team_injuries.cache_clear()
 
 
+    def test_select_research_players_fills_secondary_roles_from_roster(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"1","name":"QB","position":"QB"},
+            {"id":"2","name":"RB One","position":"RB"},
+            {"id":"3","name":"RB Two","position":"RB"},
+            {"id":"4","name":"WR One","position":"WR"},
+            {"id":"5","name":"WR Two","position":"WR"},
+            {"id":"6","name":"TE","position":"TE"},
+        ]
+        depth = {
+            "depthCharts":[{
+                "positions":{
+                    "QB":{"position":{"abbreviation":"QB"},"athletes":[{"rank":1,"athlete":{"id":"1"}}]},
+                    "RB":{"position":{"abbreviation":"RB"},"athletes":[{"rank":1,"athlete":{"id":"2"}}]},
+                    "WR":{"position":{"abbreviation":"WR"},"athletes":[{"rank":1,"athlete":{"id":"4"}}]},
+                    "TE":{"position":{"abbreviation":"TE"},"athletes":[{"rank":1,"athlete":{"id":"6"}}]},
+                }
+            }]
+        }
+        selected = _select_research_players(roster, depth)
+        self.assertEqual(
+            [player["name"] for player in selected],
+            ["QB","RB One","RB Two","WR One","WR Two","TE"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
