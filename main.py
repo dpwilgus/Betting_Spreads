@@ -593,7 +593,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 2
+                            and cached.get("analysis_version") == 3
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
