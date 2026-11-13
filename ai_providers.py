@@ -171,8 +171,8 @@ def ensure_configured() -> list[tuple[Provider, str]]:
         configured = _configured_providers()
     if not configured:
         raise RuntimeError(
-            "No AI API keys are configured. Set GEMINI_API_KEY, GROQ_API_KEY, "
-            "or OPENROUTER_API_KEY, then restart the app."
+            "No AI API keys are configured for the selected providers. Set the relevant "
+            "provider key (for example NVIDIA_API_KEY) and AI_PROVIDER_ORDER, then restart."
         )
     _CONFIGURED_PROVIDERS_CACHE = list(configured)
     return list(_CONFIGURED_PROVIDERS_CACHE)
