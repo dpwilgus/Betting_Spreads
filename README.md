@@ -127,6 +127,13 @@ For local testing only, the Python script supports a cache-only workbook refresh
 
 Use `python main.py --refresh-incomplete` to reuse cached analyses that already contain exactly five prop ideas and three touchdown candidates, while making API calls only for missing or incomplete cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
 
+Run a focused analysis for one game without spending AI calls on the rest of the slate:
+
+```bash
+AI_PROVIDER_ORDER=nvidia python main.py --matchup "Patriots at Lions"
+```
+
+
 The first run for a new slate may require API usage for games that have no cache entry. Existing workbooks created before caching do not automatically contain the structured cache. These options are intended for developers and are not exposed in the packaged end-user app.
 
 ```bash
