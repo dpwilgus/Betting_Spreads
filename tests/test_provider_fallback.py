@@ -526,11 +526,7 @@ class ProviderFallbackTests(unittest.TestCase):
 
 
     def test_player_props_are_rejected_when_threshold_conflicts_with_espn_stats(self):
-        research = """ESPN CURRENT-SEASON PLAYER GAME LOGS — Team (retrieved 2026-11-13): [
-          {"player":"Josh Jacobs","position":"RB","usage_and_recent_stats":{
-            "games_available":9,"season":{"rushingYards":80,"rushingAttempts":36},
-            "recent":[{"stats":{"rushingYards":3}},{"stats":{"rushingYards":-1}}]}}
-        ]"""
+        research = """ESPN CURRENT-SEASON PLAYER GAME LOGS — Team (retrieved 2026-11-13): [{"player":"Josh Jacobs","position":"RB","usage_and_recent_stats":{"games_available":9,"season":{"rushingYards":80,"rushingAttempts":36},"recent":[{"stats":{"rushingYards":3}},{"stats":{"rushingYards":-1}}]}}]"""
         usage = _research_player_usage(research)
         data = {"picks":[{
             "market_type":"Player Prop","player_or_team":"Josh Jacobs",
