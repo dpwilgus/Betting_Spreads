@@ -44,9 +44,31 @@ You can also configure environment variables before launching:
 
 The default free-provider order is Gemini → Groq → OpenRouter. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, and `OPENAI_MODEL`.
 
-### NVIDIA NIM
+### NVIDIA NIM (experimental, local development only)
 
-NVIDIA NIM is not currently included as a production provider. NVIDIA's Developer Program NIM access is for prototyping, research, development, and testing; NVIDIA says serving real end users requires an NVIDIA AI Enterprise license. See [NVIDIA's NIM FAQ](https://docs.api.nvidia.com/nim/docs/product). We may add NIM back as a clearly labeled local-development option if useful.
+NVIDIA NIM is available as an **opt-in experimental provider** for personal development and testing. It is deliberately excluded from the default Gemini → Groq → OpenRouter provider order.
+
+- Default model: `nvidia/nemotron-3-ultra-550b-a55b`
+- Alternative model: `nvidia/nemotron-3.5-lightning-30b-a3b`
+- API endpoint: `https://integrate.api.nvidia.com/v1/chat/completions`
+- Credential: `NVIDIA_API_KEY` (stored in macOS Keychain / Windows Credential Manager as `nvidia_api_key`)
+- Optional settings: `NVIDIA_MODEL` and `NVIDIA_MAX_TOKENS` (default 2600)
+
+To run a local development test using NVIDIA only, set the provider order in the same Terminal session before launching:
+
+```bash
+AI_PROVIDER_ORDER=nvidia python main.py
+```
+
+To compare NVIDIA first and then fall back to the existing free providers:
+
+```bash
+AI_PROVIDER_ORDER=nvidia,gemini,groq,openrouter python main.py
+```
+
+The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endpoint does not guarantee JSON-mode enforcement. The app therefore asks for strict JSON in its prompt and still validates the returned analysis. Invalid responses may trigger retries and fallback. Check the NVIDIA account dashboard for current per-model limits and availability.
+
+**Development/testing only:** NVIDIA says hosted Developer Program endpoints are for prototyping, research, development, and testing—not serving real end users. NVIDIA's free endpoint rate limits vary by model and current traffic, and are not an unlimited token allocation. See [NVIDIA NIM FAQ](https://docs.api.nvidia.com/nim/docs/product), [LLM API reference](https://docs.api.nvidia.com/nim/reference/llm-apis), and [Nemotron 3 Ultra model card](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard).
 
 ## How to use
 
