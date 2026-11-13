@@ -377,7 +377,7 @@ class LiveResearchTests(unittest.TestCase):
         ]
         self.assertEqual(
             [player["name"] for player in _select_research_players(roster)],
-            ["QB", "RB1", "WR", "TE"],
+            ["QB", "RB1", "RB2", "WR", "TE"],
         )
 
 
