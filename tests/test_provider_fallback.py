@@ -172,6 +172,51 @@ class ProviderFallbackTests(unittest.TestCase):
         })
         self.assertEqual(result, '{"ok": true}')
 
+    def test_nvidia_is_not_in_default_provider_order(self):
+        from ai_providers import PROVIDER_ORDER
+        self.assertNotIn("nvidia", PROVIDER_ORDER)
+
+    def test_nvidia_is_only_configured_when_explicitly_selected(self):
+        from ai_providers import _configured_providers
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "gemini,groq,openrouter"}, clear=False), patch(
+            "ai_providers._saved_key", return_value="test-key"
+        ):
+            providers = _configured_providers()
+        self.assertNotIn("nvidia", [provider.name for provider, _ in providers])
+
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "nvidia"}, clear=False), patch(
+            "ai_providers._saved_key", return_value="test-key"
+        ):
+            providers = _configured_providers()
+        self.assertEqual([provider.name for provider, _ in providers], ["nvidia"])
+
+    def test_nvidia_request_uses_hosted_nim_compatible_payload(self):
+        provider = Provider(
+            "nvidia", "NVIDIA_API_KEY", "nvidia_api_key",
+            "https://integrate.api.nvidia.com/v1/chat/completions",
+            "nvidia/nemotron-3-ultra-550b-a55b", "openai",
+        )
+        response = {
+            "choices": [{"message": {"content": '{"summary":"ok"}'}}],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 8},
+        }
+        with patch("ai_providers._request_json", return_value=response) as request, patch.dict(
+            "os.environ", {
+                "NVIDIA_MODEL": "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "NVIDIA_MAX_TOKENS": "1800",
+            }
+        ):
+            result = _call_provider(provider, "nvidia-test-key", "system", "user")
+        args = request.call_args
+        self.assertEqual(args.args[0], provider.endpoint)
+        self.assertEqual(args.args[2]["Authorization"], "Bearer nvidia-test-key")
+        payload = args.args[1]
+        self.assertEqual(payload["model"], "nvidia/nemotron-3.5-lightning-30b-a3b")
+        self.assertEqual(payload["max_tokens"], 1800)
+        self.assertNotIn("max_completion_tokens", payload)
+        self.assertNotIn("response_format", payload)
+        self.assertEqual(result, {"summary": "ok"})
+
     def test_analysis_schema_validation(self):
         _validate_analysis(valid_analysis())
 
