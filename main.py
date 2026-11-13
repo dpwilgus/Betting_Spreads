@@ -490,6 +490,29 @@ def _load_cached_analysis(game: dict) -> dict:
     return analysis
 
 
+
+def filter_requested_matchup(games: list[dict], arguments: list[str]) -> list[dict]:
+    """Optionally limit an update to one named matchup for focused testing."""
+    if "--matchup" not in arguments:
+        return games
+    index = arguments.index("--matchup")
+    if index + 1 >= len(arguments) or arguments[index + 1].startswith("--"):
+        raise ValueError('Use --matchup "Away Team at Home Team" to select one game.')
+    requested = arguments[index + 1].strip().casefold()
+    matches = [
+        game for game in games
+        if requested in f"{game['Away Team']} at {game['Home Team']}".casefold()
+    ]
+    if not matches:
+        available = ", ".join(
+            f"{game['Away Team']} at {game['Home Team']}" for game in games
+        )
+        raise ValueError(
+            f"No matchup matched {arguments[index + 1]!r}. Available games: {available}"
+        )
+    return matches
+
+
 def main() -> int:
     reset_provider_run_state()
     reset_research_cache()
@@ -499,6 +522,7 @@ def main() -> int:
         refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
+        games = filter_requested_matchup(games, sys.argv[1:])
         if not reuse_cache:
             ensure_configured()
         analyses = []
