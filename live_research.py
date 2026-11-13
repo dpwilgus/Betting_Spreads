@@ -151,10 +151,10 @@ def _core_team_injuries(team_id: str) -> list[dict[str, Any]]:
     injuries = []
     seen_players = set()
 
-    # ESPN returns newest reports first. Bound detail lookups per team so a
-    # large historical injury feed cannot trigger dozens of slow HTTP requests.
+    # ESPN returns newest reports first. Bound detail lookups per team while searching beyond the newest handful of
+    # records; important longer-term designations can otherwise be missed.
     # The game-summary injury feed is retained separately as supplemental evidence.
-    for item in result.get("items", [])[:12]:
+    for item in result.get("items", [])[:50]:
         ref = item.get("$ref")
         if not ref:
             continue
