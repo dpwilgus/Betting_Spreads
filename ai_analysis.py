@@ -9,7 +9,7 @@ from typing import Any
 from ai_providers import generate_json
 from live_research import collect_game_research
 
-MAX_RESEARCH_PROMPT_CHARS = 24000
+MAX_RESEARCH_PROMPT_CHARS = 16000
 
 
 def _bounded_research_text(research_text: str) -> tuple[str, bool]:
@@ -353,7 +353,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Each touchdown_scorer must "
         "contain: rank, player, team, estimated_td_probability (number 0-100), "
         "availability (current status), availability_evidence (latest dated practice/injury evidence), "
-        "confidence (integer 1-10), rationale, risk_factors. Each injury_impact "
+        "confidence (integer 1-10), concise rationale, concise risk_factors. Each injury_impact "
         "must contain: injured_player, team, availability, affected_player, "
         "affected_team, impact_direction (Positive, Negative, or Mixed), "
         "statistical_effect, prop_market, evidence, confidence (integer 1-10), "
