@@ -3,7 +3,7 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from ai_analysis import _bounded_research_text, _validate_analysis, analyze_game
+from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_text,\n                         _filter_player_props_by_usage, _filter_td_scorers_by_usage,\n                         _research_player_usage, _validate_analysis, analyze_game)
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
                           get_provider_usage_stats, reset_provider_run_state)
 from live_research import collect_game_research, _extract_roster_names
@@ -521,6 +521,61 @@ class ProviderFallbackTests(unittest.TestCase):
             module.ensure_configured()
 
         self.assertEqual(load.call_count, 2)
+
+
+    def test_player_props_are_rejected_when_threshold_conflicts_with_espn_stats(self):
+        research = """ESPN CURRENT-SEASON PLAYER GAME LOGS — Team (retrieved 2026-11-13): [
+          {"player":"Josh Jacobs","position":"RB","usage_and_recent_stats":{
+            "games_available":9,"season":{"rushingYards":80,"rushingAttempts":36},
+            "recent":[{"stats":{"rushingYards":3}},{"stats":{"rushingYards":-1}}]}}
+        ]"""
+        usage = _research_player_usage(research)
+        data = {"picks":[{
+            "market_type":"Player Prop","player_or_team":"Josh Jacobs",
+            "bet_description":"Rushing Yards Over 65.5",
+            "play_threshold":"65.5 yards",
+        }]}
+        gaps = _filter_player_props_by_usage(data, usage)
+        self.assertEqual(data["picks"], [])
+        self.assertTrue(any("materially conflicts" in gap for gap in gaps))
+
+    def test_td_filter_rejects_quarterback_without_rushing_td_profile(self):
+        usage = {
+            "jordanlove": {
+                "player":"Jordan Love","position":"QB","games_available":9,
+                "season":{"rushingAttempts":5,"rushingTouchdowns":0},
+                "recent":[]
+            },
+            "justinjefferson": {
+                "player":"Justin Jefferson","position":"WR","games_available":9,
+                "season":{"receivingTargets":65,"receivingTouchdowns":1},
+                "recent":[]
+            },
+        }
+        data = {"touchdown_scorers":[
+            {"player":"Jordan Love","estimated_td_probability":30},
+            {"player":"Justin Jefferson","estimated_td_probability":25},
+        ]}
+        gaps = _filter_td_scorers_by_usage(data, usage)
+        self.assertEqual([p["player"] for p in data["touchdown_scorers"]], ["Justin Jefferson"])
+        self.assertEqual(data["touchdown_scorers"][0]["rank"], 1)
+        self.assertTrue(any("Jordan Love" in gap for gap in gaps))
+
+    def test_missing_injury_record_never_gets_reported_as_active(self):
+        data = {
+            "picks":[{
+                "market_type":"Player Prop","player_or_team":"Player A",
+                "risk_factors":"No current risks",
+            }],
+            "touchdown_scorers":[{
+                "player":"Player A","availability":"Active",
+                "availability_evidence":"No injury report today",
+                "confidence":7,"risk_factors":"",
+            }],
+        }
+        _apply_independent_injury_statuses(data, [])
+        self.assertEqual(data["touchdown_scorers"][0]["availability"], "Not independently verified")
+        self.assertIn("not independently verified", data["picks"][0]["risk_factors"].casefold())
 
 
 if __name__ == "__main__":
