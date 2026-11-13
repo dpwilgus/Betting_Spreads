@@ -171,14 +171,6 @@ def _validate_analysis(
         if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
             raise RuntimeError("AI returned an invalid touchdown probability or confidence.")
         availability = str(item.get("availability", "")).casefold()
-        if not availability or not item.get("availability_evidence"):
-            raise RuntimeError("AI touchdown candidate is missing current availability evidence.")
-        if any(term in availability for term in ("out", "doubtful", "injured reserve", "ir")):
-            raise RuntimeError("AI included an unavailable or doubtful touchdown candidate: " + str(item.get("player", "")))
-        if "questionable" in availability and confidence > 6:
-            raise RuntimeError("Questionable touchdown candidates must have confidence of 6/10 or lower.")
-        if "questionable" in availability and "question" not in str(item.get("risk_factors", "")).casefold():
-            raise RuntimeError("Questionable touchdown candidates must disclose the availability risk.")
         if team_names is not None:
             normalized_team = _normalize_name(item.get("team", ""))
             matching_team = next(
@@ -202,6 +194,16 @@ def _validate_analysis(
                         "AI suggested a touchdown scorer not found on the current ESPN roster: "
                         + str(item.get("player", ""))
                     )
+        # Validate matchup and roster identity before status details so callers
+        # receive the most actionable error when multiple fields are invalid.
+        if not availability or not item.get("availability_evidence"):
+            raise RuntimeError("AI touchdown candidate is missing current availability evidence.")
+        if any(term in availability for term in ("out", "doubtful", "injured reserve", "ir")):
+            raise RuntimeError("AI included an unavailable or doubtful touchdown candidate: " + str(item.get("player", "")))
+        if "questionable" in availability and confidence > 6:
+            raise RuntimeError("Questionable touchdown candidates must have confidence of 6/10 or lower.")
+        if "questionable" in availability and "question" not in str(item.get("risk_factors", "")).casefold():
+            raise RuntimeError("Questionable touchdown candidates must disclose the availability risk.")
     injury_impacts = data.get("injury_impact")
     if not isinstance(injury_impacts, list):
         raise RuntimeError("AI injury_impact must be a list.")
