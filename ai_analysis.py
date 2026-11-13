@@ -43,7 +43,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "summary": {"type": "string"},
         "game_script": {"type": "string"},
         "picks": {
-            "type": "array", "minItems": 0, "maxItems": 5,
+            "type": "array", "minItems": 0,
             "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {
@@ -129,6 +129,63 @@ def _normalize_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value).casefold())
 
 
+def _is_unavailable_status(value: str) -> bool:
+    """Recognize explicit inactive designations without broad substring matches."""
+    status = re.sub(r"[^a-z ]", " ", str(value).casefold())
+    status = " ".join(status.split())
+    return (
+        status in {"out", "doubtful", "ir", "pup", "nfi"}
+        or "injured reserve" in status
+        or "physically unable to perform" in status
+        or status.startswith("out ")
+        or status.startswith("doubtful ")
+    )
+
+
+def _apply_independent_injury_statuses(
+    data: dict[str, Any],
+    injury_statuses: list[dict[str, Any]] | None,
+) -> list[str]:
+    """Remove unavailable player picks and TD candidates using independent ESPN reports."""
+    unavailable: dict[str, str] = {}
+    questionable: set[str] = set()
+    for report in injury_statuses or []:
+        if not isinstance(report, dict):
+            continue
+        player_key = _normalize_name(str(report.get("player", "")))
+        status = str(report.get("status", "")).strip()
+        if not player_key or not status:
+            continue
+        if _is_unavailable_status(status):
+            unavailable[player_key] = status
+        elif "questionable" in status.casefold():
+            questionable.add(player_key)
+
+    gaps: list[str] = []
+    for collection, name_field in (("picks", "player_or_team"), ("touchdown_scorers", "player")):
+        retained = []
+        for item in data.get(collection, []):
+            player = str(item.get(name_field, ""))
+            player_key = _normalize_name(player)
+            status = unavailable.get(player_key)
+            if status:
+                gaps.append(
+                    f"Removed {player} from {collection.replace('_', ' ')}: ESPN lists {status}."
+                )
+                continue
+            if player_key in questionable:
+                item["confidence"] = min(int(item.get("confidence", 6)), 6)
+                risk = str(item.get("risk_factors", "")).strip()
+                if "question" not in risk.casefold():
+                    item["risk_factors"] = (
+                        "Questionable: availability unconfirmed"
+                        if not risk else "Questionable: availability unconfirmed; " + risk
+                    )
+            retained.append(item)
+        data[collection] = retained
+    return gaps
+
+
 def _validate_analysis(
     data: dict[str, Any],
     rosters: dict[str, list[str]] | None = None,
@@ -138,8 +195,8 @@ def _validate_analysis(
         raise RuntimeError("AI response is missing the matchup summary or game script.")
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
-    if not isinstance(picks, list) or len(picks) > 5:
-        raise RuntimeError("AI response may contain at most five betting opportunities.")
+    if not isinstance(picks, list):
+        raise RuntimeError("AI response betting opportunities must be a list.")
     if not isinstance(scorers, list) or len(scorers) > 3:
         raise RuntimeError("AI response may contain at most three touchdown candidates.")
     for item in picks:
@@ -199,7 +256,7 @@ def _validate_analysis(
         # receive the most actionable error when multiple fields are invalid.
         if not availability or not item.get("availability_evidence"):
             raise RuntimeError("AI touchdown candidate is missing current availability evidence.")
-        if any(term in availability for term in ("out", "doubtful", "injured reserve", "ir")):
+        if _is_unavailable_status(availability):
             raise RuntimeError("AI included an unavailable or doubtful touchdown candidate: " + str(item.get("player", "")))
         if "questionable" in availability and confidence > 6:
             raise RuntimeError("Questionable touchdown candidates must have confidence of 6/10 or lower.")
@@ -323,7 +380,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "If a current prop line is not in the evidence, label it Not verified. Never fabricate "
         "injuries, player statistics, market prices, sources, or source timestamps.\n\n"
         "Return one JSON object only, with exactly these top-level keys: "
-        "summary (string), game_script (string), picks (array of up to 5), "
+        summary (string), game_script (string), picks (array), 
         "touchdown_scorers (array of up to 3), injury_impact (array), "
         "data_gaps (array of strings). Each pick object must contain: rank (integer), "
         "market_type (Player Prop or Game Prop), player_or_team, bet_description, "
@@ -334,9 +391,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Each Player Prop must name a player exactly as listed on one of the supplied current ESPN rosters. "
         "Each touchdown_scorer team must exactly match one of the two matchup teams, and the player "
         "must exactly match that team's supplied roster. "
-        "Aim for 4-5 strong picks when evidence supports them; do not stop at 2-3 merely to be concise. "
-        "Target a balanced shortlist with 2-3 player props when current player logs support them, "
-        "plus the strongest game props. Explicitly assess every researched QB, RB, WR and TE log, "
+        "Player-prop selection rule: target five player props per matchup, with at least three as the normal minimum when the evidence supports them. Fewer than three are allowed only when fewer than three genuinely worthwhile props qualify; never pad or invent picks. More than five are allowed when additional independent candidates meet the same evidence standard. Separate player props from game-level bets by setting market_type correctly; the workbook displays them in different sections. Explicitly assess every researched QB, RB, WR and TE log, "
         "including secondary options and players identified as beneficiaries in injury_impact. "
         "For each candidate compare recent games with season rates, role/opportunity evidence, "
         "and opponent weakness; do not require a verified sportsbook prop line to assess a model "
@@ -351,8 +406,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "For Questionable TD candidates, risk_factors must start 'Questionable:' "
         "(e.g. 'Questionable: active status unconfirmed'). "
         "Exclude doubtful, out, or injured-reserve players. Never infer active status from roster presence. "
-        "If the roster does not support a player or evidence is inadequate, omit that candidate; "
-        "shorter arrays are acceptable. Keep output extremely compact for free-model limits: "
+        "If the roster does not support a player or evidence is inadequate, omit that candidate. Keep output extremely compact for free-model limits: "
         "summary <= 35 words; game_script <= 45 words; each pick statistical_rationale <= 18 words "
         "and risk_factors <= 10 words; each TD rationale <= 12 words and risk_factors <= 8 words; "
         "return up to 3 meaningful injury_impact entries, each text field <= 10 words; "
@@ -378,6 +432,12 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             result, rosters=rosters, team_names=team_names
         ),
     )
+    injury_gaps = _apply_independent_injury_statuses(
+        data, research.get("injury_statuses", [])
+    )
+    if injury_gaps:
+        existing_gaps = data.setdefault("data_gaps", [])
+        existing_gaps.extend(injury_gaps[:max(0, 6 - len(existing_gaps))])
     picks, removed_correlated = _deduplicate_correlated_game_picks(
         data.get("picks", []), team_names
     )
@@ -386,6 +446,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         data.setdefault("data_gaps", []).append(
             "Overlapping same-team moneyline/spread recommendations were deduplicated; only the higher-confidence option was retained."
         )
+    data["analysis_version"] = 2
     data["sources"] = list(research.get("sources", []))
     data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
