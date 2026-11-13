@@ -71,6 +71,19 @@ class AnalysisQualityTests(unittest.TestCase):
             team_names=("New England Patriots", "Detroit Lions"),
         )
 
+    def test_questionable_td_candidate_gets_missing_availability_warning(self):
+        analysis = self._td_analysis()
+        analysis["touchdown_scorers"][0]["risk_factors"] = "Limited practice"
+        _validate_analysis(
+            analysis,
+            rosters={"New England Patriots": ["Rhamondre Stevenson"]},
+            team_names=("New England Patriots", "Detroit Lions"),
+        )
+        self.assertIn(
+            "Questionable",
+            analysis["touchdown_scorers"][0]["risk_factors"],
+        )
+
     def test_questionable_td_candidate_cannot_have_high_confidence(self):
         with self.assertRaisesRegex(RuntimeError, "confidence of 6/10 or lower"):
             _validate_analysis(
