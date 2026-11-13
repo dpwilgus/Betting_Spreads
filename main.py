@@ -245,7 +245,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         _style_header(sheet.cell(td_start + 1, col, value))
     scorers = analysis.get("touchdown_scorers", [])
     if not scorers:
-        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=7)
+        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=9)
         sheet.cell(td_start + 2, 1, "No touchdown scorer met the evidence threshold.")
     for row_num, scorer in enumerate(scorers, td_start + 2):
         values = [
