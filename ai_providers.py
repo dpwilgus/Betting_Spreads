@@ -97,8 +97,8 @@ def _configure_keys() -> None:
         from tkinter import messagebox
     except Exception as exc:
         raise RuntimeError(
-            "No AI API keys are configured for the selected providers. Set the relevant "
-            "provider key (for example NVIDIA_API_KEY) and AI_PROVIDER_ORDER, then restart."
+            "No AI API keys are configured for the selected providers. Set a key for one of the selected providers (for example NVIDIA_API_KEY), "
+            "and AI_PROVIDER_ORDER if you want to override the default order, then restart."
         ) from exc
 
     root = tk.Tk()
@@ -109,7 +109,7 @@ def _configure_keys() -> None:
     tk.Label(
         root,
         text=("Add one or more API keys. Gemini, Groq and OpenRouter offer free usage "
-              "with limits. NVIDIA NIM is experimental and for development/testing only. "
+              "with limits. NVIDIA NIM is an additional fallback; its limits may vary. "
               "OpenAI is optional and usage is paid. Keys are stored in your computer's "
               "secure credential store."),
         wraplength=580, justify="left",
@@ -159,7 +159,7 @@ def _configure_keys() -> None:
     root.mainloop()
     if not result["saved"]:
         raise RuntimeError(
-            "No AI API keys were saved. Add a Gemini, Groq or OpenRouter key to continue."
+            "No AI API keys were saved. Add a Gemini, Groq, OpenRouter or NVIDIA key to continue."
         )
 
 
