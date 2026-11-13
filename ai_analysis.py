@@ -203,7 +203,12 @@ def _validate_analysis(
         if "questionable" in availability and confidence > 6:
             raise RuntimeError("Questionable touchdown candidates must have confidence of 6/10 or lower.")
         if "questionable" in availability and "question" not in str(item.get("risk_factors", "")).casefold():
-            raise RuntimeError("Questionable touchdown candidates must disclose the availability risk.")
+            existing_risk = str(item.get("risk_factors", "")).strip()
+            item["risk_factors"] = (
+                "Questionable: availability unconfirmed"
+                if not existing_risk
+                else "Questionable: availability unconfirmed; " + existing_risk
+            )
     injury_impacts = data.get("injury_impact")
     if not isinstance(injury_impacts, list):
         raise RuntimeError("AI injury_impact must be a list.")
