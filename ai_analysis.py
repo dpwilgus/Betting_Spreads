@@ -162,9 +162,13 @@ def _apply_independent_injury_statuses(
             questionable.add(player_key)
 
     gaps: list[str] = []
+    reported_players = set(unavailable) | set(questionable)
     for collection, name_field in (("picks", "player_or_team"), ("touchdown_scorers", "player")):
         retained = []
         for item in data.get(collection, []):
+            if collection == "picks" and item.get("market_type") != "Player Prop":
+                retained.append(item)
+                continue
             player = str(item.get(name_field, ""))
             player_key = _normalize_name(player)
             status = unavailable.get(player_key)
@@ -180,6 +184,18 @@ def _apply_independent_injury_statuses(
                     item["risk_factors"] = (
                         "Questionable: availability unconfirmed"
                         if not risk else "Questionable: availability unconfirmed; " + risk
+                    )
+            elif player_key not in reported_players:
+                risk = str(item.get("risk_factors", "")).strip()
+                if "availability" not in risk.casefold():
+                    item["risk_factors"] = (
+                        "Availability not independently verified"
+                        if not risk else "Availability not independently verified; " + risk
+                    )
+                if collection == "touchdown_scorers":
+                    item["availability"] = "Not independently verified"
+                    item["availability_evidence"] = (
+                        "No matching ESPN injury designation was found; active status is not confirmed."
                     )
             retained.append(item)
         data[collection] = retained
@@ -253,7 +269,7 @@ def _filter_player_props_by_usage(
             None,
         )
         threshold_text = str(pick.get("play_threshold") or pick.get("bet_description") or "")
-        threshold_match = re.search(r"(-?\\d+(?:\\.\\d+)?)", threshold_text)
+        threshold_match = re.search(r"(-?\d+(?:\.\d+)?)", threshold_text)
         if not stat_key or not threshold_match:
             gaps.append(f"Removed {player} player prop: market statistic or numeric threshold could not be validated.")
             continue
@@ -274,8 +290,8 @@ def _filter_player_props_by_usage(
         recent_average = (
             sum(recent_values) / len(recent_values) if recent_values else season_average
         )
-        is_over = bool(re.search(r"\\bover\\b", description))
-        is_under = bool(re.search(r"\\bunder\\b", description))
+        is_over = bool(re.search(r"\bover\b", description))
+        is_under = bool(re.search(r"\bunder\b", description))
         unsupported = (
             is_over and threshold > max(season_average, recent_average, 0.1) * 1.75
         ) or (
