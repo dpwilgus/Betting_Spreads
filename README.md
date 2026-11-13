@@ -83,7 +83,7 @@ The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endp
 ## Workbook contents
 
 - **Weekly Matchups:** kickoff in Eastern Time, away team, home team, ESPN betting line, and game status.
-- **One tab per matchup:** matchup summary, expected game script, up to five researched player/game prop ideas, up to three touchdown scorer candidates, confidence ratings, model-estimated probabilities, data limitations, and source links.
+- **One tab per matchup:** matchup summary, expected game script, player props (target five, aiming for at least three when evidence supports them, with no fixed maximum), a separate game-level bets section, up to three touchdown scorer candidates, confidence ratings, model-estimated probabilities, data limitations, and source links.
 - The redundant Spread and Sportsbook columns are intentionally omitted from the main schedule sheet.
 
 ## Research and probability limitations
@@ -92,7 +92,7 @@ The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endp
 - ESPN game summaries and available team injury endpoints are fetched independently of the AI provider. The selected AI provider analyzes this evidence; it does not automatically have web search. Current player-prop prices must be independently present in the evidence to be labeled verified.
 - A market line is labeled **Not verified** when the research cannot confirm a live sportsbook offer. A model play threshold is an analytical target, not a claim that a sportsbook currently offers that number.
 - Estimated hit probabilities and 1–10 confidence ratings are research estimates, not guarantees or independently audited forecasts. Confidence reflects the reliability of available data and the stability of the estimate; it is not the same as probability.
-- The analyst is instructed not to invent stats or lines and not to pad the recommendations when evidence is weak. Sources and material data gaps are included in each game tab.
+- Player props target five per matchup, with a preferred minimum of three when the evidence supports them; fewer than three are allowed only when fewer than three worthwhile picks qualify, and more than five are allowed when additional picks meet the quality standard. Game-level bets appear in a separate section. ESPN Core injury statuses are applied as a deterministic safety check so players listed Out, Doubtful, or on injured reserve are removed from player-prop and touchdown recommendations. The analyst is instructed not to invent stats or lines or pad recommendations. Sources and material data gaps are included in each game tab.
 - API use is subject to each selected provider's free-tier limits or paid pricing. An internet connection is required. Provider fallback does not combine quotas and cannot guarantee uninterrupted free access.
 
 This tool is for research and informational purposes only. It does not guarantee outcomes or constitute financial advice.
@@ -126,7 +126,7 @@ For local testing only, the Python script supports a cache-only workbook refresh
 2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling any AI API.
 3. Cached analyses are clearly marked in the workbook because injuries, player availability, weather, usage, and sportsbook markets are not refreshed.
 
-Use `python main.py --refresh-incomplete` to reuse cached analyses that already contain exactly five prop ideas and three touchdown candidates, while making API calls only for missing or incomplete cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
+Use `python main.py --refresh-incomplete` to reuse analyses created with the current output format, while making API calls only for missing or outdated cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
 
 Run a focused analysis for one game without spending AI calls on the rest of the slate:
 
