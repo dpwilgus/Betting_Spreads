@@ -13,25 +13,26 @@ MAX_RESEARCH_PROMPT_CHARS = 16000
 
 
 def _bounded_research_text(research_text: str) -> tuple[str, bool]:
-    """Keep complete, priority-ordered research sections within the prompt budget."""
+    """Keep priority-ordered complete sections; skip oversized sections, not later evidence."""
     text = str(research_text or "")
     if len(text) <= MAX_RESEARCH_PROMPT_CHARS:
         return text, False
 
     kept: list[str] = []
     used = 0
+    omitted = False
+    marker = "[Research truncated.]"
+    budget = max(0, MAX_RESEARCH_PROMPT_CHARS - len(marker) - 2)
     for section in text.split("\n\n"):
         separator = 2 if kept else 0
-        remaining = MAX_RESEARCH_PROMPT_CHARS - used - separator
-        if len(section) > remaining:
-            break
+        if len(section) + separator > budget - used:
+            omitted = True
+            continue
         kept.append(section)
         used += separator + len(section)
 
-    marker = "[Research truncated.]"
-    while kept and used + 2 + len(marker) > MAX_RESEARCH_PROMPT_CHARS:
-        removed = kept.pop()
-        used -= len(removed) + (2 if kept else 0)
+    if not omitted:
+        return text, False
     if not kept:
         return marker[:MAX_RESEARCH_PROMPT_CHARS], True
     return "\n\n".join(kept) + "\n\n" + marker, True
@@ -354,7 +355,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "shorter arrays are acceptable. Keep output extremely compact for free-model limits: "
         "summary <= 35 words; game_script <= 45 words; each pick statistical_rationale <= 18 words "
         "and risk_factors <= 10 words; each TD rationale <= 12 words and risk_factors <= 8 words; "
-        "return at most 2 meaningful injury_impact entries, each text field <= 10 words; "
+        "return up to 3 meaningful injury_impact entries, each text field <= 10 words; "
         "data_gaps <= 4 short items. Use short phrases, not paragraphs. Do not repeat facts "
         "across fields or add commentary outside JSON. "
         "Each touchdown_scorer must "
