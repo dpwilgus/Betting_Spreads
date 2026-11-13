@@ -30,6 +30,10 @@ def reset_provider_run_state() -> None:
     _PROVIDER_USAGE.clear()
 
 
+class IncompleteResponseError(RuntimeError):
+    """A provider explicitly reported that its generated response was truncated."""
+
+
 @dataclass(frozen=True)
 class Provider:
     name: str
@@ -288,7 +292,7 @@ def _call_provider(
         if provider.name == "nvidia":
             # NVIDIA's hosted Nemotron endpoint uses max_tokens. Its API does
             # not guarantee JSON mode, so rely on the prompt and our validator.
-            payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "2600"))
+            payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "5000"))
         else:
             payload["max_completion_tokens"] = int(
                 os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")
@@ -316,6 +320,24 @@ def _call_provider(
             _record_provider_request(provider, system_prompt, user_prompt)
             result = _request_json(provider.endpoint, payload, headers)
     _record_provider_response(provider, result)
+
+    # Detect provider-reported truncation before attempting JSON parsing. Retrying
+    # the identical oversized prompt only burns another full output allowance.
+    if provider.style == "gemini":
+        candidates = result.get("candidates") or []
+        finish_reason = candidates[0].get("finishReason", "") if candidates else ""
+        truncated = str(finish_reason).upper() in {"MAX_TOKENS", "LENGTH"}
+    else:
+        choices = result.get("choices") or []
+        finish_reason = choices[0].get("finish_reason", "") if choices else ""
+        truncated = str(finish_reason).lower() in {"length", "max_tokens"}
+    if truncated:
+        limit = payload.get("max_tokens", payload.get("max_completion_tokens"))
+        raise IncompleteResponseError(
+            f"{provider.name} truncated its response (finish_reason={finish_reason}; "
+            f"output limit={limit}). Shorten the requested analysis or raise the "
+            "provider output limit if the account permits it."
+        )
     return json.loads(_response_text(provider, result))
 
 
@@ -377,9 +399,13 @@ def generate_json(
                     continue
                 failures.append(f"{provider.name}: connection error: {exc}")
                 break
+            except IncompleteResponseError as exc:
+                # The provider confirmed that the output hit its cap. Repeating the
+                # same request cannot fix truncation and wastes tokens; try fallback.
+                failures.append(f"{provider.name}: {exc}")
+                break
             except (ValueError, KeyError, RuntimeError) as exc:
-                # Invalid model output is not evidence that the provider is offline.
-                # Retry once for this matchup, then allow the next matchup to try again.
+                # Invalid JSON/schema output may be transient; retry once, then fallback.
                 if attempt == 0:
                     time.sleep(1)
                     continue
