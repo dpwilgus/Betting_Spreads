@@ -174,17 +174,30 @@ class ProviderFallbackTests(unittest.TestCase):
         })
         self.assertEqual(result, '{"ok": true}')
 
-    def test_nvidia_is_not_in_default_provider_order(self):
+    def test_nvidia_is_last_in_default_provider_order(self):
         from ai_providers import PROVIDER_ORDER
-        self.assertNotIn("nvidia", PROVIDER_ORDER)
+        self.assertEqual(PROVIDER_ORDER, ("gemini", "groq", "openrouter", "nvidia"))
 
-    def test_nvidia_is_only_configured_when_explicitly_selected(self):
+    def test_nvidia_is_optional_and_configured_only_with_a_saved_key(self):
         from ai_providers import _configured_providers
-        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "gemini,groq,openrouter"}, clear=False), patch(
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "gemini,groq,openrouter,nvidia"}, clear=False), patch(
+            "ai_providers._saved_key",
+            side_effect=lambda provider: "test-key" if provider.name != "nvidia" else "",
+        ):
+            providers = _configured_providers()
+        self.assertEqual(
+            [provider.name for provider, _ in providers],
+            ["gemini", "groq", "openrouter"],
+        )
+
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "gemini,groq,openrouter,nvidia"}, clear=False), patch(
             "ai_providers._saved_key", return_value="test-key"
         ):
             providers = _configured_providers()
-        self.assertNotIn("nvidia", [provider.name for provider, _ in providers])
+        self.assertEqual(
+            [provider.name for provider, _ in providers],
+            ["gemini", "groq", "openrouter", "nvidia"],
+        )
 
         with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "nvidia"}, clear=False), patch(
             "ai_providers._saved_key", return_value="test-key"
