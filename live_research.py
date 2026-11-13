@@ -993,36 +993,6 @@ def _compact_player_data(value: Any, depth: int = 0) -> Any:
     return str(value)[:140]
 
 
-def _select_research_players(
-    players: list[dict[str, str]],
-    depth_chart: dict[str, Any] | None = None,
-) -> list[dict[str, str]]:
-    """Select depth-chart No. 1 QB/RB/WR/TE, matching IDs to the current roster."""
-    roster_by_id = {player.get("id"): player for player in players if player.get("id")}
-    depth_ids = _extract_depth_chart_ids(depth_chart or {})
-    selected = []
-    for position in ("QB", "RB", "WR", "TE"):
-        ranked_ids = depth_ids.get(position, [])
-        player = next(
-            (roster_by_id[athlete_id] for athlete_id in ranked_ids if athlete_id in roster_by_id),
-            None,
-        )
-        if player is not None:
-            selected.append(player)
-    if selected:
-        return selected
-
-    # Explicit fallback for ESPN depth-chart outages or unexpected response formats.
-    limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
-    counts = {position: 0 for position in limits}
-    for player in players:
-        position = player.get("position", "").upper()
-        if player.get("id") and position in limits and counts[position] < limits[position]:
-            selected.append(player)
-            counts[position] += 1
-    return selected
-
-
 @lru_cache(maxsize=32)
 def _team_statistics(team_id: str) -> dict[str, Any]:
     """Fetch and compact team statistics once per team during a slate run."""
