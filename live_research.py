@@ -627,11 +627,17 @@ def _select_research_players(
     if selected:
         return selected
 
-    # Explicit fallback for ESPN depth-chart outages or unexpected response formats.
-    counts = {position: 0 for position in limits}
+    # Without depth-chart ranks, roster order is not reliable enough to
+    # justify selecting secondary RB/WR options. Keep the fallback conservative.
+    fallback_limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
+    counts = {position: 0 for position in fallback_limits}
     for player in players:
         position = player.get("position", "").upper()
-        if player.get("id") and position in limits and counts[position] < limits[position]:
+        if (
+            player.get("id")
+            and position in fallback_limits
+            and counts[position] < fallback_limits[position]
+        ):
             selected.append(player)
             counts[position] += 1
     return selected
