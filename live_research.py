@@ -1056,6 +1056,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     team_stat_sections: list[str] = []
     player_stat_sections: list[str] = []
     injury_sections: list[str] = []
+    injury_statuses: list[dict[str, Any]] = []
     rosters: dict[str, list[str]] = {}
 
     if not event_id:
@@ -1213,6 +1214,15 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     team_injuries = _core_team_injuries(team_id)
                     if team_injuries:
                         core_injuries_found = True
+                        for report in team_injuries:
+                            if isinstance(report, dict) and report.get("player") and report.get("status"):
+                                injury_statuses.append({
+                                    "player": str(report["player"]),
+                                    "team": str(team_name),
+                                    "status": str(report["status"]),
+                                    "report_date": str(report.get("report_date") or ""),
+                                    "comment": str(report.get("comment") or ""),
+                                })
                         injury_sections.append(
                             f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
                             + json.dumps(
@@ -1262,4 +1272,5 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         "research_text": "\n\n".join(sections),
         "sources": unique,
         "rosters": rosters,
+        "injury_statuses": injury_statuses,
     }
