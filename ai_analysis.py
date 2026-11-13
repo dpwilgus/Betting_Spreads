@@ -186,6 +186,162 @@ def _apply_independent_injury_statuses(
     return gaps
 
 
+
+def _research_player_usage(research_text: str) -> dict[str, dict[str, Any]]:
+    """Extract structured current-season player usage from independent ESPN log sections."""
+    usage_by_player: dict[str, dict[str, Any]] = {}
+    for line in str(research_text or "").splitlines():
+        if not line.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS"):
+            continue
+        marker = line.find(": [")
+        if marker < 0:
+            continue
+        try:
+            records = json.loads(line[marker + 2:])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            player = str(record.get("player") or "").strip()
+            usage = record.get("usage_and_recent_stats")
+            if player and isinstance(usage, dict):
+                usage_by_player[_normalize_name(player)] = {
+                    "player": player,
+                    "position": str(record.get("position") or "").upper(),
+                    **usage,
+                }
+    return usage_by_player
+
+
+def _stat_number(stats: dict[str, Any], key: str) -> float:
+    try:
+        return float(str(stats.get(key, 0)).replace(",", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _filter_player_props_by_usage(
+    data: dict[str, Any],
+    player_usage: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Reject player props that materially contradict independent season/recent production."""
+    stat_patterns = (
+        (r"passing yards?", "passingYards"),
+        (r"rushing yards?", "rushingYards"),
+        (r"receiving yards?", "receivingYards"),
+        (r"receptions?", "receptions"),
+        (r"receiving targets?|targets?", "receivingTargets"),
+        (r"rushing attempts?|carries", "rushingAttempts"),
+    )
+    retained = []
+    gaps = []
+    for pick in data.get("picks", []):
+        if pick.get("market_type") != "Player Prop":
+            retained.append(pick)
+            continue
+        player = str(pick.get("player_or_team") or "")
+        usage = player_usage.get(_normalize_name(player))
+        if not usage:
+            gaps.append(f"Removed {player} player prop: no structured ESPN season game log was available.")
+            continue
+        description = str(pick.get("bet_description") or "").casefold()
+        stat_key = next(
+            (key for pattern, key in stat_patterns if re.search(pattern, description)),
+            None,
+        )
+        threshold_text = str(pick.get("play_threshold") or pick.get("bet_description") or "")
+        threshold_match = re.search(r"(-?\\d+(?:\\.\\d+)?)", threshold_text)
+        if not stat_key or not threshold_match:
+            gaps.append(f"Removed {player} player prop: market statistic or numeric threshold could not be validated.")
+            continue
+        threshold = float(threshold_match.group(1))
+        games = int(usage.get("games_available") or 0)
+        season = usage.get("season") if isinstance(usage.get("season"), dict) else {}
+        if games <= 0 or stat_key not in season:
+            gaps.append(f"Removed {player} player prop: ESPN did not provide the required season statistic.")
+            continue
+        season_average = _stat_number(season, stat_key) / games
+        recent = usage.get("recent") if isinstance(usage.get("recent"), list) else []
+        recent_values = [
+            _stat_number(game.get("stats", {}), stat_key)
+            for game in recent[:5]
+            if isinstance(game, dict) and isinstance(game.get("stats"), dict)
+            and stat_key in game["stats"]
+        ]
+        recent_average = (
+            sum(recent_values) / len(recent_values) if recent_values else season_average
+        )
+        is_over = bool(re.search(r"\\bover\\b", description))
+        is_under = bool(re.search(r"\\bunder\\b", description))
+        unsupported = (
+            is_over and threshold > max(season_average, recent_average, 0.1) * 1.75
+        ) or (
+            is_under and threshold < min(season_average, recent_average) * 0.50
+        )
+        if unsupported:
+            gaps.append(
+                f"Removed {player} {stat_key} prop: {threshold:g} threshold materially conflicts "
+                f"with ESPN season average {season_average:.1f} and recent average {recent_average:.1f}."
+            )
+            continue
+        retained.append(pick)
+    data["picks"] = retained
+    return gaps
+
+
+def _filter_td_scorers_by_usage(
+    data: dict[str, Any],
+    player_usage: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Require a credible current-season scoring role; quarterbacks need rushing evidence."""
+    ranked = []
+    gaps = []
+    for scorer in data.get("touchdown_scorers", []):
+        player = str(scorer.get("player") or "")
+        usage = player_usage.get(_normalize_name(player))
+        if not usage:
+            gaps.append(f"Removed {player} TD candidate: no structured ESPN season game log was available.")
+            continue
+        position = str(usage.get("position") or "").upper()
+        season = usage.get("season") if isinstance(usage.get("season"), dict) else {}
+        games = int(usage.get("games_available") or 0)
+        if games <= 0:
+            gaps.append(f"Removed {player} TD candidate: ESPN season game-log sample was unavailable.")
+            continue
+        rush_td = _stat_number(season, "rushingTouchdowns")
+        receiving_td = _stat_number(season, "receivingTouchdowns")
+        carries = _stat_number(season, "rushingAttempts")
+        targets = _stat_number(season, "receivingTargets")
+        total_td = rush_td + receiving_td
+        if position == "QB":
+            eligible = rush_td >= 1 or carries / games >= 3.0
+            score = (rush_td / games) * 3.0 + (carries / games) * 0.20
+        elif position == "RB":
+            eligible = total_td >= 1 and (carries + targets) / games >= 4.0
+            score = (total_td / games) * 3.0 + ((carries + targets) / games) * 0.08
+        elif position in {"WR", "TE"}:
+            eligible = receiving_td >= 1 and targets / games >= 2.5
+            score = (receiving_td / games) * 3.0 + (targets / games) * 0.12
+        else:
+            eligible = False
+            score = 0.0
+        if not eligible:
+            gaps.append(
+                f"Removed {player} TD candidate: current ESPN {position or 'position'} usage/scoring "
+                "does not support an anytime-TD recommendation."
+            )
+            continue
+        ranked.append((score, scorer))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    data["touchdown_scorers"] = [scorer for _, scorer in ranked]
+    for rank, scorer in enumerate(data["touchdown_scorers"], 1):
+        scorer["rank"] = rank
+    return gaps
+
+
 def _validate_analysis(
     data: dict[str, Any],
     rosters: dict[str, list[str]] | None = None,
@@ -432,11 +588,13 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     injury_gaps = _apply_independent_injury_statuses(
         data, research.get("injury_statuses", [])
     )
-    if injury_gaps:
+    player_usage = _research_player_usage(research.get("research_text", ""))
+    prop_gaps = _filter_player_props_by_usage(data, player_usage)
+    td_gaps = _filter_td_scorers_by_usage(data, player_usage)
+    quality_gaps = injury_gaps + prop_gaps + td_gaps
+    if quality_gaps:
         existing_gaps = data.setdefault("data_gaps", [])
-        existing_gaps.extend(injury_gaps[:max(0, 6 - len(existing_gaps))])
-    for rank, scorer in enumerate(data.get("touchdown_scorers", []), 1):
-        scorer["rank"] = rank
+        existing_gaps.extend(quality_gaps[:max(0, 6 - len(existing_gaps))])
     picks, removed_correlated = _deduplicate_correlated_game_picks(
         data.get("picks", []), team_names
     )
