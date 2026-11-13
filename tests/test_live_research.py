@@ -427,6 +427,8 @@ class LiveResearchTests(unittest.TestCase):
             })
 
         self.assertIn("ESPN CURRENT-SEASON PLAYER GAME LOGS", result["research_text"])
+        self.assertIn("usage_and_recent_stats", result["research_text"])
+        self.assertNotIn("season_game_log", result["research_text"])
         self.assertIn("Away QB", result["research_text"])
         self.assertIn("Home TE", result["research_text"])
         player_sources = [
