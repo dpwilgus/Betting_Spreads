@@ -16,7 +16,7 @@ import certifi
 import keyring
 
 SERVICE_NAME = "Betting Spreads"
-PROVIDER_ORDER = ("gemini", "groq", "openrouter")  # NVIDIA stays opt-in for local development.
+PROVIDER_ORDER = ("gemini", "groq", "openrouter", "nvidia")  # NVIDIA is the final free fallback.
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
 _CONFIGURED_PROVIDERS_CACHE: list[tuple["Provider", str]] | None = None
 _PROVIDER_USAGE: dict[str, dict[str, int]] = {}
