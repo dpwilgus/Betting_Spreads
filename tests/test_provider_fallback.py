@@ -19,6 +19,8 @@ def valid_analysis():
     }
     scorer = {
         "rank": 1, "player": "Player A", "team": "Team A",
+        "availability": "Active",
+        "availability_evidence": "Latest team injury report lists no designation.",
         "estimated_td_probability": 20.0, "confidence": 4,
         "rationale": "Example role", "risk_factors": "Example risk",
     }
