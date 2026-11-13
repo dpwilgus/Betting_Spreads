@@ -499,10 +499,31 @@ def filter_requested_matchup(games: list[dict], arguments: list[str]) -> list[di
     if index + 1 >= len(arguments) or arguments[index + 1].startswith("--"):
         raise ValueError('Use --matchup "Away Team at Home Team" to select one game.')
     requested = arguments[index + 1].strip().casefold()
-    matches = [
-        game for game in games
-        if requested in f"{game['Away Team']} at {game['Home Team']}".casefold()
+    requested_sides = [
+        side.strip() for side in requested.split(" at ", maxsplit=1)
     ]
+
+    def team_matches(requested_team: str, full_team: str) -> bool:
+        """Allow a nickname or city portion as well as the full team name."""
+        normalized_team = full_team.casefold().strip()
+        return bool(requested_team) and (
+            requested_team in normalized_team or normalized_team in requested_team
+        )
+
+    matches = []
+    for game in games:
+        away = str(game.get("Away Team", "")).casefold()
+        home = str(game.get("Home Team", "")).casefold()
+        if len(requested_sides) == 2:
+            is_match = (
+                team_matches(requested_sides[0], away)
+                and team_matches(requested_sides[1], home)
+            )
+        else:
+            matchup = f"{away} at {home}"
+            is_match = requested in matchup
+        if is_match:
+            matches.append(game)
     if not matches:
         available = ", ".join(
             f"{game['Away Team']} at {game['Home Team']}" for game in games
