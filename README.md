@@ -40,6 +40,7 @@ You can also configure environment variables before launching:
 - `GEMINI_API_KEY`
 - `GROQ_API_KEY`
 - `OPENROUTER_API_KEY`
+- `NVIDIA_API_KEY` (experimental; only used when explicitly added to `AI_PROVIDER_ORDER`)
 - `OPENAI_API_KEY` (optional; paid)
 
 The default free-provider order is Gemini → Groq → OpenRouter. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, and `OPENAI_MODEL`.
@@ -75,7 +76,7 @@ The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endp
 1. Download the file for your operating system from [Releases](../../releases).
 2. Windows: double-click `Betting_Spreads.exe`.
 3. macOS: unzip the download, then open `Betting_Spreads.app`. On first launch, macOS may require right-clicking the app and choosing **Open** because this app is not signed or notarized.
-4. Enter one or more provider API keys on first run (Gemini, Groq, or OpenRouter are the recommended free options).
+4. Enter one or more provider API keys on first run (Gemini, Groq, or OpenRouter are the recommended default free options; NVIDIA is optional and must be explicitly enabled for local development).
 5. The app retrieves the current ESPN scoreboard week, researches each matchup, and creates or replaces `NFL_Weekly_Matchups.xlsx` beside the executable/app bundle.
 
 ## Workbook contents
