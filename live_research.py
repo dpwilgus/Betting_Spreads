@@ -1144,7 +1144,9 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
-                                    "season_game_log": gamelog,
+                                    "usage_and_recent_stats": _compact_player_gamelog(
+                                        gamelog, player["position"]
+                                    ),
                                 })
                                 _player_gamelog_failures = 0
                                 sources.append({
