@@ -20,7 +20,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-from ai_analysis import analyze_game, get_api_key
+from ai_analysis import analyze_game
+from live_research import collect_game_research, reset_research_cache
+from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
@@ -89,6 +91,9 @@ def extract_games(data: dict) -> tuple[list[dict], object, object]:
             details = str(spread) if spread != "" else "Odds unavailable"
 
         games.append({
+            "event_id": str(event.get("id", "")),
+            "away_team_id": str(away.get("team", {}).get("id", "")),
+            "home_team_id": str(home.get("team", {}).get("id", "")),
             "Game Date (ET)": kickoff_text,
             "Away Team": away.get("team", {}).get("displayName", "Away team"),
             "Home Team": home.get("team", {}).get("displayName", "Home team"),
@@ -152,14 +157,29 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A2"].font = Font(italic=True, color="17365D")
     sheet["A2"].alignment = Alignment(wrap_text=True)
 
+    sheet.merge_cells("A3:J3")
     if analysis.get("cache_reused"):
-        sheet.merge_cells("A3:J3")
         sheet["A3"] = (
             "CACHED ANALYSIS — research has not been refreshed for current injuries, "
             "player availability, weather, or sportsbook markets."
         )
         sheet["A3"].font = Font(italic=True, color="9C6500")
-        sheet["A3"].alignment = Alignment(wrap_text=True)
+    else:
+        provider = analysis.get("ai_provider", "Unknown provider")
+        research_truncated = analysis.get("research_truncated_for_prompt")
+        research_chars = analysis.get("research_prompt_characters")
+        if research_truncated is True:
+            prompt_status = f"TRUNCATED ({research_chars:,} chars)" if isinstance(research_chars, int) else "TRUNCATED"
+        elif research_truncated is False:
+            prompt_status = f"complete ({research_chars:,} chars)" if isinstance(research_chars, int) else "complete"
+        else:
+            prompt_status = "not recorded"
+        sheet["A3"] = (
+            f"AI provider: {provider} | Research: {analysis.get('research_mode', 'Not recorded')} "
+            f"| AI research prompt: {prompt_status} | Live sources are listed at the bottom of this sheet."
+        )
+        sheet["A3"].font = Font(italic=True, color="9C6500" if research_truncated is True else "526579")
+    sheet["A3"].alignment = Alignment(wrap_text=True)
 
     sheet["A4"] = "MATCHUP SUMMARY"
     sheet["A4"].font = white_bold
@@ -242,7 +262,60 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 cell.fill = light
         sheet.row_dimensions[row_num].height = 65
 
-    gap_row = td_start + max(len(scorers), 1) + 4
+    injury_start = td_start + max(len(scorers), 1) + 4
+    sheet.cell(injury_start, 1, "INJURY IMPACT ANALYSIS")
+    sheet.cell(injury_start, 1).font = white_bold
+    sheet.cell(injury_start, 1).fill = navy
+    sheet.merge_cells(
+        start_row=injury_start, start_column=1,
+        end_row=injury_start, end_column=10,
+    )
+
+    injury_headers = [
+        "Injured Player", "Team", "Availability", "Affected Player",
+        "Affected Team", "Impact", "Statistical Effect", "Prop Market",
+        "Evidence / Confidence", "Conditions",
+    ]
+    for col, value in enumerate(injury_headers, 1):
+        _style_header(sheet.cell(injury_start + 1, col, value))
+
+    impacts = analysis.get("injury_impact", [])
+    if not impacts:
+        sheet.merge_cells(
+            start_row=injury_start + 2, start_column=1,
+            end_row=injury_start + 2, end_column=10,
+        )
+        sheet.cell(
+            injury_start + 2, 1,
+            "No meaningful, evidence-supported downstream injury impacts identified.",
+        )
+        sheet.cell(injury_start + 2, 1).alignment = Alignment(wrap_text=True)
+
+    for row_num, impact in enumerate(impacts, injury_start + 2):
+        values = [
+            impact.get("injured_player", ""),
+            impact.get("team", ""),
+            impact.get("availability", ""),
+            impact.get("affected_player", ""),
+            impact.get("affected_team", ""),
+            impact.get("impact_direction", ""),
+            impact.get("statistical_effect", ""),
+            impact.get("prop_market", ""),
+            (
+                f"{impact.get('evidence', '')} "
+                f"(Confidence: {impact.get('confidence', '')}/10)"
+            ),
+            impact.get("conditions", ""),
+        ]
+        for col, value in enumerate(values, 1):
+            cell = sheet.cell(row=row_num, column=col, value=value)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = Border(bottom=thin_gray)
+            if row_num % 2 == 0:
+                cell.fill = light
+        sheet.row_dimensions[row_num].height = 78
+
+    gap_row = injury_start + max(len(impacts), 1) + 4
     sheet.cell(gap_row, 1, "DATA LIMITATIONS")
     sheet.cell(gap_row, 1).font = white_bold
     sheet.cell(gap_row, 1).fill = navy
@@ -252,7 +325,20 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(gap_row + 1, 1, "\n".join(f"• {gap}" for gap in gaps) if gaps else "No material data gaps were reported.")
     sheet.cell(gap_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
 
-    source_row = gap_row + 4
+    research_row = gap_row + 4
+    sheet.cell(research_row, 1, "INDEPENDENT LIVE RESEARCH")
+    sheet.cell(research_row, 1).font = white_bold
+    sheet.cell(research_row, 1).fill = navy
+    sheet.merge_cells(start_row=research_row, start_column=1, end_row=research_row, end_column=10)
+    sheet.merge_cells(start_row=research_row + 1, start_column=1, end_row=research_row + 3, end_column=10)
+    sheet.cell(
+        research_row + 1, 1,
+        analysis.get("independent_research", "No independent research text was retained.")
+    )
+    sheet.cell(research_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
+    sheet.row_dimensions[research_row + 1].height = 180
+
+    source_row = research_row + 5
     sheet.cell(source_row, 1, "RESEARCH SOURCES")
     sheet.cell(source_row, 1).font = white_bold
     sheet.cell(source_row, 1).fill = navy
@@ -396,7 +482,7 @@ def _load_cached_analysis(game: dict) -> dict:
     analysis = json.loads(path.read_text(encoding="utf-8"))
     gaps = list(analysis.get("data_gaps", []))
     gaps.append(
-        "CACHED ANALYSIS: This research was reused without an OpenAI API call. "
+        "CACHED ANALYSIS: This research was reused without an AI API call. "
         "Player availability, injuries, weather, usage, and sportsbook markets have not been refreshed."
     )
     analysis["data_gaps"] = gaps
@@ -405,13 +491,16 @@ def _load_cached_analysis(game: dict) -> dict:
 
 
 def main() -> int:
+    reset_provider_run_state()
+    reset_research_cache()
     log_path = application_directory() / "Betting_Spreads.log"
     try:
         reuse_cache = "--reuse-cache" in sys.argv[1:]
         refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
-        api_key = None if reuse_cache else get_api_key()
+        if not reuse_cache:
+            ensure_configured()
         analyses = []
         failures = []
         progress_window = ProgressWindow(len(games))
@@ -431,6 +520,7 @@ def main() -> int:
                     continue
                 if sys.stdout is not None:
                     print(f"Researching {index} of {len(games)}: {matchup}", flush=True)
+                research = None
                 try:
                     if reuse_cache:
                         analysis = _load_cached_analysis(game)
@@ -439,27 +529,40 @@ def main() -> int:
                         cached = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else None
                         is_complete = (
                             cached is not None
-                            and len(cached.get("picks", [])) == 5
-                            and len(cached.get("touchdown_scorers", [])) == 3
+                            and isinstance(cached.get("picks"), list)
+                            and len(cached["picks"]) <= 5
+                            and isinstance(cached.get("touchdown_scorers"), list)
+                            and len(cached["touchdown_scorers"]) <= 3
+                            and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
                             analysis = _load_cached_analysis(game)
                         else:
-                            analysis = analyze_game(game, api_key)
+                            research = collect_game_research(game)
+                            analysis = analyze_game(game, research)
                             _save_cached_analysis(game, analysis)
                     else:
-                        analysis = analyze_game(game, api_key)
+                        research = collect_game_research(game)
+                        analysis = analyze_game(game, research)
                         _save_cached_analysis(game, analysis)
                     analyses.append(analysis)
                 except Exception as exc:
                     failures.append(f"{matchup}: {exc}")
                     analyses.append({
-                        "summary": "AI research could not be completed or no cached analysis was available.",
-                        "game_script": "",
+                        "summary": (
+                            "AI analysis was unavailable. Independent NFL research was collected "
+                            "where possible; see the research evidence and source links below."
+                            if research else
+                            "AI research could not be completed and no independent research was available."
+                        ),
+                        "game_script": "No AI-generated game script is available for this matchup.",
                         "picks": [],
                         "touchdown_scorers": [],
                         "data_gaps": [str(exc)],
-                        "sources": [],
+                        "sources": list(research.get("sources", [])) if research else [],
+                        "independent_research": research.get("research_text", "") if research else "",
+                        "ai_provider": "Unavailable",
+                        "research_mode": "independent_research_only" if research else "unavailable",
                     })
         finally:
             progress_window.close()
@@ -470,11 +573,26 @@ def main() -> int:
             f"NFL Season {season}, Week {week}\n"
             f"{len(games)} matchups exported.\n"
             f"AI analysis completed for {success_count} of {len(games)} games.\n"
-            + ("Cached analysis reused; no OpenAI API calls were made.\n" if reuse_cache else
+            + ("Cached analysis reused; no AI API calls were made.\n" if reuse_cache else
                "Only missing/incomplete cache entries were refreshed; complete entries were reused.\n" if refresh_incomplete else
-               "Fresh AI research completed; results were saved to the local cache.\n")
+               "Fresh AI research completed with provider fallback; results were saved to the local cache.\n")
             + f"\nSaved to:\n{output}"
         )
+        provider_usage = get_provider_usage_stats()
+        usage_lines = []
+        for provider_name, stats in sorted(provider_usage.items()):
+            usage_line = (
+                f"{provider_name}: {stats['requests']} request(s), "
+                f"{stats['prompt_characters']:,} prompt characters"
+            )
+            if stats["prompt_tokens"] or stats["completion_tokens"]:
+                usage_line += (
+                    f", {stats['prompt_tokens']:,} input tokens, "
+                    f"{stats['completion_tokens']:,} output tokens"
+                )
+            usage_lines.append(usage_line)
+        usage_report = "\n".join(usage_lines) or "No AI provider requests were made."
+        message += f"\n\nProvider API usage:\n{usage_report}"
         if failures:
             message += f"\n\n{len(failures)} matchup analyses failed. See Betting_Spreads.log."
         log_path.write_text(message + ("\n\n" + "\n".join(failures) if failures else "") + "\n", encoding="utf-8")

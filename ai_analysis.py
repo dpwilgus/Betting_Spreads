@@ -1,198 +1,281 @@
-"""OpenAI-powered NFL matchup research and betting analysis."""
+"""Provider-independent NFL matchup analysis with independent live research."""
 from __future__ import annotations
-import json, os, ssl, urllib.error, urllib.request
+
+import json
+import re
 from pathlib import Path
 from typing import Any
-import certifi, keyring
-from tkinter import Tk, Label, Entry, Button
 
-API_URL = "https://api.openai.com/v1/responses"
-MODEL = "gpt-6-astra"
-SERVICE_NAME = "Betting Spreads"
-ACCOUNT_NAME = "openai_api_key"
+from ai_providers import generate_json
+from live_research import collect_game_research
 
-def _resource_path(relative: str) -> Path:
-    import sys
-    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
-    return base / relative
+MAX_RESEARCH_PROMPT_CHARS = 24000
 
-def get_api_key() -> str:
-    env_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if env_key:
-        return env_key
-    try:
-        stored = keyring.get_password(SERVICE_NAME, ACCOUNT_NAME)
-    except Exception:
-        stored = None
-    if stored:
-        return stored.strip()
 
-    # Use a small custom Tk window. tkinter.simpledialog relies on a
-    # MacWindowStyle command that is absent in some Homebrew Tk 9 builds.
-    root = Tk()
-    root.title("Set up Betting Spreads AI")
-    root.geometry("560x170")
-    root.resizable(False, False)
-    root.attributes("-topmost", True)
-    Label(
-        root,
-        text="Enter your OpenAI API key.\nIt will be saved securely in your computer's credential store.",
-        wraplength=520
-    ).pack(pady=15)
-    entry = Entry(root, show="*", width=65)
-    entry.pack(pady=5)
-    entry.focus_set()
-    result = {"key": None}
+def _bounded_research_text(research_text: str) -> tuple[str, bool]:
+    """Keep complete, priority-ordered research sections within the prompt budget."""
+    text = str(research_text or "")
+    if len(text) <= MAX_RESEARCH_PROMPT_CHARS:
+        return text, False
 
-    def submit():
-        result["key"] = entry.get().strip()
-        root.destroy()
+    kept: list[str] = []
+    used = 0
+    for section in text.split("\n\n"):
+        separator = 2 if kept else 0
+        remaining = MAX_RESEARCH_PROMPT_CHARS - used - separator
+        if len(section) > remaining:
+            break
+        kept.append(section)
+        used += separator + len(section)
 
-    def cancel():
-        root.destroy()
-
-    Button(root, text="Save API Key", command=submit).pack(pady=12)
-    root.bind("<Return>", lambda event: submit())
-    root.protocol("WM_DELETE_WINDOW", cancel)
-    root.mainloop()
-
-    key = result["key"]
-    if not key:
-        raise RuntimeError("An OpenAI API key is required to generate matchup analysis.")
-    try:
-        keyring.set_password(SERVICE_NAME, ACCOUNT_NAME, key)
-    except Exception as exc:
-        raise RuntimeError(
-            "Could not securely save your API key in macOS Keychain or Windows Credential Manager. "
-            f"Details: {exc}"
-        ) from exc
-    return key
-
+    marker = "[Research truncated.]"
+    while kept and used + 2 + len(marker) > MAX_RESEARCH_PROMPT_CHARS:
+        removed = kept.pop()
+        used -= len(removed) + (2 if kept else 0)
+    if not kept:
+        return marker[:MAX_RESEARCH_PROMPT_CHARS], True
+    return "\n\n".join(kept) + "\n\n" + marker, True
 ANALYSIS_SCHEMA: dict[str, Any] = {
-    "type": "object", "additionalProperties": False,
+    "type": "object",
+    "additionalProperties": False,
     "properties": {
         "summary": {"type": "string"},
         "game_script": {"type": "string"},
-        "picks": {"type": "array", "minItems": 5, "maxItems": 5, "items": {
-            "type": "object", "additionalProperties": False,
-            "properties": {
-                "rank": {"type": "integer"},
-                "market_type": {"type": "string", "enum": ["Player Prop", "Game Prop"]},
-                "player_or_team": {"type": "string"},
-                "bet_description": {"type": "string"},
-                "market_line": {"type": "string"},
-                "play_threshold": {"type": "string"},
-                "estimated_hit_probability": {"type": "number"},
-                "confidence": {"type": "integer"},
-                "statistical_rationale": {"type": "string"},
-                "risk_factors": {"type": "string"},
-                "data_quality": {"type": "string", "enum": ["Strong", "Moderate", "Limited"]}
+        "picks": {
+            "type": "array", "minItems": 0, "maxItems": 5,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "rank": {"type": "integer"},
+                    "market_type": {"type": "string", "enum": ["Player Prop", "Game Prop"]},
+                    "player_or_team": {"type": "string"},
+                    "bet_description": {"type": "string"},
+                    "market_line": {"type": "string"},
+                    "play_threshold": {"type": "string"},
+                    "estimated_hit_probability": {"type": "number"},
+                    "confidence": {"type": "integer"},
+                    "statistical_rationale": {"type": "string"},
+                    "risk_factors": {"type": "string"},
+                    "data_quality": {"type": "string", "enum": ["Strong", "Moderate", "Limited"]},
+                },
+                "required": [
+                    "rank", "market_type", "player_or_team", "bet_description", "market_line",
+                    "play_threshold", "estimated_hit_probability", "confidence",
+                    "statistical_rationale", "risk_factors", "data_quality",
+                ],
             },
-            "required": ["rank", "market_type", "player_or_team", "bet_description", "market_line",
-                         "play_threshold", "estimated_hit_probability", "confidence",
-                         "statistical_rationale", "risk_factors", "data_quality"]
-        }},
-        "touchdown_scorers": {"type": "array", "minItems": 3, "maxItems": 3, "items": {
-            "type": "object", "additionalProperties": False,
-            "properties": {
-                "rank": {"type": "integer"}, "player": {"type": "string"}, "team": {"type": "string"},
-                "estimated_td_probability": {"type": "number"}, "confidence": {"type": "integer"},
-                "rationale": {"type": "string"}, "risk_factors": {"type": "string"}
+        },
+        "touchdown_scorers": {
+            "type": "array", "minItems": 0, "maxItems": 3,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "rank": {"type": "integer"},
+                    "player": {"type": "string"},
+                    "team": {"type": "string"},
+                    "estimated_td_probability": {"type": "number"},
+                    "confidence": {"type": "integer"},
+                    "rationale": {"type": "string"},
+                    "risk_factors": {"type": "string"},
+                },
+                "required": [
+                    "rank", "player", "team", "estimated_td_probability",
+                    "confidence", "rationale", "risk_factors",
+                ],
             },
-            "required": ["rank", "player", "team", "estimated_td_probability", "confidence",
-                         "rationale", "risk_factors"]
-        }},
-        "data_gaps": {"type": "array", "items": {"type": "string"}}
+        },
+        "injury_impact": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "injured_player": {"type": "string"},
+                    "team": {"type": "string"},
+                    "availability": {"type": "string"},
+                    "affected_player": {"type": "string"},
+                    "affected_team": {"type": "string"},
+                    "impact_direction": {
+                        "type": "string",
+                        "enum": ["Positive", "Negative", "Mixed"],
+                    },
+                    "statistical_effect": {"type": "string"},
+                    "prop_market": {"type": "string"},
+                    "evidence": {"type": "string"},
+                    "confidence": {"type": "integer"},
+                    "conditions": {"type": "string"},
+                },
+                "required": [
+                    "injured_player", "team", "availability",
+                    "affected_player", "affected_team", "impact_direction",
+                    "statistical_effect", "prop_market", "evidence",
+                    "confidence", "conditions",
+                ],
+            },
+        },
+        "data_gaps": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["summary", "game_script", "picks", "touchdown_scorers", "data_gaps"]
+    "required": [
+        "summary", "game_script", "picks", "touchdown_scorers",
+        "injury_impact", "data_gaps",
+    ],
 }
 
-def _extract_output_text(response: dict[str, Any]) -> str:
-    chunks = []
-    for item in response.get("output", []):
-        if item.get("type") != "message":
-            continue
-        for content in item.get("content", []):
-            if content.get("type") == "output_text":
-                chunks.append(content.get("text", ""))
-            elif content.get("type") == "refusal":
-                raise RuntimeError(f"AI analysis was refused: {content.get('refusal', 'No details')}")
-    if not chunks:
-        raise RuntimeError("OpenAI returned no structured analysis text.")
-    return "".join(chunks)
 
-def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
+def _normalize_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value).casefold())
+
+
+def _validate_analysis(
+    data: dict[str, Any],
+    rosters: dict[str, list[str]] | None = None,
+    team_names: tuple[str, str] | None = None,
+) -> None:
+    if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
+        raise RuntimeError("AI response is missing the matchup summary or game script.")
+    picks = data.get("picks")
+    scorers = data.get("touchdown_scorers")
+    if not isinstance(picks, list) or len(picks) > 5:
+        raise RuntimeError("AI response may contain at most five betting opportunities.")
+    if not isinstance(scorers, list) or len(scorers) > 3:
+        raise RuntimeError("AI response may contain at most three touchdown candidates.")
+    for item in picks:
+        probability = float(item.get("estimated_hit_probability", -1))
+        confidence = int(item.get("confidence", 0))
+        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+            raise RuntimeError("AI returned an invalid pick probability or confidence.")
+        if item.get("market_type") not in ("Player Prop", "Game Prop"):
+            raise RuntimeError("AI returned an unsupported betting market type.")
+        if item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
+            raise RuntimeError("AI returned an unsupported data-quality label.")
+        for field in ("market_type", "player_or_team", "bet_description",
+                      "market_line", "play_threshold", "statistical_rationale", "risk_factors"):
+            if not item.get(field):
+                raise RuntimeError(f"AI response is missing a required pick field: {field}")
+        if rosters is not None and item.get("market_type") == "Player Prop":
+            known_players = {
+                _normalize_name(player)
+                for roster in rosters.values()
+                for player in roster
+            }
+            if not known_players or _normalize_name(item.get("player_or_team", "")) not in known_players:
+                raise RuntimeError(
+                    "AI suggested a player prop for someone not found on either current ESPN roster: "
+                    + str(item.get("player_or_team", ""))
+                )
+    for item in scorers:
+        probability = float(item.get("estimated_td_probability", -1))
+        confidence = int(item.get("confidence", 0))
+        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+            raise RuntimeError("AI returned an invalid touchdown probability or confidence.")
+        if team_names is not None:
+            normalized_team = _normalize_name(item.get("team", ""))
+            matching_team = next(
+                (name for name in team_names if _normalize_name(name) == normalized_team),
+                None,
+            )
+            if matching_team is None:
+                raise RuntimeError(
+                    "AI assigned a touchdown candidate to a team outside this matchup: "
+                    + str(item.get("team", ""))
+                )
+            if rosters is not None:
+                roster = next(
+                    (players for name, players in rosters.items()
+                     if _normalize_name(name) == _normalize_name(matching_team)),
+                    [],
+                )
+                roster_names = {_normalize_name(player) for player in roster}
+                if not roster_names or _normalize_name(item.get("player", "")) not in roster_names:
+                    raise RuntimeError(
+                        "AI suggested a touchdown scorer not found on the current ESPN roster: "
+                        + str(item.get("player", ""))
+                    )
+    injury_impacts = data.get("injury_impact")
+    if not isinstance(injury_impacts, list):
+        raise RuntimeError("AI injury_impact must be a list.")
+
+    for item in injury_impacts:
+        if item.get("impact_direction") not in ("Positive", "Negative", "Mixed"):
+            raise RuntimeError("AI returned an unsupported injury-impact direction.")
+        confidence = int(item.get("confidence", 0))
+        if not 1 <= confidence <= 10:
+            raise RuntimeError("AI returned an invalid injury-impact confidence.")
+        for field in (
+            "injured_player", "team", "availability", "affected_player",
+            "affected_team", "statistical_effect", "prop_market",
+            "evidence", "conditions",
+        ):
+            if not item.get(field):
+                raise RuntimeError(
+                    f"AI injury impact is missing a required field: {field}"
+                )
+
+    if not isinstance(data.get("data_gaps", []), list):
+        raise RuntimeError("AI data_gaps must be a list.")
+
+
+def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Collect current data without AI, then use the first healthy configured AI provider."""
+    research = research or collect_game_research(game)
+    base = Path(__file__).resolve().parent / "agents"
     instructions = (
-        _resource_path("agents/NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")
+        (base / "NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")
         + "\n\nQUALITY REVIEW CHECKLIST\n"
-        + _resource_path("agents/PROBABILITY_REVIEW.md").read_text(encoding="utf-8")
+        + (base / "PROBABILITY_REVIEW.md").read_text(encoding="utf-8")
     )
     matchup = f"{game['Away Team']} at {game['Home Team']}"
+    team_names = (str(game["Away Team"]), str(game["Home Team"]))
+    prompt_research, research_truncated = _bounded_research_text(
+        research.get("research_text", "No independent research was available.")
+    )
+
     user_input = (
         f"Analyze this upcoming NFL matchup: {matchup}.\n"
         f"Kickoff: {game.get('Game Date (ET)', 'Not supplied')}.\n"
         f"ESPN game line: {game.get('Betting Line', 'Unavailable')}.\n"
         f"Game status: {game.get('Game Status', 'Not supplied')}.\n\n"
-        "Research current season statistics, recent player game logs and usage, injuries/availability, "
-        "defensive matchup tendencies, and weather when relevant. Research current player/game prop "
-        "market lines only where publicly verifiable. Return exactly five ranked betting opportunities "
-        "and exactly three ranked anytime touchdown candidates, as required by the schema. Prioritize "
-        "the strongest evidence and confidence ratings of 7-10 when genuinely supported. If fewer than "
-        "five or three candidates have strong evidence, include the next-best plausible candidates but "
-        "clearly lower their confidence, mark data quality Limited where appropriate, and disclose "
-        "the uncertainty. Never invent players, statistics, injuries, lines, odds, or sources. "
-        "Do not assume an unverified market line is available."
+        "Use the independently collected research below as source material. Distinguish current "
+        "facts from historical references. You may supplement it with your own knowledge, but do "
+        "not claim to have browsed or verified anything that is not in the supplied evidence. "
+        "If a current prop line is not in the evidence, label it Not verified. Never fabricate "
+        "injuries, player statistics, market prices, sources, or source timestamps.\n\n"
+        "Return one JSON object only, with exactly these top-level keys: "
+        "summary (string), game_script (string), picks (array of up to 5), "
+        "touchdown_scorers (array of up to 3), injury_impact (array), "
+        "data_gaps (array of strings). Each pick object must contain: rank (integer), "
+        "market_type (Player Prop or Game Prop), player_or_team, bet_description, "
+        "market_line, play_threshold, estimated_hit_probability (number 0-100), "
+        "confidence (integer 1-10), statistical_rationale, risk_factors, "
+        "data_quality (Strong, Moderate, or Limited). Only include evidence-supported picks. "
+        f"Only use these matchup teams: {team_names[0]} and {team_names[1]}. "
+        "Each Player Prop must name a player exactly as listed on one of the supplied current ESPN rosters. "
+        "Each touchdown_scorer team must exactly match one of the two matchup teams, and the player "
+        "must exactly match that team's supplied roster. "
+        "If the roster does not support a player or evidence is inadequate, omit that candidate; "
+        "shorter arrays are acceptable. Each touchdown_scorer must "
+        "contain: rank, player, team, estimated_td_probability (number 0-100), "
+        "confidence (integer 1-10), rationale, risk_factors. Each injury_impact "
+        "must contain: injured_player, team, availability, affected_player, "
+        "affected_team, impact_direction (Positive, Negative, or Mixed), "
+        "statistical_effect, prop_market, evidence, confidence (integer 1-10), "
+        "conditions. Include every listed field; use empty arrays when appropriate.\n"
+        "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n"
+        + prompt_research
     )
-    payload = {
-        "model": MODEL, "reasoning": {"effort": "low"},
-        "tools": [{"type": "web_search"}], "tool_choice": "auto",
-        "include": ["web_search_call.action.sources"],
-        "text": {"format": {"type": "json_schema", "name": "nfl_matchup_analysis",
-                            "strict": True, "schema": ANALYSIS_SCHEMA}},
-        "input": [{"role": "system", "content": instructions},
-                  {"role": "user", "content": user_input}]
-    }
-    request = urllib.request.Request(
-        API_URL, data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
-                 "User-Agent": "Betting-Spreads/2.0"}, method="POST"
+
+    rosters = research.get("rosters")
+    data, provider_name = generate_json(
+        instructions,
+        user_input,
+        validator=lambda result: _validate_analysis(
+            result, rosters=rosters, team_names=team_names
+        ),
     )
-    context = ssl.create_default_context(cafile=certifi.where())
-    try:
-        with urllib.request.urlopen(request, timeout=240, context=context) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        if exc.code == 401:
-            raise RuntimeError(
-                "OpenAI rejected the API key. Check that it is valid and API billing is enabled. "
-                "To replace it, remove the 'Betting Spreads' credential from Keychain Access "
-                "(macOS) or Windows Credential Manager and run the app again."
-            ) from exc
-        raise RuntimeError(f"OpenAI API error ({exc.code}): {body[:1200]}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError(f"Could not connect to OpenAI: {exc}") from exc
-    analysis = json.loads(_extract_output_text(result))
-    sources = []
-    for item in result.get("output", []):
-        if item.get("type") == "web_search_call":
-            action = item.get("action", {})
-            source_items = action.get("sources", []) or action.get("search", {}).get("sources", [])
-            for source in source_items:
-                url = source.get("url")
-                if url and all(existing["url"] != url for existing in sources):
-                    sources.append({"title": source.get("title") or url, "url": url})
-    if len(analysis.get("picks", [])) > 5 or len(analysis.get("touchdown_scorers", [])) > 3:
-        raise RuntimeError("The AI returned more recommendations than the workbook supports.")
-    for pick in analysis.get("picks", []):
-        probability = float(pick.get("estimated_hit_probability", -1))
-        confidence = int(pick.get("confidence", 0))
-        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
-            raise RuntimeError("The AI returned an invalid probability or confidence score.")
-    for scorer in analysis.get("touchdown_scorers", []):
-        probability = float(scorer.get("estimated_td_probability", -1))
-        confidence = int(scorer.get("confidence", 0))
-        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
-            raise RuntimeError("The AI returned an invalid touchdown probability or confidence score.")
-    analysis["sources"] = sources
-    return analysis
+    data["sources"] = list(research.get("sources", []))
+    data["independent_research"] = str(research.get("research_text", ""))
+    data["ai_provider"] = provider_name
+    data["research_mode"] = "independent_espn_plus_ai"
+    data["research_truncated_for_prompt"] = research_truncated
+    data["research_prompt_characters"] = len(prompt_research)
+    return data

@@ -1,6 +1,6 @@
 # Betting Spreads
 
-A one-click desktop app for Windows and macOS that retrieves the current NFL scoreboard week from ESPN, researches each matchup with the OpenAI API, and exports an Excel workbook with a separate analysis tab for every game.
+A one-click desktop app for Windows and macOS that retrieves the current NFL scoreboard week, independently collects ESPN game and injury information, then uses a configurable AI provider with automatic retries and fallback to analyze each matchup and export an Excel workbook.
 
 ## Downloads
 
@@ -11,25 +11,72 @@ Download the latest stable version from the repository's **Releases** page:
 
 No Python installation or package setup is required for end users.
 
-## First-time AI setup
+## AI providers and first-time setup
 
-The AI matchup research feature requires an OpenAI API key and API billing. ChatGPT subscriptions do not include API usage.
+AI analysis is provider-independent. The app can use one or more API keys, tries providers in the configured order, retries transient failures, and falls back when a provider is unavailable, rate-limited, or out of quota.
 
-1. Create an API key at [OpenAI API keys](https://platform.openai.com/api-keys).
-2. Run Betting Spreads.
-3. On first launch, paste your API key into the setup prompt.
-4. The key is saved in your computer's secure credential store (macOS Keychain or Windows Credential Manager). It is not written into the workbook or repository.
+### Free providers (recommended)
 
-The app uses the OpenAI Responses API with web search to research each matchup. API usage and web-search tool charges are billed to the API account associated with the key. Review current [API pricing](https://developers.openai.com/api/docs/pricing) before use. The number of API research calls generally corresponds to the number of games on the current scoreboard.
+1. **Google Gemini API** — default model: `gemini-3.8-flash`. Free-tier token pricing is currently $0 for this model, subject to project/model rate limits. Google says free-tier content may be used to improve its products; do not submit private or sensitive information. See [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) and [rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+2. **GroqCloud** — default model: `openai/gpt-oss-20b`. The Free plan currently includes hosted models with per-model RPM, RPD, and token limits. Check your organization's live [rate limits](https://console.groq.com/docs/rate-limits).
+3. **OpenRouter** — default route: `openrouter/free`, which selects an available free model. Free-model requests currently have a 20 RPM / 50 RPD limit for accounts below the $10 lifetime-credit threshold. See [free models](https://openrouter.ai/collections/free-models) and [pricing/limits](https://openrouter.ai/pricing).
 
-To replace a saved key, remove the `Betting Spreads` / `openai_api_key` credential from macOS Keychain Access or Windows Credential Manager, then run the app again. An `OPENAI_API_KEY` environment variable can also be used instead of the saved key.
+Free tiers, model availability, rate limits, and provider terms can change. The app cannot guarantee that a provider's free quota will cover an entire NFL slate. Users should review each provider's terms and dashboard before use.
+
+### Optional paid provider
+
+**OpenAI API** is supported as an optional fallback. ChatGPT subscriptions do not include API usage; OpenAI API usage is billed separately. See [OpenAI API pricing](https://developers.openai.com/api/docs/pricing).
+
+### Create your keys
+
+- Gemini: [Google AI Studio API keys](https://aistudio.google.com/app/apikey)
+- Groq: [GroqCloud API keys](https://console.groq.com/keys)
+- OpenRouter: [OpenRouter API keys](https://openrouter.ai/settings/keys)
+- OpenAI (optional): [OpenAI API keys](https://platform.openai.com/api-keys)
+
+On first run, the app prompts for any combination of these keys. Leave providers you do not want to use blank. Keys are saved in the computer's secure credential store (macOS Keychain or Windows Credential Manager), not in the workbook or repository.
+
+You can also configure environment variables before launching:
+- `GEMINI_API_KEY`
+- `GROQ_API_KEY`
+- `OPENROUTER_API_KEY`
+- `NVIDIA_API_KEY` (experimental; only used when explicitly added to `AI_PROVIDER_ORDER`)
+- `OPENAI_API_KEY` (optional; paid)
+
+The default free-provider order is Gemini → Groq → OpenRouter. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, and `OPENAI_MODEL`.
+
+### NVIDIA NIM (experimental, local development only)
+
+NVIDIA NIM is available as an **opt-in experimental provider** for personal development and testing. It is deliberately excluded from the default Gemini → Groq → OpenRouter provider order.
+
+- Default model: `nvidia/nemotron-3-ultra-550b-a55b`
+- Alternative model: `nvidia/nemotron-3.5-lightning-30b-a3b`
+- API endpoint: `https://integrate.api.nvidia.com/v1/chat/completions`
+- Credential: `NVIDIA_API_KEY` (stored in macOS Keychain / Windows Credential Manager as `nvidia_api_key`)
+- Optional settings: `NVIDIA_MODEL` and `NVIDIA_MAX_TOKENS` (default 2600)
+
+To run a local development test using NVIDIA only, set the provider order in the same Terminal session before launching:
+
+```bash
+AI_PROVIDER_ORDER=nvidia python main.py
+```
+
+To compare NVIDIA first and then fall back to the existing free providers:
+
+```bash
+AI_PROVIDER_ORDER=nvidia,gemini,groq,openrouter python main.py
+```
+
+The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endpoint does not guarantee JSON-mode enforcement. The app therefore asks for strict JSON in its prompt and still validates the returned analysis. Invalid responses may trigger retries and fallback. Check the NVIDIA account dashboard for current per-model limits and availability.
+
+**Development/testing only:** NVIDIA says hosted Developer Program endpoints are for prototyping, research, development, and testing—not serving real end users. NVIDIA's free endpoint rate limits vary by model and current traffic, and are not an unlimited token allocation. See [NVIDIA NIM FAQ](https://docs.api.nvidia.com/nim/docs/product), [LLM API reference](https://docs.api.nvidia.com/nim/reference/llm-apis), and [Nemotron 3 Ultra model card](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard).
 
 ## How to use
 
 1. Download the file for your operating system from [Releases](../../releases).
 2. Windows: double-click `Betting_Spreads.exe`.
 3. macOS: unzip the download, then open `Betting_Spreads.app`. On first launch, macOS may require right-clicking the app and choosing **Open** because this app is not signed or notarized.
-4. Enter your OpenAI API key on first run.
+4. Enter one or more provider API keys on first run (Gemini, Groq, or OpenRouter are the recommended default free options; NVIDIA is optional and must be explicitly enabled for local development).
 5. The app retrieves the current ESPN scoreboard week, researches each matchup, and creates or replaces `NFL_Weekly_Matchups.xlsx` beside the executable/app bundle.
 
 ## Workbook contents
@@ -41,11 +88,11 @@ To replace a saved key, remove the `Betting Spreads` / `openai_api_key` credenti
 ## Research and probability limitations
 
 - ESPN's public scoreboard endpoint supplies the schedule and available game line. It is unofficial and may change without notice.
-- OpenAI web search is used to research current statistics, player usage, injuries, matchup tendencies, weather, and publicly available prop markets.
+- ESPN game summaries and available team injury endpoints are fetched independently of the AI provider. The selected AI provider analyzes this evidence; it does not automatically have web search. Current player-prop prices must be independently present in the evidence to be labeled verified.
 - A market line is labeled **Not verified** when the research cannot confirm a live sportsbook offer. A model play threshold is an analytical target, not a claim that a sportsbook currently offers that number.
 - Estimated hit probabilities and 1–10 confidence ratings are research estimates, not guarantees or independently audited forecasts. Confidence reflects the reliability of available data and the stability of the estimate; it is not the same as probability.
 - The analyst is instructed not to invent stats or lines and not to pad the recommendations when evidence is weak. Sources and material data gaps are included in each game tab.
-- API use is subject to OpenAI's usage-based pricing. An internet connection is required.
+- API use is subject to each selected provider's free-tier limits or paid pricing. An internet connection is required. Provider fallback does not combine quotas and cannot guarantee uninterrupted free access.
 
 This tool is for research and informational purposes only. It does not guarantee outcomes or constitute financial advice.
 
@@ -75,7 +122,7 @@ pyinstaller --noconfirm --clean --windowed --collect-data certifi --collect-all 
 For local testing only, the Python script supports a cache-only workbook refresh:
 
 1. Run a normal update once. Each successful matchup analysis is saved as JSON in the local `analysis_cache/` folder.
-2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling the OpenAI API.
+2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling any AI API.
 3. Cached analyses are clearly marked in the workbook because injuries, player availability, weather, usage, and sportsbook markets are not refreshed.
 
 Use `python main.py --refresh-incomplete` to reuse cached analyses that already contain exactly five prop ideas and three touchdown candidates, while making API calls only for missing or incomplete cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
