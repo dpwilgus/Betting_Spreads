@@ -293,6 +293,19 @@ def _call_provider(
             # NVIDIA's hosted Nemotron endpoint uses max_tokens. Its API does
             # not guarantee JSON mode, so rely on the prompt and our validator.
             payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "5000"))
+            # Nemotron 3 Ultra defaults to high-effort internal reasoning. Those
+            # tokens consume the same max_tokens budget as the JSON answer. Keep
+            # reasoning off by default for this structured-output workload; users
+            # can opt into medium/high effort when experimenting.
+            if "nemotron-3-ultra" in model.lower():
+                reasoning_effort = os.environ.get(
+                    "NVIDIA_REASONING_EFFORT", "none"
+                ).strip().lower()
+                if reasoning_effort not in {"none", "medium", "high"}:
+                    raise RuntimeError(
+                        "NVIDIA_REASONING_EFFORT must be none, medium, or high."
+                    )
+                payload["reasoning_effort"] = reasoning_effort
         else:
             payload["max_completion_tokens"] = int(
                 os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")
