@@ -53,7 +53,7 @@ NVIDIA NIM is available as an **opt-in experimental provider** for personal deve
 - Alternative model: `nvidia/nemotron-3.5-lightning-30b-a3b`
 - API endpoint: `https://integrate.api.nvidia.com/v1/chat/completions`
 - Credential: `NVIDIA_API_KEY` (stored in macOS Keychain / Windows Credential Manager as `nvidia_api_key`)
-- Optional settings: `NVIDIA_MODEL` and `NVIDIA_MAX_TOKENS` (default 2600)
+- Optional settings: `NVIDIA_MODEL` and `NVIDIA_MAX_TOKENS` (default 5000)
 
 To run a local development test using NVIDIA only, set the provider order in the same Terminal session before launching:
 
@@ -67,7 +67,7 @@ To compare NVIDIA first and then fall back to the existing free providers:
 AI_PROVIDER_ORDER=nvidia,gemini,groq,openrouter python main.py
 ```
 
-The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endpoint does not guarantee JSON-mode enforcement. The app therefore asks for strict JSON in its prompt and still validates the returned analysis. Invalid responses may trigger retries and fallback. Check the NVIDIA account dashboard for current per-model limits and availability.
+The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endpoint does not guarantee JSON-mode enforcement. The app therefore asks for strict JSON in its prompt and still validates the returned analysis. Explicitly truncated responses are detected and sent to fallback without repeating the same token-expensive request; other invalid responses may receive one retry. Check the NVIDIA account dashboard for current per-model limits and availability.
 
 **Development/testing only:** NVIDIA says hosted Developer Program endpoints are for prototyping, research, development, and testing—not serving real end users. NVIDIA's free endpoint rate limits vary by model and current traffic, and are not an unlimited token allocation. See [NVIDIA NIM FAQ](https://docs.api.nvidia.com/nim/docs/product), [LLM API reference](https://docs.api.nvidia.com/nim/reference/llm-apis), and [Nemotron 3 Ultra model card](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard).
 
