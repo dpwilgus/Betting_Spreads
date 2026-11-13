@@ -16,7 +16,7 @@ import certifi
 import keyring
 
 SERVICE_NAME = "Betting Spreads"
-PROVIDER_ORDER = ("gemini", "groq", "openrouter")
+PROVIDER_ORDER = ("gemini", "groq", "openrouter")  # NVIDIA stays opt-in for local development.
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
 _CONFIGURED_PROVIDERS_CACHE: list[tuple["Provider", str]] | None = None
 _PROVIDER_USAGE: dict[str, dict[str, int]] = {}
@@ -56,6 +56,12 @@ PROVIDERS = {
         "https://openrouter.ai/api/v1/chat/completions",
         "openrouter/free", "openai",
     ),
+    # Experimental NVIDIA-hosted NIM endpoint. Never included in the default order.
+    "nvidia": Provider(
+        "nvidia", "NVIDIA_API_KEY", "nvidia_api_key",
+        "https://integrate.api.nvidia.com/v1/chat/completions",
+        "nvidia/nemotron-3-ultra-550b-a55b", "openai",
+    ),
     # Optional paid fallback. ChatGPT subscriptions do not include API credits.
     "openai": Provider(
         "openai", "OPENAI_API_KEY", "openai_api_key",
@@ -93,14 +99,15 @@ def _configure_keys() -> None:
 
     root = tk.Tk()
     root.title("Set up Betting Spreads AI")
-    root.geometry("620x330")
+    root.geometry("640x380")
     root.resizable(False, False)
     root.attributes("-topmost", True)
     tk.Label(
         root,
         text=("Add one or more API keys. Gemini, Groq and OpenRouter offer free usage "
-              "with limits. OpenAI is optional and usage is paid. Keys are stored in "
-              "your computer's secure credential store."),
+              "with limits. NVIDIA NIM is experimental and for development/testing only. "
+              "OpenAI is optional and usage is paid. Keys are stored in your computer's "
+              "secure credential store."),
         wraplength=580, justify="left",
     ).pack(padx=18, pady=(16, 10), anchor="w")
 
@@ -109,6 +116,7 @@ def _configure_keys() -> None:
         ("gemini", "Google Gemini API key (free tier)"),
         ("groq", "Groq API key (free tier)"),
         ("openrouter", "OpenRouter API key (free models)"),
+        ("nvidia", "NVIDIA NIM API key (experimental)"),
         ("openai", "OpenAI API key (optional, paid)"),
     ]
     for name, label in labels:
@@ -276,12 +284,17 @@ def _call_provider(
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.2,
-            "max_completion_tokens": int(
+        }
+        if provider.name == "nvidia":
+            # NVIDIA's hosted Nemotron endpoint uses max_tokens. Its API does
+            # not guarantee JSON mode, so rely on the prompt and our validator.
+            payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "2600"))
+        else:
+            payload["max_completion_tokens"] = int(
                 os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")
                 if provider.name == "groq" else "1400"
-            ),
-            "response_format": {"type": "json_object"},
-        }
+            )
+            payload["response_format"] = {"type": "json_object"}
         if provider.name == "groq":
             if model.startswith("openai/gpt-oss"):
                 payload["include_reasoning"] = False
