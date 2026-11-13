@@ -32,6 +32,7 @@ Free tiers, model availability, rate limits, and provider terms can change. The 
 - Gemini: [Google AI Studio API keys](https://aistudio.google.com/app/apikey)
 - Groq: [GroqCloud API keys](https://console.groq.com/keys)
 - OpenRouter: [OpenRouter API keys](https://openrouter.ai/settings/keys)
+- NVIDIA NIM: [NVIDIA API keys](https://build.nvidia.com/)
 - OpenAI (optional): [OpenAI API keys](https://platform.openai.com/api-keys)
 
 On first run, the app prompts for any combination of these keys. Leave providers you do not want to use blank. Keys are saved in the computer's secure credential store (macOS Keychain or Windows Credential Manager), not in the workbook or repository.
@@ -40,14 +41,14 @@ You can also configure environment variables before launching:
 - `GEMINI_API_KEY`
 - `GROQ_API_KEY`
 - `OPENROUTER_API_KEY`
-- `NVIDIA_API_KEY` (experimental; only used when explicitly added to `AI_PROVIDER_ORDER`)
+- `NVIDIA_API_KEY` (optional; final free-provider fallback)
 - `OPENAI_API_KEY` (optional; paid)
 
-The default free-provider order is Gemini → Groq → OpenRouter. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, and `OPENAI_MODEL`.
+The default free-provider order is Gemini → Groq → OpenRouter → NVIDIA. Providers without a saved key are skipped. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,NVIDIA,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI,NVIDIA`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, `NVIDIA_MODEL`, and `OPENAI_MODEL`.
 
-### NVIDIA NIM (experimental, local development only)
+### NVIDIA NIM (experimental fallback)
 
-NVIDIA NIM is available as an **opt-in experimental provider** for personal development and testing. It is deliberately excluded from the default Gemini → Groq → OpenRouter provider order.
+NVIDIA NIM is included as the **fourth optional free-provider fallback** for personal analysis and testing. It is only contacted when its API key is configured and the first three providers cannot complete the analysis.
 
 - Default model: `nvidia/nemotron-3-ultra-550b-a55b`
 - Alternative model: `nvidia/nemotron-3.5-lightning-30b-a3b`
