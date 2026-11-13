@@ -33,6 +33,19 @@ class NvidiaTruncationTests(unittest.TestCase):
             ):
                 _call_provider(self.provider, "test-key", "system", "user")
 
+    def test_token_cap_is_detected_when_finish_reason_is_missing(self):
+        response = {
+            "choices": [{"message": {"content": '{"summary":"cut off'}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 777},
+        }
+        with patch("ai_providers._request_json", return_value=response), patch.dict(
+            "os.environ", {"NVIDIA_MAX_TOKENS": "777"}
+        ):
+            with self.assertRaisesRegex(
+                IncompleteResponseError, "finish_reason=token_limit_reached"
+            ):
+                _call_provider(self.provider, "test-key", "system", "user")
+
     def test_explicit_truncation_does_not_repeat_the_same_provider_request(self):
         with patch(
             "ai_providers.ensure_configured",
