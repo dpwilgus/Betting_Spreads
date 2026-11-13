@@ -436,7 +436,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("summary <= 35 words", user_prompt)
         self.assertIn("statistical_rationale <= 18 words", user_prompt)
         self.assertIn("at most 2 meaningful", user_prompt)
-        self.assertIn("risk_factors value MUST literally start with", user_prompt)
+        self.assertIn("risk_factors must start 'Questionable:'", user_prompt)
         self.assertIn("'Questionable:'", user_prompt)
         self.assertNotIn('"additionalProperties"', user_prompt)
         self.assertLess(len(system_prompt) + len(user_prompt), 10000)
