@@ -235,11 +235,13 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_analysis_schema_validation(self):
         _validate_analysis(valid_analysis())
 
-    def test_analysis_rejects_more_than_five_recommendations(self):
+    def test_analysis_allows_more_than_five_recommendations(self):
         data = valid_analysis()
-        data["picks"].append(dict(data["picks"][0], rank=6))
-        with self.assertRaises(RuntimeError):
-            _validate_analysis(data)
+        data["picks"].extend(
+            dict(data["picks"][0], rank=rank)
+            for rank in range(6, 9)
+        )
+        _validate_analysis(data)
 
     def test_analysis_allows_fewer_evidence_supported_recommendations(self):
         data = valid_analysis()
@@ -458,7 +460,8 @@ class ProviderFallbackTests(unittest.TestCase):
             result = analyze_game(game, research=research)
 
         system_prompt, user_prompt = generate.call_args.args[:2]
-        self.assertIn("up to five ranked betting opportunities", system_prompt)
+        self.assertIn("target five per matchup", system_prompt)
+        self.assertIn("at least three", system_prompt)
         self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
         self.assertIn("statistical_rationale", user_prompt)
         self.assertIn("touchdown_scorers", user_prompt)
