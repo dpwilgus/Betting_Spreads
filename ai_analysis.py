@@ -85,7 +85,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
             },
         },
         "injury_impact": {
-            "type": "array",
+            "type": "array", "maxItems": 3,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
@@ -113,7 +113,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
                 ],
             },
         },
-        "data_gaps": {"type": "array", "items": {"type": "string"}},
+        "data_gaps": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
     },
     "required": [
         "summary", "game_script", "picks", "touchdown_scorers",
@@ -253,7 +253,12 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Each touchdown_scorer team must exactly match one of the two matchup teams, and the player "
         "must exactly match that team's supplied roster. "
         "If the roster does not support a player or evidence is inadequate, omit that candidate; "
-        "shorter arrays are acceptable. Each touchdown_scorer must "
+        "shorter arrays are acceptable. Keep the JSON compact: summary <= 70 words; game_script "
+        "<= 90 words; each pick statistical_rationale <= 35 words and risk_factors <= 20 words; "
+        "each TD rationale <= 25 words and risk_factors <= 15 words; return at most 3 meaningful "
+        "injury_impact entries, with each text field <= 18 words; data_gaps <= 6 short items. "
+        "Use concise phrases, avoid repeating research, and do not add commentary outside JSON. "
+        "Each touchdown_scorer must "
         "contain: rank, player, team, estimated_td_probability (number 0-100), "
         "confidence (integer 1-10), rationale, risk_factors. Each injury_impact "
         "must contain: injured_player, team, availability, affected_player, "
