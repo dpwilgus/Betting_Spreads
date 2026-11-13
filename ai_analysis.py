@@ -223,6 +223,20 @@ def _research_player_usage(research_text: str) -> dict[str, dict[str, Any]]:
                 continue
             player = str(record.get("player") or "").strip()
             usage = record.get("usage_and_recent_stats")
+            if not isinstance(usage, dict):
+                # The active legacy collector stores the full normalized ESPN log.
+                game_log = record.get("season_game_log")
+                if isinstance(game_log, dict):
+                    totals_by_category = game_log.get("season_totals", {})
+                    totals = (
+                        next(iter(totals_by_category.values()), {})
+                        if isinstance(totals_by_category, dict) else {}
+                    )
+                    usage = {
+                        "games_available": game_log.get("games_available", 0),
+                        "season": totals if isinstance(totals, dict) else {},
+                        "recent": game_log.get("recent_games", []),
+                    }
             if player and isinstance(usage, dict):
                 usage_by_player[_normalize_name(player)] = {
                     "player": player,
