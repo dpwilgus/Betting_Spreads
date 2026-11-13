@@ -657,5 +657,26 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(result["injury_statuses"][0]["status"], "Out")
 
 
+    def test_core_injuries_searches_beyond_first_twelve_records(self):
+        _core_team_injuries.cache_clear()
+        items = [{"$ref": f"active-record-{index}"} for index in range(12)]
+        items.append({"$ref":"jacobs-record"})
+        responses = [{"items":items}]
+        responses.extend({"status":"Active"} for _ in range(12))
+        responses.extend([
+            {
+                "status":"Out","date":"2026-11-13","shortComment":"Finger surgery",
+                "athlete":{"$ref":"jacobs-athlete"},
+            },
+            {"displayName":"Josh Jacobs","position":{"abbreviation":"RB"}},
+        ])
+        with patch("live_research._get_json", side_effect=responses) as get_json:
+            result = _core_team_injuries("123")
+        self.assertEqual([item["player"] for item in result], ["Josh Jacobs"])
+        self.assertEqual(result[0]["status"], "Out")
+        self.assertEqual(get_json.call_count, 15)
+        _core_team_injuries.cache_clear()
+
+
 if __name__ == "__main__":
     unittest.main()
