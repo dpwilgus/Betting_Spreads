@@ -331,8 +331,16 @@ def _call_provider(
         choices = result.get("choices") or []
         finish_reason = choices[0].get("finish_reason", "") if choices else ""
         truncated = str(finish_reason).lower() in {"length", "max_tokens"}
+    limit = payload.get("max_tokens", payload.get("max_completion_tokens"))
+    if provider.name == "nvidia" and not finish_reason and isinstance(limit, int):
+        # Some compatible gateways omit finish_reason. If usage exactly reaches
+        # max_tokens, treat the response as truncated rather than retrying blindly.
+        metadata = result.get("usage") or {}
+        completion_tokens = metadata.get("completion_tokens")
+        if isinstance(completion_tokens, (int, float)) and completion_tokens >= limit:
+            truncated = True
+            finish_reason = "token_limit_reached"
     if truncated:
-        limit = payload.get("max_tokens", payload.get("max_completion_tokens"))
         raise IncompleteResponseError(
             f"{provider.name} truncated its response (finish_reason={finish_reason}; "
             f"output limit={limit}). Shorten the requested analysis or raise the "
