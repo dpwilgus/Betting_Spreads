@@ -60,6 +60,35 @@ class NvidiaTruncationTests(unittest.TestCase):
                 generate_json("system", "user")
         call.assert_called_once()
 
+    def test_nemotron_ultra_disables_internal_reasoning_by_default(self):
+        response = {
+            "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        with patch("ai_providers._request_json", return_value=response) as request, patch.dict(
+            "os.environ", {}, clear=True
+        ):
+            _call_provider(self.provider, "test-key", "system", "user")
+        payload = request.call_args.args[1]
+        self.assertEqual(payload["reasoning_effort"], "none")
+        self.assertEqual(payload["max_tokens"], 5000)
+
+    def test_nemotron_ultra_reasoning_effort_can_be_overridden(self):
+        response = {
+            "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        }
+        with patch("ai_providers._request_json", return_value=response) as request, patch.dict(
+            "os.environ", {"NVIDIA_REASONING_EFFORT": "medium"}
+        ):
+            _call_provider(self.provider, "test-key", "system", "user")
+        self.assertEqual(request.call_args.args[1]["reasoning_effort"], "medium")
+
+    def test_invalid_nvidia_reasoning_effort_is_rejected(self):
+        with patch.dict("os.environ", {"NVIDIA_REASONING_EFFORT": "extreme"}):
+            with self.assertRaisesRegex(RuntimeError, "must be none, medium, or high"):
+                _call_provider(self.provider, "test-key", "system", "user")
+
     def test_nvidia_default_output_limit_is_5000(self):
         response = {
             "choices": [{"message": {"content": '{"ok":true}'}, "finish_reason": "stop"}],
