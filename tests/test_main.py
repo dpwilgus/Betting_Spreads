@@ -15,6 +15,21 @@ class MatchupFilterTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["Away Team"], "New England Patriots")
 
+
+    def test_filter_accepts_full_team_names(self):
+        result = filter_requested_matchup(
+            self.games, ["--matchup", "New England Patriots at Detroit Lions"]
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["Home Team"], "Detroit Lions")
+
+    def test_filter_accepts_city_names(self):
+        result = filter_requested_matchup(
+            self.games, ["--matchup", "New England at Detroit"]
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["Away Team"], "New England Patriots")
+
     def test_filter_without_option_keeps_full_slate(self):
         self.assertEqual(filter_requested_matchup(self.games, []), self.games)
 
