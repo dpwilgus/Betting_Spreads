@@ -1116,7 +1116,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             selected_players = _select_research_players(
                                 roster_players, depth_chart
                             )
-                            selection_basis = "ESPN depth-chart No. 1 at position"
+                            selection_basis = "ESPN depth-chart order plus secondary roster candidates"
                         except Exception as exc:
                             selected_players = _select_research_players(roster_players)
                             selection_basis = (
