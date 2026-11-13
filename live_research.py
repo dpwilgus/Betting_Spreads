@@ -608,40 +608,38 @@ def _select_research_players(
     players: list[dict[str, str]],
     depth_chart: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
-    """Select a bounded set of likely offensive contributors from current depth charts."""
+    """Research primary and secondary offensive contributors, not just one starter."""
     roster_by_id = {player.get("id"): player for player in players if player.get("id")}
     depth_ids = _extract_depth_chart_ids(depth_chart or {})
-    # More than one RB/WR is intentional: usage is often split, and the listed
-    # No. 1 player is not necessarily the team's leading fantasy/prop producer.
+    # Secondary backs and receivers can lead their team in actual usage or scoring.
+    # Use depth-chart order first, then fill any missing slots from the current roster.
     limits = {"QB": 1, "RB": 2, "WR": 2, "TE": 1}
     selected: list[dict[str, str]] = []
+    selected_ids: set[str] = set()
     for position, limit in limits.items():
         added = 0
         for athlete_id in depth_ids.get(position, []):
             player = roster_by_id.get(athlete_id)
-            if player is not None:
+            if player is not None and athlete_id not in selected_ids:
                 selected.append(player)
+                selected_ids.add(athlete_id)
                 added += 1
                 if added >= limit:
                     break
-    if selected:
-        return selected
-
-    # Without depth-chart ranks, roster order is not reliable enough to
-    # justify selecting secondary RB/WR options. Keep the fallback conservative.
-    fallback_limits = {"QB": 1, "RB": 1, "WR": 1, "TE": 1}
-    counts = {position: 0 for position in fallback_limits}
-    for player in players:
-        position = player.get("position", "").upper()
-        if (
-            player.get("id")
-            and position in fallback_limits
-            and counts[position] < fallback_limits[position]
-        ):
-            selected.append(player)
-            counts[position] += 1
+        if added < limit:
+            for player in players:
+                athlete_id = str(player.get("id") or "")
+                if (
+                    player.get("position", "").upper() == position
+                    and athlete_id
+                    and athlete_id not in selected_ids
+                ):
+                    selected.append(player)
+                    selected_ids.add(athlete_id)
+                    added += 1
+                    if added >= limit:
+                        break
     return selected
-
 
 def _compact_player_gamelog(
     gamelog: dict[str, Any],
