@@ -653,6 +653,8 @@ class LiveResearchTests(unittest.TestCase):
 
         self.assertIn("Core Injury Player", result["research_text"])
         self.assertIn("Summary Injury Player", result["research_text"])
+        self.assertEqual(result["injury_statuses"][0]["player"], "Core Injury Player")
+        self.assertEqual(result["injury_statuses"][0]["status"], "Out")
 
 
 if __name__ == "__main__":
