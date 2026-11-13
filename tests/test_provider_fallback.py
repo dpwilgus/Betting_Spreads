@@ -406,6 +406,22 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("[Research truncated.]", result)
         self.assertLessEqual(len(result), 100)
 
+    def test_research_truncation_skips_oversized_section_and_keeps_later_evidence(self):
+        research = (
+            "HEADER"
+            + "\n\nINJURIES: " + ("x" * 120)
+            + "\n\nPLAYER LOGS: compact evidence"
+        )
+        with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 100):
+            result, truncated = _bounded_research_text(research)
+
+        self.assertTrue(truncated)
+        self.assertIn("HEADER", result)
+        self.assertNotIn("INJURIES:", result)
+        self.assertIn("PLAYER LOGS: compact evidence", result)
+        self.assertIn("[Research truncated.]", result)
+        self.assertLessEqual(len(result), 100)
+
     def test_short_research_prompt_is_not_changed(self):
         research = "HEADER\n\nINJURIES: complete"
         result, truncated = _bounded_research_text(research)
@@ -435,7 +451,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("touchdown_scorers", user_prompt)
         self.assertIn("summary <= 35 words", user_prompt)
         self.assertIn("statistical_rationale <= 18 words", user_prompt)
-        self.assertIn("at most 2 meaningful", user_prompt)
+        self.assertIn("up to 3 meaningful injury_impact entries", user_prompt)
         self.assertIn("risk_factors must start 'Questionable:'", user_prompt)
         self.assertIn("'Questionable:'", user_prompt)
         self.assertNotIn('"additionalProperties"', user_prompt)
