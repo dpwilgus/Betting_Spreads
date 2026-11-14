@@ -385,6 +385,46 @@ def fetch_event_quotes(
     return record
 
 
+def research_supports_first_td(research_text: str) -> bool:
+    """Return true only when collected player logs show a credible scoring-role candidate."""
+    for line in str(research_text or "").splitlines():
+        if not line.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS"):
+            continue
+        marker = line.find(": [")
+        if marker < 0:
+            continue
+        try:
+            records = json.loads(line[marker + 2:])
+        except (TypeError, ValueError):
+            continue
+        for record in records if isinstance(records, list) else []:
+            if not isinstance(record, dict):
+                continue
+            log = record.get("season_game_log")
+            if not isinstance(log, dict):
+                continue
+            games = int(log.get("games_available") or 0)
+            totals_by_category = log.get("season_totals", {})
+            totals = next(iter(totals_by_category.values()), {}) if isinstance(totals_by_category, dict) else {}
+            if games <= 0 or not isinstance(totals, dict):
+                continue
+            try:
+                rushing_tds = float(totals.get("rushingTouchdowns", 0) or 0)
+                receiving_tds = float(totals.get("receivingTouchdowns", 0) or 0)
+                carries = float(totals.get("rushingAttempts", 0) or 0)
+                targets = float(totals.get("receivingTargets", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            position = str(record.get("position") or "").upper()
+            if position == "RB" and carries / games >= 7 and rushing_tds >= 2:
+                return True
+            if position in {"WR", "TE"} and targets / games >= 5 and receiving_tds >= 2:
+                return True
+            if position == "QB" and carries / games >= 3 and rushing_tds >= 1:
+                return True
+    return False
+
+
 def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
     if not quotes:
         return "No live player-prop quotes were returned by The Odds API for the requested markets."
