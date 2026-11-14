@@ -378,20 +378,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(gap_row + 1, 1, "\n".join(f"• {gap}" for gap in gaps) if gaps else "No material data gaps were reported.")
     sheet.cell(gap_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
 
-    research_row = gap_row + 4
-    sheet.cell(research_row, 1, "INDEPENDENT LIVE RESEARCH")
-    sheet.cell(research_row, 1).font = white_bold
-    sheet.cell(research_row, 1).fill = navy
-    sheet.merge_cells(start_row=research_row, start_column=1, end_row=research_row, end_column=10)
-    sheet.merge_cells(start_row=research_row + 1, start_column=1, end_row=research_row + 3, end_column=10)
-    sheet.cell(
-        research_row + 1, 1,
-        analysis.get("independent_research", "No independent research text was retained.")
-    )
-    sheet.cell(research_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
-    sheet.row_dimensions[research_row + 1].height = 180
-
-    source_row = research_row + 5
+    source_row = gap_row + 4
     sheet.cell(source_row, 1, "RESEARCH SOURCES")
     sheet.cell(source_row, 1).font = white_bold
     sheet.cell(source_row, 1).fill = navy
@@ -630,7 +617,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 5
+                            and cached.get("analysis_version") == 6
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
