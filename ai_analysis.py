@@ -48,7 +48,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
     kept: list[str] = []
     used = 0
     omitted = len(prioritized) != len(sections)
-    marker = "[Research truncated: lower-priority sections omitted.]"
+    marker = "[Research truncated.]"
     budget = max(0, MAX_RESEARCH_PROMPT_CHARS - len(marker) - 2)
     for _, _, section in prioritized:
         separator = 2 if kept else 0
