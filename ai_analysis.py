@@ -348,7 +348,8 @@ def _filter_player_props_by_usage(
         if any(term in description for term in (
             "anytime touchdown", "anytime td", "touchdown scorer",
             "first touchdown", "first td", "first-half touchdown",
-            "first half touchdown", "1st half touchdown",
+            "first half touchdown", "1st half touchdown", "first half td",
+            "1st half td", "1h td",
         )):
             season = usage.get("season") if isinstance(usage.get("season"), dict) else {}
             games = int(usage.get("games_available") or 0)
@@ -738,6 +739,7 @@ def _separate_unverified_player_props(
                               "receptions", "receiving targets", "rushing attempts",
                               "passing attempts", "completions", "interceptions",
                               "longest reception", "anytime touchdown", "anytime td", "touchdown scorer",
+                              "first touchdown", "first half touchdown", "first half td",
                               "passing touchdowns", "rushing touchdowns", "receiving touchdowns",
                               "tackles for loss", "quarterback hits", "forced fumbles",
                               "fumble recoveries", "field goals made", "field goals attempted", "extra points made", "extra points attempted", "punting yards", "longest punt", "punts", "longest pass", "longest rush")
