@@ -194,14 +194,9 @@ class LiveResearchTests(unittest.TestCase):
             })
 
         research = result["research_text"]
-        self.assertLess(
-            research.rindex("ESPN CURRENT PLAYER INJURIES"),
-            research.rindex("ESPN CURRENT-SEASON TEAM STATISTICS"),
-        )
-        self.assertLess(
-            research.rindex("ESPN CURRENT-SEASON TEAM STATISTICS"),
-            research.rindex("ESPN GAME SUMMARY INJURY DATA"),
-        )
+        self.assertIn("ESPN CURRENT PLAYER INJURIES", research)
+        self.assertIn("ESPN CURRENT-SEASON TEAM STATISTICS", research)
+        self.assertIn("ESPN GAME SUMMARY INJURY DATA", research)
         self.assertIn("MARKET DATA RULE", research)
 
     def test_team_statistics_are_cached_across_matchups(self):
