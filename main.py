@@ -361,7 +361,8 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     player_rows = []
     if isinstance(candidates_by_team, dict):
         for team_name, candidates in candidates_by_team.items():
-            for candidate in candidates if isinstance(candidates, list) else []:
+            team_candidates = candidates if isinstance(candidates, list) else []
+            for candidate in team_candidates:
                 if not isinstance(candidate, dict):
                     continue
                 player_name = str(candidate.get("name") or "")
@@ -659,7 +660,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 4
+                            and cached.get("analysis_version") == 5
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
