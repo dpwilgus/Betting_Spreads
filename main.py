@@ -23,7 +23,8 @@ from openpyxl.utils import get_column_letter
 from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
 from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
-from sportsbook_odds import fetch_event_quotes, PASS1_MARKETS, summarize_quotes
+from sportsbook_odds import fetch_event_quotes, PASS1_MARKETS, summarize_quotes, ensure_api_key_configured
+from game_selector import select_games_gui
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
