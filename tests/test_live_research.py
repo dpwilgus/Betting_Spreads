@@ -684,12 +684,12 @@ class LiveResearchTests(unittest.TestCase):
         from live_research import _select_research_players
 
         roster = [
-            {"id":"1","name":"QB","position":"QB"},
+            {"id":"1","name":"Quarterback One","position":"QB"},
             {"id":"2","name":"RB One","position":"RB"},
             {"id":"3","name":"RB Two","position":"RB"},
             {"id":"4","name":"WR One","position":"WR"},
             {"id":"5","name":"WR Two","position":"WR"},
-            {"id":"6","name":"TE","position":"TE"},
+            {"id":"6","name":"Tight End One","position":"TE"},
         ]
         depth = {
             "depthCharts":[{
@@ -704,7 +704,7 @@ class LiveResearchTests(unittest.TestCase):
         selected = _select_research_players(roster, depth)
         self.assertEqual(
             [player["name"] for player in selected],
-            ["QB","RB One","RB Two","WR One","WR Two","TE"],
+            ["Quarterback One","RB One","RB Two","WR One","WR Two","Tight End One"],
         )
 
 
@@ -749,6 +749,26 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(len(compact), 8)
         self.assertLess(len(str(compact)), len(str(reports)))
         self.assertEqual(compact[0]["player"], "Player 11")
+
+
+    def test_prompt_trimming_keeps_both_teams_player_logs_before_injuries(self):
+        from ai_analysis import _bounded_research_text
+
+        research = "\n\n".join([
+            "INDEPENDENT LIVE NFL RESEARCH",
+            "CURRENT ESPN ACTIVE TEAM ROSTER — Minnesota Vikings: " + ("R"*2500),
+            "ESPN MATCHUP, PLAYER, INJURY, MARKET AND RECENT-GAME DATA: " + ("S"*2000),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Minnesota Vikings: " + ("M"*5000),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Green Bay Packers: " + ("G"*5000),
+            "ESPN CURRENT-SEASON TEAM STATISTICS — Minnesota Vikings: " + ("T"*1000),
+            "ESPN CURRENT PLAYER INJURIES — Minnesota Vikings: " + ("I"*5000),
+        ])
+        with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 15000):
+            prompt, truncated = _bounded_research_text(research)
+        self.assertTrue(truncated)
+        self.assertIn("PLAYER GAME LOGS — Minnesota Vikings", prompt)
+        self.assertIn("PLAYER GAME LOGS — Green Bay Packers", prompt)
+        self.assertNotIn("CURRENT ESPN ACTIVE TEAM ROSTER", prompt)
 
 
 if __name__ == "__main__":
