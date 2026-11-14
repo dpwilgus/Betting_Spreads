@@ -6,7 +6,7 @@ from unittest.mock import patch
 from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_text,
                          _filter_injury_impacts, _filter_player_props_by_usage, _filter_td_scorers_by_usage,
                          _research_player_usage, _separate_unverified_player_props,
-                         _validate_analysis, analyze_game)
+                         _normalize_name, _validate_analysis, analyze_game)
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
                           get_provider_usage_stats, reset_provider_run_state)
 from live_research import collect_game_research, _extract_roster_names
