@@ -825,10 +825,11 @@ def _compact_player_gamelog(
         ),
         "WR": (
             "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
-            "rushingAttempts", "rushingYards",
+            "rushingAttempts", "rushingYards", "longReception",
         ),
         "TE": (
             "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
+            "longReception",
         ),
     }.get(position.upper(), (
         "totalTackles", "soloTackles", "assistedTackles", "sacks",
