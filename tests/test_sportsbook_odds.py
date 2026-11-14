@@ -49,6 +49,29 @@ class OddsApiMarketTests(unittest.TestCase):
         self.assertEqual(quote["price"], "+250")
         self.assertEqual(quote["sportsbook"], "DraftKings")
 
+    def test_parse_anytime_td_when_player_is_in_outcome_name(self):
+        event = {
+            "id": "odds-event-2",
+            "bookmakers": [{
+                "key": "fanduel",
+                "title": "FanDuel",
+                "markets": [{
+                    "key": "player_anytime_td",
+                    "outcomes": [{
+                        "name": "Gavin Bartholomew",
+                        "description": "Yes",
+                        "price": 275,
+                    }],
+                }],
+            }],
+        }
+        quotes = sportsbook_odds._parse_quotes(
+            event, "2026-11-14T15:01:00+00:00"
+        )
+        self.assertEqual(quotes[0]["player"], "Gavin Bartholomew")
+        self.assertEqual(quotes[0]["line"], "Yes")
+        self.assertEqual(quotes[0]["price"], "+275")
+
     def test_event_matching_uses_both_teams(self):
         game = {
             "Away Team": "Green Bay Packers",
