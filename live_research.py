@@ -646,17 +646,26 @@ def _select_research_players(
     # every inactive/developmental roster player for every game in a full slate.
     limits = {"QB": 2, "RB": 3, "WR": 5, "TE": 2}
     selected: list[dict[str, str]] = []
-    selected_ids: set[str] = set()
+    selected_by_id: dict[str, dict[str, str]] = {}
 
-    def add_player(athlete_id: str) -> None:
+    def add_player(athlete_id: str, reason: str) -> None:
         player = roster_by_id.get(str(athlete_id))
-        if player is not None and str(athlete_id) not in selected_ids:
-            selected.append(player)
-            selected_ids.add(str(athlete_id))
+        if player is None:
+            return
+        existing = selected_by_id.get(str(athlete_id))
+        if existing is not None:
+            prior = existing.get("research_reason", "")
+            if reason not in prior:
+                existing["research_reason"] = "; ".join(filter(None, (prior, reason)))
+            return
+        candidate = dict(player)
+        candidate["research_reason"] = reason
+        selected_by_id[str(athlete_id)] = candidate
+        selected.append(candidate)
 
     for position, limit in limits.items():
         for athlete_id in position_ids[position][:limit]:
-            add_player(athlete_id)
+            add_player(athlete_id, "Core depth-chart/roster candidate")
 
     def normalize(value: Any) -> str:
         return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
@@ -710,7 +719,10 @@ def _select_research_players(
         # Add the next two available depth-chart options, even beyond the base
         # position limit. These are candidates to evaluate, not assumed beneficiaries.
         for athlete_id in ordered_ids[injured_index + 1:injured_index + 3]:
-            add_player(athlete_id)
+            add_player(
+                athlete_id,
+                f"Potential replacement for {report.get('player')} ({report.get('status')})",
+            )
 
     return selected
 
@@ -932,6 +944,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
+                                    "research_reason": player.get("research_reason", ""),
                                     "game_log_unavailable": "skipped after repeated ESPN player-log errors",
                                 })
                                 continue
@@ -946,6 +959,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
+                                    "research_reason": player.get("research_reason", ""),
                                     "usage_and_recent_stats": _compact_player_gamelog(gamelog, player["position"]),
                                 })
                                 _player_gamelog_failures = 0
@@ -960,6 +974,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
+                                    "research_reason": player.get("research_reason", ""),
                                     "game_log_unavailable": type(exc).__name__,
                                 })
                         if player_records:
@@ -1292,7 +1307,11 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 f"({type(exc).__name__})"
                             )
                         selected_player_candidates[team_name] = [
-                            {"name": player["name"], "position": player["position"]}
+                            {
+                                "name": player["name"],
+                                "position": player["position"],
+                                "research_reason": player.get("research_reason", ""),
+                            }
                             for player in selected_players
                         ]
                         player_records = []
