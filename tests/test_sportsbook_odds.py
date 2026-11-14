@@ -21,6 +21,49 @@ class OddsApiMarketTests(unittest.TestCase):
         self.assertIn("spreads_h1", sportsbook_odds.PASS2_MARKETS)
         self.assertIn("totals_h1", sportsbook_odds.PASS2_MARKETS)
 
+    def test_pass2_includes_first_touchdown_scorer(self):
+        self.assertIn("player_1st_td", sportsbook_odds.PASS2_MARKETS)
+        self.assertEqual(sportsbook_odds.PASS2_TD_MARKETS, ("player_1st_td",))
+
+    def test_first_td_market_is_labeled_and_parsed(self):
+        event = {
+            "id": "odds-event-first-td",
+            "bookmakers": [{
+                "key": "fanduel",
+                "title": "FanDuel",
+                "markets": [{
+                    "key": "player_1st_td",
+                    "outcomes": [{
+                        "name": "Yes",
+                        "description": "Jordan Addison",
+                        "price": 650,
+                    }],
+                }],
+            }],
+        }
+        quotes = sportsbook_odds._parse_quotes(
+            event, "2026-11-14T15:01:00+00:00"
+        )
+        self.assertEqual(quotes[0]["market"], "first touchdown scorer")
+        self.assertEqual(quotes[0]["player"], "Jordan Addison")
+        self.assertEqual(quotes[0]["price"], "+650")
+
+    def test_first_td_fetch_requires_researched_scoring_role(self):
+        no_role = (
+            'ESPN CURRENT-SEASON PLAYER GAME LOGS — Team: '
+            '[{"player":"Receiver","position":"WR","season_game_log":'
+            '{"games_available":8,"season_totals":{"Regular Season Stats":'
+            '{"receivingTargets":"20","receivingTouchdowns":"0"}}}}]'
+        )
+        strong_role = (
+            'ESPN CURRENT-SEASON PLAYER GAME LOGS — Team: '
+            '[{"player":"Receiver","position":"WR","season_game_log":'
+            '{"games_available":8,"season_totals":{"Regular Season Stats":'
+            '{"receivingTargets":"64","receivingTouchdowns":"5"}}}}]'
+        )
+        self.assertFalse(sportsbook_odds.research_supports_first_td(no_role))
+        self.assertTrue(sportsbook_odds.research_supports_first_td(strong_role))
+
     def test_parse_anytime_td_quote_preserves_player_book_and_price(self):
         event = {
             "id": "odds-event-1",
