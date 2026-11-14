@@ -195,12 +195,12 @@ class LiveResearchTests(unittest.TestCase):
 
         research = result["research_text"]
         self.assertLess(
-            research.index("ESPN CURRENT PLAYER INJURIES"),
-            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
+            research.rindex("ESPN CURRENT PLAYER INJURIES"),
+            research.rindex("ESPN CURRENT-SEASON TEAM STATISTICS"),
         )
         self.assertLess(
-            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
-            research.index("ESPN GAME SUMMARY INJURY DATA"),
+            research.rindex("ESPN CURRENT-SEASON TEAM STATISTICS"),
+            research.rindex("ESPN GAME SUMMARY INJURY DATA"),
         )
         self.assertIn("MARKET DATA RULE", research)
 
