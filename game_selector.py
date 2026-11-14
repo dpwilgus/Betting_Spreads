@@ -40,6 +40,10 @@ def select_games_gui(games: list[dict[str, Any]]) -> list[dict[str, Any]]:
         radio_row, text="Non-Sunday (Thu / Fri / Sat / Mon)", variable=mode,
         value="other", command=lambda: refresh_games()
     ).pack(side="left")
+    tk.Radiobutton(
+        root, text="Entire week (all game days)", variable=mode,
+        value="all", command=lambda: refresh_games()
+    ).pack(anchor="w", padx=18, pady=(6, 0))
 
     tk.Label(
         root,
@@ -83,7 +87,7 @@ def select_games_gui(games: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 is_sunday = kickoff.weekday() == 6
             except ValueError:
                 is_sunday = True
-            if (mode.get() == "sunday" and is_sunday) or (mode.get() == "other" and not is_sunday):
+            if mode.get() == "all" or (mode.get() == "sunday" and is_sunday) or (mode.get() == "other" and not is_sunday):
                 subset.append(game)
         if not subset:
             tk.Label(list_frame, text="No games found in this slate.").pack(
