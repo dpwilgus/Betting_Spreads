@@ -670,5 +670,18 @@ class ProviderFallbackTests(unittest.TestCase):
         )
 
 
+    def test_high_volume_receiver_can_qualify_as_td_candidate_without_prior_td(self):
+        data = {"touchdown_scorers":[{"player":"Justin Jefferson","estimated_td_probability":24}]}
+        usage = {
+            "justinjefferson":{
+                "player":"Justin Jefferson","position":"WR","games_available":9,
+                "season":{"receivingTargets":90,"receivingTouchdowns":0},
+                "recent":[{"stats":{"receivingTargets":10,"receivingTouchdowns":0}}]
+            }
+        }
+        _filter_td_scorers_by_usage(data,usage)
+        self.assertEqual([item["player"] for item in data["touchdown_scorers"]],["Justin Jefferson"])
+
+
 if __name__ == "__main__":
     unittest.main()
