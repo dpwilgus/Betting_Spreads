@@ -268,6 +268,7 @@ def _research_player_usage(research_text: str) -> dict[str, dict[str, Any]]:
                 usage_by_player[_normalize_name(player)] = {
                     "player": player,
                     "position": str(record.get("position") or "").upper(),
+                    "research_reason": str(record.get("research_reason") or ""),
                     **usage,
                 }
     return usage_by_player
@@ -815,6 +816,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             "Overlapping same-team moneyline/spread recommendations were deduplicated; only the higher-confidence option was retained."
         )
     data["analysis_version"] = 5
+    data["selected_player_candidates"] = research.get("selected_player_candidates", {})
+    data["researched_player_evidence"] = player_usage
     data["sources"] = list(research.get("sources", []))
     data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
