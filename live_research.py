@@ -1262,6 +1262,46 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     if team.get("id"):
                         teams[str(team["id"])] = team.get("displayName", "Team")
 
+            team_injuries_by_id: dict[str, list[dict[str, Any]]] = {}
+            # Injury reports are fetched independently of roster availability;
+            # an incomplete roster response must never suppress injury evidence.
+            for team_id, team_name in teams.items():
+                core_url = (
+                    "https://sports.core.api.espn.com/v2/sports/football/"
+                    f"leagues/nfl/teams/{team_id}/injuries?limit=100"
+                )
+                try:
+                    team_injuries = _core_team_injuries(team_id)
+                    team_injuries_by_id[team_id] = team_injuries
+                    for report in team_injuries:
+                        if isinstance(report, dict) and report.get("player") and report.get("status"):
+                            injury_statuses.append({
+                                "player": str(report["player"]),
+                                "position": str(report.get("position") or ""),
+                                "team": str(team_name),
+                                "status": str(report["status"]),
+                                "report_date": str(report.get("report_date") or ""),
+                                "comment": str(report.get("comment") or ""),
+                            })
+                    if team_injuries:
+                        injury_sections.append(
+                            f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
+                            + json.dumps(
+                                _compact_injury_prompt_reports(team_injuries),
+                                ensure_ascii=False, separators=(",", ":"),
+                            )
+                        )
+                except Exception as exc:
+                    team_injuries_by_id[team_id] = []
+                    sections.append(
+                        f"ESPN Core API injury data unavailable for {team_name}: "
+                        f"{type(exc).__name__}"
+                    )
+                sources.append({
+                    "title": f"ESPN Core API player injuries — {team_name}",
+                    "url": core_url,
+                })
+
             for team_id, team_name in teams.items():
                 try:
                     roster_players = list(_team_roster_players(team_id))
@@ -1280,40 +1320,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             f"CURRENT ESPN ACTIVE TEAM ROSTER — {team_name}: "
                             + ", ".join(roster_names)
                         )
-                        team_injuries = []
-                        core_url = (
-                            "https://sports.core.api.espn.com/v2/sports/football/"
-                            f"leagues/nfl/teams/{team_id}/injuries?limit=100"
-                        )
-                        try:
-                            team_injuries = _core_team_injuries(team_id)
-                            for report in team_injuries:
-                                if isinstance(report, dict) and report.get("player") and report.get("status"):
-                                    injury_statuses.append({
-                                        "player": str(report["player"]),
-                                        "position": str(report.get("position") or ""),
-                                        "team": str(team_name),
-                                        "status": str(report["status"]),
-                                        "report_date": str(report.get("report_date") or ""),
-                                        "comment": str(report.get("comment") or ""),
-                                    })
-                            if team_injuries:
-                                injury_sections.append(
-                                    f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
-                                    + json.dumps(
-                                        _compact_injury_prompt_reports(team_injuries),
-                                        ensure_ascii=False, separators=(",", ":"),
-                                    )
-                                )
-                        except Exception as exc:
-                            sections.append(
-                                f"ESPN Core API injury data unavailable for {team_name}: "
-                                f"{type(exc).__name__}"
-                            )
-                        sources.append({
-                            "title": f"ESPN Core API player injuries — {team_name}",
-                            "url": core_url,
-                        })
+                        team_injuries = team_injuries_by_id.get(team_id, [])
                         try:
                             depth_chart = _team_depth_chart(team_id)
                             depth_chart_url = (
