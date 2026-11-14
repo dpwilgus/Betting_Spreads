@@ -32,6 +32,7 @@ Free tiers, model availability, rate limits, and provider terms can change. The 
 - Gemini: [Google AI Studio API keys](https://aistudio.google.com/app/apikey)
 - Groq: [GroqCloud API keys](https://console.groq.com/keys)
 - OpenRouter: [OpenRouter API keys](https://openrouter.ai/settings/keys)
+- NVIDIA NIM: [NVIDIA API keys](https://build.nvidia.com/)
 - OpenAI (optional): [OpenAI API keys](https://platform.openai.com/api-keys)
 
 On first run, the app prompts for any combination of these keys. Leave providers you do not want to use blank. Keys are saved in the computer's secure credential store (macOS Keychain or Windows Credential Manager), not in the workbook or repository.
@@ -40,20 +41,20 @@ You can also configure environment variables before launching:
 - `GEMINI_API_KEY`
 - `GROQ_API_KEY`
 - `OPENROUTER_API_KEY`
-- `NVIDIA_API_KEY` (experimental; only used when explicitly added to `AI_PROVIDER_ORDER`)
+- `NVIDIA_API_KEY` (optional; final free-provider fallback)
 - `OPENAI_API_KEY` (optional; paid)
 
-The default free-provider order is Gemini → Groq → OpenRouter. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, and `OPENAI_MODEL`.
+The default free-provider order is Gemini → Groq → OpenRouter → NVIDIA. Providers without a saved key are skipped. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,NVIDIA,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI,NVIDIA`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, `NVIDIA_MODEL`, and `OPENAI_MODEL`.
 
-### NVIDIA NIM (experimental, local development only)
+### NVIDIA NIM (experimental fallback)
 
-NVIDIA NIM is available as an **opt-in experimental provider** for personal development and testing. It is deliberately excluded from the default Gemini → Groq → OpenRouter provider order.
+NVIDIA NIM is included as the **fourth optional free-provider fallback** for personal analysis and testing. It is only contacted when its API key is configured and the first three providers cannot complete the analysis.
 
 - Default model: `nvidia/nemotron-3-ultra-550b-a55b`
 - Alternative model: `nvidia/nemotron-3.5-lightning-30b-a3b`
 - API endpoint: `https://integrate.api.nvidia.com/v1/chat/completions`
 - Credential: `NVIDIA_API_KEY` (stored in macOS Keychain / Windows Credential Manager as `nvidia_api_key`)
-- Optional settings: `NVIDIA_MODEL` and `NVIDIA_MAX_TOKENS` (default 2600)
+- Optional settings: `NVIDIA_MODEL` and `NVIDIA_MAX_TOKENS` (default 5000)
 
 To run a local development test using NVIDIA only, set the provider order in the same Terminal session before launching:
 
@@ -67,7 +68,7 @@ To compare NVIDIA first and then fall back to the existing free providers:
 AI_PROVIDER_ORDER=nvidia,gemini,groq,openrouter python main.py
 ```
 
-The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endpoint does not guarantee JSON-mode enforcement. The app therefore asks for strict JSON in its prompt and still validates the returned analysis. Invalid responses may trigger retries and fallback. Check the NVIDIA account dashboard for current per-model limits and availability.
+The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endpoint does not guarantee JSON-mode enforcement. The app therefore asks for strict JSON in its prompt and still validates the returned analysis. Explicitly truncated responses are detected and sent to fallback without repeating the same token-expensive request; other invalid responses may receive one retry. Check the NVIDIA account dashboard for current per-model limits and availability.
 
 **Development/testing only:** NVIDIA says hosted Developer Program endpoints are for prototyping, research, development, and testing—not serving real end users. NVIDIA's free endpoint rate limits vary by model and current traffic, and are not an unlimited token allocation. See [NVIDIA NIM FAQ](https://docs.api.nvidia.com/nim/docs/product), [LLM API reference](https://docs.api.nvidia.com/nim/reference/llm-apis), and [Nemotron 3 Ultra model card](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard).
 
@@ -82,16 +83,16 @@ The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endp
 ## Workbook contents
 
 - **Weekly Matchups:** kickoff in Eastern Time, away team, home team, ESPN betting line, and game status.
-- **One tab per matchup:** matchup summary, expected game script, up to five researched player/game prop ideas, up to three touchdown scorer candidates, confidence ratings, model-estimated probabilities, data limitations, and source links.
+- **One tab per matchup:** matchup summary, expected game script, verified sportsbook player props when lines/prices are available, a separate model-only prop-lean section when they are not, separate game-level bets, up to three touchdown scorer candidates, injury impacts, a researched player pool with season/recent evidence and reasons for selection (including injury replacements), confidence ratings, model-estimated probabilities, data limitations, and source links.
 - The redundant Spread and Sportsbook columns are intentionally omitted from the main schedule sheet.
 
 ## Research and probability limitations
 
 - ESPN's public scoreboard endpoint supplies the schedule and available game line. It is unofficial and may change without notice.
-- ESPN game summaries and available team injury endpoints are fetched independently of the AI provider. The selected AI provider analyzes this evidence; it does not automatically have web search. Current player-prop prices must be independently present in the evidence to be labeled verified.
+- ESPN game summaries, rosters, depth charts, player game logs, team statistics, team-news headlines, and available team injury endpoints are fetched independently of the AI provider. The collector researches a broader core player pool and adds next-man-up candidates for relevant injuries before AI analysis. Candidate evidence is retained in the workbook even when the AI does not recommend that player. The selected AI provider analyzes this evidence; it does not automatically have web search. Current player-prop prices must be independently present in the evidence to be labeled verified.
 - A market line is labeled **Not verified** when the research cannot confirm a live sportsbook offer. A model play threshold is an analytical target, not a claim that a sportsbook currently offers that number.
 - Estimated hit probabilities and 1–10 confidence ratings are research estimates, not guarantees or independently audited forecasts. Confidence reflects the reliability of available data and the stability of the estimate; it is not the same as probability.
-- The analyst is instructed not to invent stats or lines and not to pad the recommendations when evidence is weak. Sources and material data gaps are included in each game tab.
+- Player props target five per matchup, with a preferred minimum of three when the evidence supports them; fewer than three are allowed only when fewer than three worthwhile picks qualify, and more than five are allowed when additional picks meet the quality standard. Game-level bets appear in a separate section. ESPN Core injury statuses are applied as a deterministic safety check so players listed Out, Doubtful, or on injured reserve are removed from player-prop and touchdown recommendations. The analyst is instructed not to invent stats or lines or pad recommendations. Sources and material data gaps are included in each game tab.
 - API use is subject to each selected provider's free-tier limits or paid pricing. An internet connection is required. Provider fallback does not combine quotas and cannot guarantee uninterrupted free access.
 
 This tool is for research and informational purposes only. It does not guarantee outcomes or constitute financial advice.
@@ -125,7 +126,14 @@ For local testing only, the Python script supports a cache-only workbook refresh
 2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling any AI API.
 3. Cached analyses are clearly marked in the workbook because injuries, player availability, weather, usage, and sportsbook markets are not refreshed.
 
-Use `python main.py --refresh-incomplete` to reuse cached analyses that already contain exactly five prop ideas and three touchdown candidates, while making API calls only for missing or incomplete cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
+Use `python main.py --refresh-incomplete` to reuse analyses created with the current output format, while making API calls only for missing or outdated cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
+
+Run a focused analysis for one game without spending AI calls on the rest of the slate:
+
+```bash
+AI_PROVIDER_ORDER=nvidia python main.py --matchup "Patriots at Lions"
+```
+
 
 The first run for a new slate may require API usage for games that have no cache entry. Existing workbooks created before caching do not automatically contain the structured cache. These options are intended for developers and are not exposed in the packaged end-user app.
 

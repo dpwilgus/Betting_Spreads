@@ -16,7 +16,7 @@ import certifi
 import keyring
 
 SERVICE_NAME = "Betting Spreads"
-PROVIDER_ORDER = ("gemini", "groq", "openrouter")  # NVIDIA stays opt-in for local development.
+PROVIDER_ORDER = ("gemini", "groq", "openrouter", "nvidia")  # NVIDIA is the final free fallback.
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
 _CONFIGURED_PROVIDERS_CACHE: list[tuple["Provider", str]] | None = None
 _PROVIDER_USAGE: dict[str, dict[str, int]] = {}
@@ -28,6 +28,10 @@ def reset_provider_run_state() -> None:
     _SKIP_PROVIDER_FOR_RUN.clear()
     _CONFIGURED_PROVIDERS_CACHE = None
     _PROVIDER_USAGE.clear()
+
+
+class IncompleteResponseError(RuntimeError):
+    """A provider explicitly reported that its generated response was truncated."""
 
 
 @dataclass(frozen=True)
@@ -93,8 +97,8 @@ def _configure_keys() -> None:
         from tkinter import messagebox
     except Exception as exc:
         raise RuntimeError(
-            "No AI API keys are configured for the selected providers. Set the relevant "
-            "provider key (for example NVIDIA_API_KEY) and AI_PROVIDER_ORDER, then restart."
+            "No AI API keys are configured for the selected providers. Set a key for one of the selected providers (for example NVIDIA_API_KEY), "
+            "and AI_PROVIDER_ORDER if you want to override the default order, then restart."
         ) from exc
 
     root = tk.Tk()
@@ -105,7 +109,7 @@ def _configure_keys() -> None:
     tk.Label(
         root,
         text=("Add one or more API keys. Gemini, Groq and OpenRouter offer free usage "
-              "with limits. NVIDIA NIM is experimental and for development/testing only. "
+              "with limits. NVIDIA NIM is an additional fallback; its limits may vary. "
               "OpenAI is optional and usage is paid. Keys are stored in your computer's "
               "secure credential store."),
         wraplength=580, justify="left",
@@ -155,7 +159,7 @@ def _configure_keys() -> None:
     root.mainloop()
     if not result["saved"]:
         raise RuntimeError(
-            "No AI API keys were saved. Add a Gemini, Groq or OpenRouter key to continue."
+            "No AI API keys were saved. Add a Gemini, Groq, OpenRouter or NVIDIA key to continue."
         )
 
 
@@ -288,7 +292,20 @@ def _call_provider(
         if provider.name == "nvidia":
             # NVIDIA's hosted Nemotron endpoint uses max_tokens. Its API does
             # not guarantee JSON mode, so rely on the prompt and our validator.
-            payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "2600"))
+            payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "5000"))
+            # Nemotron 3 Ultra defaults to high-effort internal reasoning. Those
+            # tokens consume the same max_tokens budget as the JSON answer. Keep
+            # reasoning off by default for this structured-output workload; users
+            # can opt into medium/high effort when experimenting.
+            if "nemotron-3-ultra" in model.lower():
+                reasoning_effort = os.environ.get(
+                    "NVIDIA_REASONING_EFFORT", "none"
+                ).strip().lower()
+                if reasoning_effort not in {"none", "medium", "high"}:
+                    raise RuntimeError(
+                        "NVIDIA_REASONING_EFFORT must be none, medium, or high."
+                    )
+                payload["reasoning_effort"] = reasoning_effort
         else:
             payload["max_completion_tokens"] = int(
                 os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")
@@ -316,6 +333,32 @@ def _call_provider(
             _record_provider_request(provider, system_prompt, user_prompt)
             result = _request_json(provider.endpoint, payload, headers)
     _record_provider_response(provider, result)
+
+    # Detect provider-reported truncation before attempting JSON parsing. Retrying
+    # the identical oversized prompt only burns another full output allowance.
+    if provider.style == "gemini":
+        candidates = result.get("candidates") or []
+        finish_reason = candidates[0].get("finishReason", "") if candidates else ""
+        truncated = str(finish_reason).upper() in {"MAX_TOKENS", "LENGTH"}
+    else:
+        choices = result.get("choices") or []
+        finish_reason = choices[0].get("finish_reason", "") if choices else ""
+        truncated = str(finish_reason).lower() in {"length", "max_tokens"}
+    limit = payload.get("max_tokens", payload.get("max_completion_tokens"))
+    if provider.name == "nvidia" and not finish_reason and isinstance(limit, int):
+        # Some compatible gateways omit finish_reason. If usage exactly reaches
+        # max_tokens, treat the response as truncated rather than retrying blindly.
+        metadata = result.get("usage") or {}
+        completion_tokens = metadata.get("completion_tokens")
+        if isinstance(completion_tokens, (int, float)) and completion_tokens >= limit:
+            truncated = True
+            finish_reason = "token_limit_reached"
+    if truncated:
+        raise IncompleteResponseError(
+            f"{provider.name} truncated its response (finish_reason={finish_reason}; "
+            f"output limit={limit}). Shorten the requested analysis or raise the "
+            "provider output limit if the account permits it."
+        )
     return json.loads(_response_text(provider, result))
 
 
@@ -377,9 +420,13 @@ def generate_json(
                     continue
                 failures.append(f"{provider.name}: connection error: {exc}")
                 break
+            except IncompleteResponseError as exc:
+                # The provider confirmed that the output hit its cap. Repeating the
+                # same request cannot fix truncation and wastes tokens; try fallback.
+                failures.append(f"{provider.name}: {exc}")
+                break
             except (ValueError, KeyError, RuntimeError) as exc:
-                # Invalid model output is not evidence that the provider is offline.
-                # Retry once for this matchup, then allow the next matchup to try again.
+                # Invalid JSON/schema output may be transient; retry once, then fallback.
                 if attempt == 0:
                     time.sleep(1)
                     continue
