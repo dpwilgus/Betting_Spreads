@@ -322,10 +322,15 @@ def _filter_player_props_by_usage(
         (r"receiving touchdowns?", "receivingTouchdowns"),
         (r"forced fumbles?", "forcedFumbles"),
         (r"fumble recoveries?", "fumbleRecoveries"),
+        (r"field goals? attempted", "fieldGoalsAttempted"),
         (r"field goals? made", "fieldGoalsMade"),
+        (r"extra points? attempted", "extraPointsAttempted"),
         (r"extra points? made", "extraPointsMade"),
         (r"punting yards?", "puntingYards"),
+        (r"longest punt", "longPunt"),
         (r"punts?", "punts"),
+        (r"longest pass", "longestPass"),
+        (r"longest rush", "longRushing"),
         (r"longest reception", "longReception"),
     )
     retained = []
@@ -700,7 +705,7 @@ def _separate_unverified_player_props(
                               "sacks", "tackles", "passes defended", "longest reception",
                               "passing touchdowns", "rushing touchdowns", "receiving touchdowns",
                               "tackles for loss", "quarterback hits", "forced fumbles",
-                              "fumble recoveries", "field goals made", "extra points made", "punts")
+                              "fumble recoveries", "field goals made", "field goals attempted", "extra points made", "extra points attempted", "punting yards", "longest punt", "punts", "longest pass", "longest rush")
             )
             if (
                 quote_player == player_key and market_match
