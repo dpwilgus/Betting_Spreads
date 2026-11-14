@@ -422,7 +422,7 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
         pass2_usage = pass2.get("usage", {})
     research["verified_player_prop_markets"] = quotes
     if quotes:
-        research["research_text"] += "\\n\\n" + summarize_quotes(quotes)
+        research["research_text"] += "\n\n" + summarize_quotes(quotes)
         research.setdefault("sources", []).append({
             "title": "The Odds API live NFL player props",
             "url": "https://the-odds-api.com/sports/nfl-odds.html",
