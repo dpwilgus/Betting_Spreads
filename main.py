@@ -338,7 +338,66 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 cell.fill = light
         sheet.row_dimensions[row_num].height = 78
 
-    gap_row = injury_start + max(len(impacts), 1) + 4
+    # Show the full researched candidate pool so key starters and injury
+    # replacements remain visible even when the model does not recommend them.
+    player_pool_start = injury_start + max(len(impacts), 1) + 4
+    sheet.cell(player_pool_start, 1, "RESEARCHED PLAYER POOL & ROLE EVIDENCE")
+    sheet.cell(player_pool_start, 1).font = white_bold
+    sheet.cell(player_pool_start, 1).fill = navy
+    sheet.merge_cells(
+        start_row=player_pool_start, start_column=1,
+        end_row=player_pool_start, end_column=7,
+    )
+    player_headers = [
+        "Team", "Player", "Position", "Games", "Season Production",
+        "Recent Games", "Why Researched",
+    ]
+    for col, value in enumerate(player_headers, 1):
+        _style_header(sheet.cell(player_pool_start + 1, col, value))
+    candidates_by_team = analysis.get("selected_player_candidates", {})
+    evidence_by_player = analysis.get("researched_player_evidence", {})
+    def player_key(value):
+        return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+    player_rows = []
+    if isinstance(candidates_by_team, dict):
+        for team_name, candidates in candidates_by_team.items():
+            for candidate in candidates if isinstance(candidates, list) else []:
+                if not isinstance(candidate, dict):
+                    continue
+                player_name = str(candidate.get("name") or "")
+                evidence = evidence_by_player.get(player_key(player_name), {})
+                season = evidence.get("season", {}) if isinstance(evidence, dict) else {}
+                recent = evidence.get("recent", []) if isinstance(evidence, dict) else []
+                season_text = (
+                    " | ".join("{}: {}".format(key, value) for key, value in season.items())
+                    if isinstance(season, dict) and season else "No season log retrieved"
+                )
+                recent_text = (
+                    json.dumps(recent, ensure_ascii=False)
+                    if isinstance(recent, list) and recent else "No recent games retrieved"
+                )
+                player_rows.append([
+                    team_name, player_name, candidate.get("position", ""),
+                    evidence.get("games_available", "—") if isinstance(evidence, dict) else "—",
+                    season_text, recent_text,
+                    candidate.get("research_reason", "Core candidate"),
+                ])
+    if not player_rows:
+        sheet.merge_cells(
+            start_row=player_pool_start + 2, start_column=1,
+            end_row=player_pool_start + 2, end_column=7,
+        )
+        sheet.cell(player_pool_start + 2, 1, "No structured player candidates were retained.")
+    for row_num, values in enumerate(player_rows, player_pool_start + 2):
+        for col, value in enumerate(values, 1):
+            cell = sheet.cell(row=row_num, column=col, value=value)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = Border(bottom=thin_gray)
+            if row_num % 2 == 0:
+                cell.fill = light
+        sheet.row_dimensions[row_num].height = 66
+
+    gap_row = player_pool_start + max(len(player_rows), 1) + 4
     sheet.cell(gap_row, 1, "DATA LIMITATIONS")
     sheet.cell(gap_row, 1).font = white_bold
     sheet.cell(gap_row, 1).fill = navy
