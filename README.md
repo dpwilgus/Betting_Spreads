@@ -72,13 +72,25 @@ The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endp
 
 **Development/testing only:** NVIDIA says hosted Developer Program endpoints are for prototyping, research, development, and testing—not serving real end users. NVIDIA's free endpoint rate limits vary by model and current traffic, and are not an unlimited token allocation. See [NVIDIA NIM FAQ](https://docs.api.nvidia.com/nim/docs/product), [LLM API reference](https://docs.api.nvidia.com/nim/reference/llm-apis), and [Nemotron 3 Ultra model card](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard).
 
+## Sportsbook odds (The Odds API)
+
+The app uses the documented **The Odds API** service at [the-odds-api.com](https://the-odds-api.com/) (note the hyphens in the domain). Choose the free **Starter** plan, which currently includes 500 credits per month, all sports, most bookmakers, and all betting markets. Historical odds are not included on the free tier. The API key is issued through the provider's signup process.
+
+On first launch, paste the API key into the app's Odds API setup window. The key is stored in macOS Keychain or Windows Credential Manager through the existing `keyring` dependency; it is not written to the repository or workbook. Do not commit the key or paste it into source code.
+
+The app uses the official API endpoints only; it does not scrape sportsbook websites. It requests US-region odds one event at a time for player props. Event discovery is a free endpoint. Player-prop request cost is based on the number of unique markets actually returned multiplied by the number of regions requested. The app requests one region (US) and currently keeps Pass 1 to nine core markets, including anytime touchdown scorer. A 13-game Sunday slate across four weeks has a conservative upper bound of 468 credits if all nine markets are returned for every game; actual usage is generally lower when markets are unavailable. A 25-credit reserve is kept when the API has reported remaining-credit information. Recent quotes are cached locally for 20 minutes.
+
+The first-run GUI lets you choose Sunday or non-Sunday games and then select individual matchups. Every game in the selected slate is checked by default. Use `--no-gui` to process the full ESPN scoreboard without the selection window.
+
+Provider plan limits and market coverage can change. Check the provider's usage dashboard and the API response's remaining-credit header before expanding market requests.
+
 ## How to use
 
 1. Download the file for your operating system from [Releases](../../releases).
 2. Windows: double-click `Betting_Spreads.exe`.
 3. macOS: unzip the download, then open `Betting_Spreads.app`. On first launch, macOS may require right-clicking the app and choosing **Open** because this app is not signed or notarized.
 4. Enter one or more provider API keys on first run (Gemini, Groq, or OpenRouter are the recommended default free options; NVIDIA is optional and must be explicitly enabled for local development).
-5. The app retrieves the current ESPN scoreboard week, researches each matchup, and creates or replaces `NFL_Weekly_Matchups.xlsx` beside the executable/app bundle.
+5. Choose Sunday or non-Sunday, uncheck any games to omit, then enter the Odds API key on first run if you want verified sportsbook quotes. The app researches selected matchups and creates or replaces `NFL_Weekly_Matchups.xlsx` beside the executable/app bundle.
 
 ## Workbook contents
 
