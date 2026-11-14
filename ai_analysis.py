@@ -355,6 +355,9 @@ def _filter_player_props_by_usage(
         recent_average = (
             sum(recent_values) / len(recent_values) if recent_values else season_average
         )
+        if any(period in description for period in ("first quarter", "1st quarter", "first half", "1st half")):
+            retained.append(pick)
+            continue
         is_over = bool(re.search(r"\bover\b", description))
         is_under = bool(re.search(r"\bunder\b", description))
         unsupported = (
@@ -485,6 +488,21 @@ def _validate_analysis(
                     "AI suggested a player prop for someone not found on either current ESPN roster: "
                     + str(item.get("player_or_team", ""))
                 )
+    sneaky = data.get("sneaky_props")
+    if not isinstance(sneaky, list) or len(sneaky) > 8:
+        raise RuntimeError("AI sneaky_props must be a list of at most eight ideas.")
+    for item in sneaky:
+        probability = float(item.get("estimated_hit_probability", -1))
+        confidence = int(item.get("confidence", 0))
+        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+            raise RuntimeError("AI returned an invalid sneaky-prop probability or confidence.")
+        if item.get("market_type") not in ("Player Prop", "Game Prop"):
+            raise RuntimeError("AI returned an unsupported sneaky-prop market type.")
+        if not all(item.get(field) for field in (
+            "player_or_team", "bet_description", "market_line", "play_threshold",
+            "statistical_rationale", "risk_factors", "data_quality",
+        )):
+            raise RuntimeError("AI sneaky prop is missing required evidence fields.")
     for item in scorers:
         probability = float(item.get("estimated_td_probability", -1))
         confidence = int(item.get("confidence", 0))
@@ -837,15 +855,23 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     injury_gaps = _apply_independent_injury_statuses(
         data, research.get("injury_statuses", [])
     )
+    sneaky_data = {"picks": data.get("sneaky_props", [])}
+    sneaky_status_gaps = _apply_independent_injury_statuses(
+        sneaky_data, research.get("injury_statuses", [])
+    )
+    data["sneaky_props"] = sneaky_data.get("picks", [])
     player_usage = _research_player_usage(research.get("research_text", ""))
     prop_gaps = _filter_player_props_by_usage(data, player_usage)
+    sneaky_usage_data = {"picks": data.get("sneaky_props", [])}
+    sneaky_usage_gaps = _filter_player_props_by_usage(sneaky_usage_data, player_usage)
+    data["sneaky_props"] = sneaky_usage_data.get("picks", [])
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
     impact_gaps = _filter_injury_impacts(
         data, research.get("injury_statuses", []), research.get("rosters"),
         team_names, player_usage=player_usage
     )
     market_gaps = _separate_unverified_player_props(data, research)
-    quality_gaps = injury_gaps + prop_gaps + td_gaps + impact_gaps + market_gaps
+    quality_gaps = injury_gaps + sneaky_status_gaps + prop_gaps + sneaky_usage_gaps + td_gaps + impact_gaps + market_gaps
     if quality_gaps:
         existing_gaps = data.setdefault("data_gaps", [])
         existing_gaps.extend(quality_gaps[:max(0, 6 - len(existing_gaps))])
