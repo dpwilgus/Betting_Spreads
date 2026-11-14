@@ -324,6 +324,7 @@ def fetch_event_quotes(
     )
     retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     record = {
+        "cached_at": retrieved_at,
         "quotes": _parse_quotes(payload if isinstance(payload, dict) else {}, retrieved_at),
         "status": "fetched",
         "event_id": event_id,
