@@ -433,6 +433,102 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
     research["odds_api_usage"] = pass2_usage or pass1.get("usage", {})
 
 
+def _best_overall_bets(games: list[dict], analyses: list[dict], limit: int = 10) -> list[dict]:
+    """Rank the strongest matchup recommendations across the selected slate."""
+    candidates = []
+    for game, analysis in zip(games, analyses):
+        matchup = f"{game.get('Away Team', 'Away')} at {game.get('Home Team', 'Home')}"
+        for pick in analysis.get("picks", []):
+            if not isinstance(pick, dict):
+                continue
+            confidence = int(pick.get("confidence", 0) or 0)
+            probability = float(pick.get("estimated_hit_probability", 0) or 0)
+            quality = str(pick.get("data_quality", "Limited"))
+            quality_bonus = {"Strong": 3, "Moderate": 2, "Limited": 0}.get(quality, 0)
+            market_type = str(pick.get("market_type", ""))
+            line = str(pick.get("market_line", "Not verified"))
+            if market_type == "Player Prop" and " — " in line:
+                verification = "Sportsbook quote verified"
+            elif market_type == "Game Prop":
+                verification = "Confirm current sportsbook line"
+            else:
+                verification = "Not independently verified"
+            candidates.append({
+                "matchup": matchup,
+                "game_date": game.get("Game Date (ET", game.get("Game Date (ET)", "")),
+                "market_type": market_type,
+                "player_or_team": pick.get("player_or_team", ""),
+                "bet_description": pick.get("bet_description", ""),
+                "market_line": line,
+                "play_threshold": pick.get("play_threshold", ""),
+                "probability": probability,
+                "confidence": confidence,
+                "quality": quality,
+                "verification": verification,
+                "rationale": pick.get("statistical_rationale", ""),
+                "risk_factors": pick.get("risk_factors", ""),
+                "_score": confidence * 100 + probability + quality_bonus,
+            })
+    candidates.sort(
+        key=lambda item: (item["_score"], item["confidence"], item["probability"]),
+        reverse=True,
+    )
+    result = candidates[:max(0, limit)]
+    for rank, item in enumerate(result, 1):
+        item["rank"] = rank
+        item.pop("_score", None)
+    return result
+
+
+def _write_best_overall_sheet(workbook: Workbook, games: list[dict], analyses: list[dict]) -> None:
+    sheet = workbook.create_sheet("Best Overall Bets")
+    sheet.sheet_view.showGridLines = False
+    navy = PatternFill("solid", fgColor="17365D")
+    sheet.merge_cells("A1:M1")
+    sheet["A1"] = "BEST OVERALL BETS — WEEKLY SHORTLIST"
+    sheet["A1"].font = Font(bold=True, size=15, color="FFFFFF")
+    sheet["A1"].fill = navy
+    sheet["A1"].alignment = Alignment(horizontal="center")
+    sheet.merge_cells("A2:M2")
+    sheet["A2"] = (
+        "Top recommendations across the selected games and all supported bet types. "
+        "Ranked by model confidence, estimated hit probability and data quality—not guaranteed ROI. "
+        "Confirm current prices before betting."
+    )
+    sheet["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    sheet.row_dimensions[2].height = 32
+    headers = [
+        "Rank", "Matchup", "Game Date (ET)", "Bet Type", "Player / Team",
+        "Recommended Bet", "Sportsbook Line", "Model Threshold",
+        "Estimated Hit %", "Confidence", "Verification", "Statistical Rationale",
+        "Risk Factors",
+    ]
+    for col, header in enumerate(headers, 1):
+        _style_header(sheet.cell(4, col, header))
+    picks = _best_overall_bets(games, analyses, limit=10)
+    if not picks:
+        sheet.merge_cells("A5:M5")
+        sheet["A5"] = "No qualifying recommendations were returned for the selected games."
+        sheet["A5"].alignment = Alignment(wrap_text=True)
+    for row_num, pick in enumerate(picks, 5):
+        values = [
+            pick["rank"], pick["matchup"], pick["game_date"], pick["market_type"],
+            pick["player_or_team"], pick["bet_description"], pick["market_line"],
+            pick["play_threshold"], pick["probability"], pick["confidence"],
+            pick["verification"], pick["rationale"], pick["risk_factors"],
+        ]
+        for col, value in enumerate(values, 1):
+            cell = sheet.cell(row_num, col, value)
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        sheet.cell(row_num, 9).number_format = '0.0"%"'
+    widths = [8, 27, 25, 15, 23, 34, 32, 20, 16, 12, 29, 48, 42]
+    for col, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(col)].width = width
+    sheet.freeze_panes = "A5"
+    if picks:
+        sheet.auto_filter.ref = f"A4:M{4 + len(picks)}"
+
+
 def write_workbook(games: list[dict], analyses: list[dict], season: object, week: object) -> Path:
     output = application_directory() / "NFL_Weekly_Matchups.xlsx"
     workbook = Workbook()
@@ -470,6 +566,7 @@ def write_workbook(games: list[dict], analyses: list[dict], season: object, week
     for game, analysis in zip(games, analyses):
         _write_matchup_sheet(workbook, game, analysis, used)
 
+    _write_best_overall_sheet(workbook, games, analyses)
     workbook.save(output)
     return output
 
