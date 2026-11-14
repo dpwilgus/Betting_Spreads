@@ -93,6 +93,21 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
                 ],
             },
         },
+        "sneaky_props": {
+            "type": "array", "maxItems": 8,
+            "items": {"type": "object", "additionalProperties": False,
+                "properties": {
+                    "rank": {"type": "integer"}, "market_type": {"type": "string", "enum": ["Player Prop", "Game Prop"]},
+                    "player_or_team": {"type": "string"}, "bet_description": {"type": "string"},
+                    "market_line": {"type": "string"}, "play_threshold": {"type": "string"},
+                    "estimated_hit_probability": {"type": "number"}, "confidence": {"type": "integer"},
+                    "statistical_rationale": {"type": "string"}, "risk_factors": {"type": "string"},
+                    "data_quality": {"type": "string", "enum": ["Strong", "Moderate", "Limited"]}
+                },
+                "required": ["rank","market_type","player_or_team","bet_description","market_line","play_threshold",
+                    "estimated_hit_probability","confidence","statistical_rationale","risk_factors","data_quality"]
+            }
+        },
         "touchdown_scorers": {
             "type": "array", "minItems": 0, "maxItems": 5,
             "items": {
@@ -115,11 +130,12 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
             },
         },
         "injury_impact": {
-            "type": "array", "maxItems": 3,
+            "type": "array", "maxItems": 12,
             "items": {
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
+                    "impact_type": {"type": "string", "enum": ["Injury", "News", "Role Change", "Return"]},
                     "injured_player": {"type": "string"},
                     "team": {"type": "string"},
                     "availability": {"type": "string"},
@@ -136,7 +152,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
                     "conditions": {"type": "string"},
                 },
                 "required": [
-                    "injured_player", "team", "availability",
+                    "impact_type", "injured_player", "team", "availability",
                     "affected_player", "affected_team", "impact_direction",
                     "statistical_effect", "prop_market", "evidence",
                     "confidence", "conditions",
@@ -146,7 +162,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "data_gaps": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
     },
     "required": [
-        "summary", "game_script", "picks", "touchdown_scorers",
+        "summary", "game_script", "picks", "sneaky_props", "touchdown_scorers",
         "injury_impact", "data_gaps",
     ],
 }
@@ -293,6 +309,12 @@ def _filter_player_props_by_usage(
         (r"receptions?", "receptions"),
         (r"receiving targets?|targets?", "receivingTargets"),
         (r"rushing attempts?|carries", "rushingAttempts"),
+        (r"passing attempts?", "passingAttempts"),
+        (r"completions?", "completions"),
+        (r"interceptions?", "interceptions"),
+        (r"sacks?", "sacks"),
+        (r"tackles?", "totalTackles"),
+        (r"passes defended", "passesDefended"),
     )
     retained = []
     gaps = []
@@ -743,7 +765,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "injuries, player statistics, market prices, sources, or source timestamps.\n\n"
         "Return one JSON object only, with exactly these top-level keys: "
         "summary (string), game_script (string), picks (array), "
-        "touchdown_scorers (array of up to 5 preliminary candidates), injury_impact (array), "
+        "sneaky_props (array), touchdown_scorers (array of up to 5 preliminary candidates), injury_impact (array), "
         "data_gaps (array of strings). Each pick object must contain: rank (integer), "
         "market_type (Player Prop or Game Prop), player_or_team, bet_description, "
         "market_line, play_threshold, estimated_hit_probability (number 0-100), "
@@ -753,17 +775,18 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Each Player Prop must name a player with a structured ESPN game log in the supplied research. "
         "Each touchdown_scorer team must exactly match one of the two matchup teams, and the player "
         "must have a structured ESPN game log for that team. "
-        "Player props: target five only when verified sportsbook lines are supplied; aim for at least "
+        "Player props: target the strongest evidence-supported markets, not a fixed count; aim for at least "
         "three when supported. If no sportsbook line exists, label the idea model-only, not an actionable "
-        "bet. Never invent a line. Keep game bets separate. Evaluate every researched QB/RB/WR/TE log "
-        "in the expanded candidate pool, including all injury-replacement candidates, using season/recent "
-        "production, role, opportunity, and opponent weakness. Do not ignore a high-profile starter just "
-        "because another depth-chart player was selected first. "
+        "bet. Never invent a line. Keep game bets separate. Evaluate every researched offensive player and defensive starter/leader log. "
+        "Expand across evidence-supported markets: attempts, completions, interceptions, receptions, targets, sacks, tackles, passes defended, longest reception, and other researched stats. "
+        "Evaluate full-game, first-quarter, first-half, team-total, spread, and total markets when quotes or matchup evidence support them. "
+        "Never invent sportsbook availability or prices. Include alternate lines and ladders only when evidence supports a distinct high-upside angle. "
+        "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
         "Never list the same team's moneyline and spread together; keep only the stronger option. A spread's hit probability cannot exceed that team's moneyline probability. "
         "TDs: compare every researched player's season TDs, carries/targets per game, and recent scoring. "
         "Passing TDs do not count for a QB's anytime TD; require at least one rushing TD or 3+ rush attempts/game. "
         "Never select a QB just for being the starter. For injury impacts, never list the injured player "
-        "as their own affected_player. For an injured QB/RB/WR/TE, assess the next available same-position "
+        "as their own affected_player. Include meaningful absences for offensive starters and high-impact defensive leaders (tackles, sacks, interceptions, pressure), plus verified news/role changes such as starting-QB changes even when the subject is not injured. Assess downstream beneficiaries including replacement TEs/WRs/RBs gaining snaps or targets. For an injured QB/RB/WR/TE, assess the next available same-position "
         "candidates explicitly marked as potential replacements; for defensive injuries, assess the opposing "
         "team's researched offensive players. A replacement is a candidate, not an automatic positive impact. "
         "The matchup summary must compare both defenses using supplied passing/rushing efficiency, yards or "
@@ -779,7 +802,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "If the roster does not support a player or evidence is inadequate, omit that candidate. Keep output extremely compact for free-model limits: "
         "summary <= 90 words; game_script <= 65 words; each pick statistical_rationale <= 24 words "
         "and risk_factors <= 14 words; each TD rationale <= 16 words and risk_factors <= 12 words; "
-        "return up to 3 meaningful injury_impact entries, each text field <= 16 words; "
+        "return every material injury/news impact supported by evidence (up to 12), each text field <= 16 words; "
         "data_gaps <= 4 short items. Use short phrases, not paragraphs. Do not repeat facts "
         "across fields or add commentary outside JSON. "
         "Each touchdown_scorer must "
@@ -825,7 +848,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         data.setdefault("data_gaps", []).append(
             "Overlapping same-team moneyline/spread recommendations were deduplicated; only the higher-confidence option was retained."
         )
-    data["analysis_version"] = 5
+    data["sneaky_props"] = data.get("sneaky_props", [])
+    data["analysis_version"] = 6
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
     data["researched_player_evidence"] = player_usage
     data["sources"] = list(research.get("sources", []))
