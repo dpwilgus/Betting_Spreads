@@ -575,7 +575,7 @@ class LiveResearchTests(unittest.TestCase):
         )
         self.assertEqual(
             [player["name"] for player in selected],
-            ["QB1", "RB1", "RB2", "WR1", "WR2", "WR3", "TE1"],
+            ["QB1", "RB1", "RB2", "RB3", "WR1", "WR2", "WR3", "TE1"],
         )
 
     def test_player_gamelog_compaction_keeps_role_relevant_usage_only(self):
@@ -851,6 +851,61 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(result["articles"][0]["headline"], "Team acquires veteran quarterback")
         self.assertEqual(result["articles"][0]["published"], "2026-11-13T15:00:00Z")
         self.assertEqual(result["articles"][0]["url"], "https://example.com/story")
+
+
+    def test_injury_replacement_selection_finds_injured_player_missing_from_roster(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"te1","name":"Healthy TE One","position":"TE"},
+            {"id":"te2","name":"Healthy TE Two","position":"TE"},
+            {"id":"te3","name":"Gavin Bartholomew","position":"TE"},
+            {"id":"qb1","name":"QB One","position":"QB"},
+        ]
+        chart = {"depthCharts":[{"positions":{
+            "tightEnd":{
+                "position":{"abbreviation":"TE"},
+                "athletes":[
+                    {"rank":1,"athlete":{"id":"te0","displayName":"Other TE"}},
+                    {"rank":2,"athlete":{"id":"hock","displayName":"T.J. Hockenson"}},
+                    {"rank":3,"athlete":{"id":"te1","displayName":"Healthy TE One"}},
+                    {"rank":4,"athlete":{"id":"te2","displayName":"Healthy TE Two"}},
+                    {"rank":5,"athlete":{"id":"te3","displayName":"Gavin Bartholomew"}},
+                ],
+            },
+            "quarterback":{
+                "position":{"abbreviation":"QB"},
+                "athletes":[{"rank":1,"athlete":{"id":"qb1","displayName":"QB One"}}],
+            },
+        }}]}
+        selected = _select_research_players(
+            roster, chart,
+            [{"player":"T.J. Hockenson","position":"TE","status":"Out"}],
+            "Minnesota Vikings",
+        )
+        names = [item["name"] for item in selected]
+        self.assertIn("Gavin Bartholomew", names)
+
+    def test_team_stats_keep_defensive_matchup_metrics(self):
+        result = _compact_team_stats({
+            "results":{"stats":{
+                "displayName":"Example Defense",
+                "categories":[{
+                    "name":"defensive",
+                    "stats":[
+                        {"name":"passingYardsAllowed","displayValue":"190.2"},
+                        {"name":"rushingYardsAllowed","displayValue":"98.4"},
+                        {"name":"sacks","displayValue":"31"},
+                        {"name":"unneededField","displayValue":"999"},
+                    ],
+                }],
+            }},
+        })
+        values = {item["name"]:item["value"] for item in result["categories"]["defensive"]}
+        self.assertEqual(values["passingYardsAllowed"], "190.2")
+        self.assertEqual(values["rushingYardsAllowed"], "98.4")
+        self.assertEqual(values["sacks"], "31")
+        self.assertNotIn("unneededField", values)
 
 
 if __name__ == "__main__":
