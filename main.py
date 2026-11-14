@@ -455,7 +455,7 @@ def _best_overall_bets(games: list[dict], analyses: list[dict], limit: int = 10)
                 verification = "Not independently verified"
             candidates.append({
                 "matchup": matchup,
-                "game_date": game.get("Game Date (ET", game.get("Game Date (ET)", "")),
+                "game_date": game.get("Game Date (ET)", ""),
                 "market_type": market_type,
                 "player_or_team": pick.get("player_or_team", ""),
                 "bet_description": pick.get("bet_description", ""),
