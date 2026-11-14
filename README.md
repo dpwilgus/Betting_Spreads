@@ -83,7 +83,7 @@ The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endp
 ## Workbook contents
 
 - **Weekly Matchups:** kickoff in Eastern Time, away team, home team, ESPN betting line, and game status.
-- **One tab per matchup:** matchup summary, expected game script, player props (target five, aiming for at least three when evidence supports them, with no fixed maximum), a separate game-level bets section, up to three touchdown scorer candidates, confidence ratings, model-estimated probabilities, data limitations, and source links.
+- **One tab per matchup:** matchup summary, expected game script, verified sportsbook player props when lines/prices are available, a separate model-only prop-lean section when they are not, separate game-level bets, up to three touchdown scorer candidates, confidence ratings, model-estimated probabilities, data limitations, and source links.
 - The redundant Spread and Sportsbook columns are intentionally omitted from the main schedule sheet.
 
 ## Research and probability limitations
