@@ -285,7 +285,9 @@ def _parse_quotes(event_data: dict[str, Any], retrieved_at: str) -> list[dict[st
                 side = str(outcome.get("name") or "").strip()
                 # Some yes/no scorer feeds put the player in name and Yes/No in description.
                 if market_key in {"player_anytime_td", "player_tds", "player_1st_td", "player_last_td"}:
-                    if not player and side.casefold() not in {"yes", "no", "over", "under"}:
+                    if player.casefold() in {"yes", "no", "over", "under"} and side.casefold() not in {"yes", "no", "over", "under"}:
+                        player, side = side, player
+                    elif not player and side.casefold() not in {"yes", "no", "over", "under"}:
                         player, side = side, "Yes"
                 if not player:
                     continue
