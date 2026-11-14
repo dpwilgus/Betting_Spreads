@@ -633,12 +633,9 @@ def _select_research_players(
     depth_ids = _extract_depth_chart_ids(depth_chart or {})
     position_ids: dict[str, list[str]] = {}
     for position in ("QB", "RB", "WR", "TE"):
-        # Discard depth-chart placeholder IDs before applying position limits;
-        # otherwise a generic "Wide Receiver" slot can crowd out a real athlete.
-        ordered = [
-            athlete_id for athlete_id in depth_ids.get(position, [])
-            if athlete_id in roster_by_id
-        ]
+        # Preserve depth-chart IDs for locating injured players who may be absent
+        # from the active roster, but count only named roster athletes toward limits.
+        ordered = list(depth_ids.get(position, []))
         seen = set(ordered)
         ordered.extend(
             str(player["id"]) for player in valid_players
@@ -668,12 +665,36 @@ def _select_research_players(
         selected_by_id[str(athlete_id)] = candidate
         selected.append(candidate)
 
-    for position, limit in limits.items():
-        for athlete_id in position_ids[position][:limit]:
-            add_player(athlete_id, "Core depth-chart/roster candidate")
-
     def normalize(value: Any) -> str:
         return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+    def find_depth_chart_id(value: Any, wanted_name: str) -> str | None:
+        if isinstance(value, dict):
+            athlete = value.get("athlete")
+            if isinstance(athlete, dict):
+                athlete_name = athlete.get("displayName") or athlete.get("fullName")
+                if normalize(athlete_name) == wanted_name and athlete.get("id"):
+                    return str(athlete["id"])
+            for child in value.values():
+                found = find_depth_chart_id(child, wanted_name)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for child in value:
+                found = find_depth_chart_id(child, wanted_name)
+                if found:
+                    return found
+        return None
+
+    for position, limit in limits.items():
+        added = 0
+        for athlete_id in position_ids[position]:
+            if athlete_id not in roster_by_id:
+                continue
+            add_player(athlete_id, "Core depth-chart/roster candidate")
+            added += 1
+            if added >= limit:
+                break
 
     # Injury beneficiaries are added after the normal starter/usage pool so a
     # third-string replacement (e.g. Gavin Bartholomew behind T.J. Hockenson)
@@ -700,6 +721,8 @@ def _select_research_players(
              if normalize(player.get("name")) == injured_name),
             None,
         )
+        if injured_id is None:
+            injured_id = find_depth_chart_id(depth_chart or {}, injured_name)
         ordered_ids = position_ids[position]
         if injured_id in ordered_ids:
             injured_index = ordered_ids.index(injured_id)
