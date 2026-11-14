@@ -470,7 +470,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("touchdown_scorers", user_prompt)
         self.assertIn("summary <= 90 words", user_prompt)
         self.assertIn("statistical_rationale <= 24 words", user_prompt)
-        self.assertIn("up to 3 meaningful injury_impact entries", user_prompt)
+        self.assertIn("return every material injury/news impact supported by evidence (up to 12)", user_prompt)
         self.assertIn("risk_factors must start 'Questionable:'", user_prompt)
         self.assertIn("'Questionable:'", user_prompt)
         self.assertNotIn('"additionalProperties"', user_prompt)
