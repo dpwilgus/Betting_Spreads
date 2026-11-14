@@ -933,7 +933,7 @@ class LiveResearchTests(unittest.TestCase):
         }}]}
         selected = _select_defensive_research_players(roster, depth)
         names = [player["name"] for player in selected]
-        self.assertEqual(names, ["Leading Tackler", "Top Pass Rusher", "Starting Corner"])
+        self.assertEqual(names, ["Leading Tackler", "Backup Linebacker", "Top Pass Rusher", "Starting Corner"])
 
     def test_defensive_gamelog_compaction_keeps_tackles_sacks_and_takeaways(self):
         from live_research import _compact_player_gamelog
