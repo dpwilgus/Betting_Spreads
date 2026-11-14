@@ -373,15 +373,40 @@ def _filter_td_scorers_by_usage(
         carries = _stat_number(season, "rushingAttempts")
         targets = _stat_number(season, "receivingTargets")
         total_td = rush_td + receiving_td
+        recent = usage.get("recent") if isinstance(usage.get("recent"), list) else []
+        recent_td = 0.0
+        for game in recent[:5]:
+            stats = game.get("stats", {}) if isinstance(game, dict) else {}
+            if not isinstance(stats, dict):
+                continue
+            if position == "QB":
+                recent_td += _stat_number(stats, "rushingTouchdowns")
+            elif position == "RB":
+                recent_td += (
+                    _stat_number(stats, "rushingTouchdowns")
+                    + _stat_number(stats, "receivingTouchdowns")
+                )
+            elif position in {"WR", "TE"}:
+                recent_td += _stat_number(stats, "receivingTouchdowns")
+        recent_rate = recent_td / max(1, len(recent[:5]))
         if position == "QB":
-            eligible = rush_td >= 3 or (rush_td >= 2 and carries / games >= 3.0)
-            score = (rush_td / games) * 3.0 + (carries / games) * 0.12
+            carries_per_game = carries / games
+            eligible = rush_td >= 3 or (rush_td >= 2 and carries_per_game >= 3.0)
+            score = (rush_td / games) * 3.0 + carries_per_game * 0.12 + recent_rate
         elif position == "RB":
-            eligible = total_td >= 1 and (carries + targets) / games >= 4.0
-            score = (total_td / games) * 3.0 + ((carries + targets) / games) * 0.08
+            opportunities_per_game = (carries + targets) / games
+            eligible = (
+                (total_td >= 1 and opportunities_per_game >= 4.0)
+                or opportunities_per_game >= 12.0
+            )
+            score = (total_td / games) * 3.0 + opportunities_per_game * 0.08 + recent_rate
         elif position in {"WR", "TE"}:
-            eligible = receiving_td >= 1 and targets / games >= 2.5
-            score = (receiving_td / games) * 3.0 + (targets / games) * 0.12
+            targets_per_game = targets / games
+            eligible = (
+                (receiving_td >= 1 and targets_per_game >= 2.5)
+                or targets_per_game >= 6.0
+            )
+            score = (receiving_td / games) * 3.0 + targets_per_game * 0.12 + recent_rate
         else:
             eligible = False
             score = 0.0
