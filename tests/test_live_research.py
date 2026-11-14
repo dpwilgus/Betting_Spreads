@@ -860,17 +860,18 @@ class LiveResearchTests(unittest.TestCase):
             {"id":"te1","name":"Healthy TE One","position":"TE"},
             {"id":"te2","name":"Healthy TE Two","position":"TE"},
             {"id":"te3","name":"Gavin Bartholomew","position":"TE"},
+            {"id":"te4","name":"Healthy TE Four","position":"TE"},
             {"id":"qb1","name":"QB One","position":"QB"},
         ]
         chart = {"depthCharts":[{"positions":{
             "tightEnd":{
                 "position":{"abbreviation":"TE"},
                 "athletes":[
-                    {"rank":1,"athlete":{"id":"te0","displayName":"Other TE"}},
+                    {"rank":1,"athlete":{"id":"te1","displayName":"Healthy TE One"}},
                     {"rank":2,"athlete":{"id":"hock","displayName":"T.J. Hockenson"}},
-                    {"rank":3,"athlete":{"id":"te1","displayName":"Healthy TE One"}},
-                    {"rank":4,"athlete":{"id":"te2","displayName":"Healthy TE Two"}},
-                    {"rank":5,"athlete":{"id":"te3","displayName":"Gavin Bartholomew"}},
+                    {"rank":3,"athlete":{"id":"te2","displayName":"Healthy TE Two"}},
+                    {"rank":4,"athlete":{"id":"te3","displayName":"Gavin Bartholomew"}},
+                    {"rank":5,"athlete":{"id":"te4","displayName":"Healthy TE Four"}},
                 ],
             },
             "quarterback":{
