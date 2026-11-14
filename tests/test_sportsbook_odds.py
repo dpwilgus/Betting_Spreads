@@ -138,3 +138,21 @@ class OddsApiMarketTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class OddsApiKeyPromptTests(unittest.TestCase):
+    def test_cli_prompt_is_used_when_gui_is_disabled(self):
+        from unittest.mock import patch
+
+        with patch.object(sportsbook_odds, "get_api_key", return_value=""), \
+             patch.object(sportsbook_odds, "_prompt_for_api_key_cli", return_value=True) as prompt:
+            self.assertTrue(sportsbook_odds.ensure_api_key_configured(use_gui=False))
+        prompt.assert_called_once_with()
+
+    def test_existing_key_skips_prompt(self):
+        from unittest.mock import patch
+
+        with patch.object(sportsbook_odds, "get_api_key", return_value="already-set"), \
+             patch.object(sportsbook_odds, "_prompt_for_api_key_cli") as prompt:
+            self.assertTrue(sportsbook_odds.ensure_api_key_configured(use_gui=False))
+        prompt.assert_not_called()
+
