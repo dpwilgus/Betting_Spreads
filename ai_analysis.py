@@ -372,6 +372,17 @@ def _filter_player_props_by_usage(
             sum(recent_values) / len(recent_values) if recent_values else season_average
         )
         if any(period in description for period in ("first quarter", "1st quarter", "first qtr", "1st qtr", "first-quarter", "1q", "q1", "first half", "1st half", "first-half", "1st-half", "1h", "h1")):
+            pick["confidence"] = min(int(pick.get("confidence", 5)), 5)
+            pick["data_quality"] = "Limited"
+            risk = str(pick.get("risk_factors") or "").strip()
+            if "period split" not in risk.casefold():
+                pick["risk_factors"] = (
+                    "No ESPN period splits; full-game stats are context only"
+                    if not risk else risk + "; no ESPN period splits"
+                )
+            gaps.append(
+                f"{player} period-specific prop: ESPN quarter/half splits were unavailable; confidence capped at 5/10."
+            )
             retained.append(pick)
             continue
         is_over = bool(re.search(r"\bover\b", description))
@@ -839,7 +850,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "three when supported. If no sportsbook line exists, label the idea model-only, not an actionable "
         "bet. Never invent a line. Keep game bets separate. Evaluate every researched offensive player and defensive starter/leader log. "
         "Expand across evidence-supported markets: passing/rushing/receiving attempts, completions, passing/rushing/receiving TDs, interceptions, receptions, targets, longest reception, sacks, tackles, tackles for loss, QB hits, passes defended, forced fumbles, fumble recoveries, kicker field goals/extra points, punter volume, and other researched stats. "
-        "Evaluate full-game, first-quarter, first-half, team-total, spread, and total markets when quotes or matchup evidence support them. "
+        "Evaluate full-game, first-quarter, first-half, team-total, spread, and total markets when quotes or matchup evidence support them. For quarter/half player props, do not scale full-game averages as if they were period averages; when ESPN period splits are unavailable, mark Limited, cap confidence at 5/10, and disclose the missing split data, or omit the idea. "
         "Never invent sportsbook availability or prices. Include alternate lines and ladders only when evidence supports a distinct high-upside angle. "
         "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
         "Never list the same team's moneyline and spread together; keep only the stronger option. A spread's hit probability cannot exceed that team's moneyline probability. "
