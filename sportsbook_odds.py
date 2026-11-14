@@ -403,7 +403,10 @@ def research_supports_first_td(research_text: str) -> bool:
             log = record.get("season_game_log")
             if not isinstance(log, dict):
                 continue
-            games = int(log.get("games_available") or 0)
+            try:
+                games = int(log.get("games_available") or 0)
+            except (TypeError, ValueError):
+                continue
             totals_by_category = log.get("season_totals", {})
             totals = next(iter(totals_by_category.values()), {}) if isinstance(totals_by_category, dict) else {}
             if games <= 0 or not isinstance(totals, dict):
