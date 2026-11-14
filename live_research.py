@@ -410,13 +410,15 @@ def _extract_roster_players(payload: Any) -> list[dict[str, str]]:
                 "QUARTERBACK": "QB",
                 "RUNNING BACK": "RB",
                 "WIDE RECEIVER": "WR",
-                "TIGHT END": "TE", "LINEBACKER": "LB", "DEFENSIVE END": "DE",\n                "DEFENSIVE TACKLE": "DT", "CORNERBACK": "CB", "SAFETY": "S",
+                "TIGHT END": "TE", "LINEBACKER": "LB", "DEFENSIVE END": "DE",
+                "DEFENSIVE TACKLE": "DT", "CORNERBACK": "CB", "SAFETY": "S",
             }.get(position.strip().upper(), position.strip().upper())
             name = value.get("fullName") or value.get("displayName")
             athlete_id = value.get("id")
             placeholder_names = {
                 "quarterback", "running back", "wide receiver", "tight end",
-                "qb", "rb", "wr", "te", "receiver", "back", "linebacker",\n                "defensive end", "defensive tackle", "cornerback", "safety",
+                "qb", "rb", "wr", "te", "receiver", "back", "linebacker",
+                "defensive end", "defensive tackle", "cornerback", "safety",
             }
             if name and position and str(name).strip().casefold() not in placeholder_names:
                 key = str(athlete_id or str(name).strip().casefold())
