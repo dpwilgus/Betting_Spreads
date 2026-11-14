@@ -368,16 +368,16 @@ class LiveResearchTests(unittest.TestCase):
         from live_research import _select_research_players
 
         roster = [
-            {"id": "1", "name": "QB", "position": "QB"},
+            {"id": "1", "name": "Quarterback One", "position": "QB"},
             {"id": "2", "name": "RB1", "position": "RB"},
             {"id": "3", "name": "RB2", "position": "RB"},
-            {"id": "4", "name": "WR", "position": "WR"},
-            {"id": "5", "name": "TE", "position": "TE"},
+            {"id": "4", "name": "Wideout One", "position": "WR"},
+            {"id": "5", "name": "Tight End One", "position": "TE"},
             {"id": "6", "name": "K", "position": "K"},
         ]
         self.assertEqual(
             [player["name"] for player in _select_research_players(roster)],
-            ["QB", "RB1", "RB2", "WR", "TE"],
+            ["Quarterback One", "RB1", "RB2", "Wideout One", "Tight End One"],
         )
 
 
