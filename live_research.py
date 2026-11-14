@@ -839,6 +839,7 @@ def _compact_player_gamelog(
         "RB": (
             "rushingAttempts", "rushingYards", "rushingTouchdowns",
             "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
+            "longReception",
         ),
         "WR": (
             "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
