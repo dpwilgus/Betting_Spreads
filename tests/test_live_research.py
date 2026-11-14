@@ -580,7 +580,7 @@ class LiveResearchTests(unittest.TestCase):
         )
         self.assertEqual(
             [player["name"] for player in selected],
-            ["QB1", "RB1", "RB2", "WR1", "WR2", "TE1"],
+            ["QB1", "RB1", "RB2", "WR1", "WR2", "WR3", "TE1"],
         )
 
     def test_player_gamelog_compaction_keeps_role_relevant_usage_only(self):
@@ -706,6 +706,49 @@ class LiveResearchTests(unittest.TestCase):
             [player["name"] for player in selected],
             ["QB","RB One","RB Two","WR One","WR Two","TE"],
         )
+
+
+    def test_placeholder_depth_chart_label_does_not_block_roster_receiver(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"qb","name":"Quarterback One","position":"QB"},
+            {"id":"rb","name":"Running Back One","position":"RB"},
+            {"id":"wr1","name":"Jordan Addison","position":"WR"},
+            {"id":"wr2","name":"Justin Jefferson","position":"WR"},
+            {"id":"te","name":"Tight End One","position":"TE"},
+        ]
+        chart = {"depthCharts":[{
+            "positions":{
+                "QB":{"position":{"abbreviation":"QB"},"athletes":[{"rank":1,"athlete":{"id":"qb"}}]},
+                "RB":{"position":{"abbreviation":"RB"},"athletes":[{"rank":1,"athlete":{"id":"rb"}}]},
+                "WR":{"position":{"abbreviation":"WR"},"athletes":[
+                    {"rank":1,"athlete":{"id":"wr1"}},
+                    {"rank":2,"athlete":{"id":"placeholder"}},
+                ]},
+                "TE":{"position":{"abbreviation":"TE"},"athletes":[{"rank":1,"athlete":{"id":"te"}}]},
+            }
+        }]}
+        roster_with_placeholder = roster + [
+            {"id":"placeholder","name":"Wide Receiver","position":"WR"}
+        ]
+        selected = _select_research_players(roster_with_placeholder, chart)
+        self.assertIn("Justin Jefferson", [item["name"] for item in selected])
+        self.assertNotIn("Wide Receiver", [item["name"] for item in selected])
+
+    def test_compact_injury_prompt_limits_long_report_payload(self):
+        from live_research import _compact_injury_prompt_reports
+
+        reports = [
+            {"player":f"Player {i}","position":"LB","status":"Out",
+             "report_date":f"2026-11-{i:02d}","comment":"x"*200,
+             "injury_details":{"type":"Knee"}}
+            for i in range(1,12)
+        ]
+        compact = _compact_injury_prompt_reports(reports, limit=8)
+        self.assertEqual(len(compact), 8)
+        self.assertLess(len(str(compact)), len(str(reports)))
+        self.assertEqual(compact[0]["player"], "Player 11")
 
 
 if __name__ == "__main__":
