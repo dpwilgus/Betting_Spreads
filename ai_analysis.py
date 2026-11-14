@@ -345,6 +345,26 @@ def _filter_player_props_by_usage(
             gaps.append(f"Removed {player} player prop: no structured ESPN season game log was available.")
             continue
         description = str(pick.get("bet_description") or "").casefold()
+        if any(term in description for term in ("anytime touchdown", "anytime td", "touchdown scorer")):
+            season = usage.get("season") if isinstance(usage.get("season"), dict) else {}
+            games = int(usage.get("games_available") or 0)
+            position = str(usage.get("position") or "").upper()
+            carries = _stat_number(season, "rushingAttempts")
+            targets = _stat_number(season, "receivingTargets")
+            rush_tds = _stat_number(season, "rushingTouchdowns")
+            receiving_tds = _stat_number(season, "receivingTouchdowns")
+            eligible = games > 0 and (
+                (position == "QB" and (rush_tds >= 1 or carries / max(games, 1) >= 3))
+                or (position == "RB" and (carries + targets) / max(games, 1) >= 4)
+                or (position in {"WR", "TE"} and targets / max(games, 1) >= 2.5)
+            )
+            if eligible:
+                retained.append(pick)
+            else:
+                gaps.append(
+                    f"Removed {player} anytime-TD prop: current-season role evidence was insufficient."
+                )
+            continue
         stat_key = next(
             (key for pattern, key in stat_patterns if re.search(pattern, description)),
             None,
