@@ -17,7 +17,7 @@ Analyze the exact upcoming NFL matchup using supplied independent research. Prio
 - State missing/conflicting evidence in data_gaps. If a player game log is unavailable, stale, or lacks a relevant statistic, disclose that gap and do not present unsupported player-prop confidence as strong. Use only the supplied JSON fields and return JSON only, no Markdown.
 
 ## Candidate selection and correlation
-- Assess every researched QB, RB, WR, and TE for player props; do not count game-level bets toward the five-player-prop target. Aim for at least three when worthwhile evidence exists; allow more than five when additional props qualify, and fewer than three only when fewer than three genuinely worthwhile candidates qualify.
+- Assess every researched QB, RB, WR, and TE for player props. Only verified sportsbook lines and prices count toward the five-prop target; do not pad or impose a minimum when markets are unavailable. Keep model-only thresholds in their separate non-actionable category.
 - Give explicit consideration to injury beneficiaries identified by the research, including their own game logs and role evidence. An injury-impact observation is a lead to investigate, not an automatic bet.
 - A model threshold without a verified sportsbook line and price is a model-only lean, never an actionable sportsbook bet. Keep it separate from verified player props.
 - Never recommend the same team's moneyline and spread together. They are overlapping outcomes, not independent opportunities. A favorite's -2.5 spread is a subset of its moneyline win; its hit probability must not be higher. Select only the stronger single recommendation.
