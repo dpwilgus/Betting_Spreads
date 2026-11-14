@@ -253,7 +253,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         "No model-only player-prop leans met the evidence threshold."
     )
     next_pick_row = write_pick_section(
-        next_pick_row, "GAME-LEVEL BETS", game_picks,
+        next_pick_row, "GAME-LEVEL BETS (FULL GAME / 1ST HALF / 1ST QUARTER)", game_picks,
         "No game-level bets met the evidence threshold for this matchup."
     )
     td_start = max(16, next_pick_row + 1)
@@ -286,7 +286,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         sheet.row_dimensions[row_num].height = 65
 
     injury_start = td_start + max(len(scorers), 1) + 4
-    sheet.cell(injury_start, 1, "INJURY IMPACT ANALYSIS")
+    sheet.cell(injury_start, 1, "INJURY / NEWS IMPACT ANALYSIS")
     sheet.cell(injury_start, 1).font = white_bold
     sheet.cell(injury_start, 1).fill = navy
     sheet.merge_cells(
@@ -295,7 +295,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     )
 
     injury_headers = [
-        "Injured Player", "Team", "Availability", "Affected Player",
+        "Impact Type / Subject", "Team", "Status / Development", "Affected Player",
         "Affected Team", "Impact", "Statistical Effect", "Prop Market",
         "Evidence / Confidence", "Conditions",
     ]
@@ -316,7 +316,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
 
     for row_num, impact in enumerate(impacts, injury_start + 2):
         values = [
-            impact.get("injured_player", ""),
+            f"{impact.get('impact_type', 'Injury')} — {impact.get('injured_player', '')}",
             impact.get("team", ""),
             impact.get("availability", ""),
             impact.get("affected_player", ""),
@@ -338,67 +338,37 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 cell.fill = light
         sheet.row_dimensions[row_num].height = 78
 
-    # Show the full researched candidate pool so key starters and injury
-    # replacements remain visible even when the model does not recommend them.
-    player_pool_start = injury_start + max(len(impacts), 1) + 4
-    sheet.cell(player_pool_start, 1, "RESEARCHED PLAYER POOL & ROLE EVIDENCE")
-    sheet.cell(player_pool_start, 1).font = white_bold
-    sheet.cell(player_pool_start, 1).fill = navy
-    sheet.merge_cells(
-        start_row=player_pool_start, start_column=1,
-        end_row=player_pool_start, end_column=7,
-    )
-    player_headers = [
-        "Team", "Player", "Position", "Games", "Season Production",
-        "Recent Games", "Why Researched",
-    ]
-    for col, value in enumerate(player_headers, 1):
-        _style_header(sheet.cell(player_pool_start + 1, col, value))
-    candidates_by_team = analysis.get("selected_player_candidates", {})
-    evidence_by_player = analysis.get("researched_player_evidence", {})
-    def player_key(value):
-        return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
-    player_rows = []
-    if isinstance(candidates_by_team, dict):
-        for team_name, candidates in candidates_by_team.items():
-            team_candidates = candidates if isinstance(candidates, list) else []
-            for candidate in team_candidates:
-                if not isinstance(candidate, dict):
-                    continue
-                player_name = str(candidate.get("name") or "")
-                evidence = evidence_by_player.get(player_key(player_name), {})
-                season = evidence.get("season", {}) if isinstance(evidence, dict) else {}
-                recent = evidence.get("recent", []) if isinstance(evidence, dict) else []
-                season_text = (
-                    " | ".join("{}: {}".format(key, value) for key, value in season.items())
-                    if isinstance(season, dict) and season else "No season log retrieved"
-                )
-                recent_text = (
-                    json.dumps(recent, ensure_ascii=False)
-                    if isinstance(recent, list) and recent else "No recent games retrieved"
-                )
-                player_rows.append([
-                    team_name, player_name, candidate.get("position", ""),
-                    evidence.get("games_available", "—") if isinstance(evidence, dict) else "—",
-                    season_text, recent_text,
-                    candidate.get("research_reason", "Core candidate"),
-                ])
-    if not player_rows:
-        sheet.merge_cells(
-            start_row=player_pool_start + 2, start_column=1,
-            end_row=player_pool_start + 2, end_column=7,
-        )
-        sheet.cell(player_pool_start + 2, 1, "No structured player candidates were retained.")
-    for row_num, values in enumerate(player_rows, player_pool_start + 2):
+    # The full research pool remains internal; surface only selected high-upside ideas.
+    sneaky_start = injury_start + max(len(impacts), 1) + 4
+    sneaky_props = analysis.get("sneaky_props", [])
+    sneaky_props = sneaky_props if isinstance(sneaky_props, list) else []
+    sneaky_headers = ["Rank", "Player / Team", "Sneaky Prop / Ladder", "Market Line",
+        "Model Threshold", "Hit Probability", "Confidence", "Why It Has Upside",
+        "Risk Factors", "Data Quality"]
+    sheet.cell(sneaky_start, 1, "SNEAKY PROPS & LADDER OPPORTUNITIES")
+    sheet.cell(sneaky_start, 1).font = white_bold
+    sheet.cell(sneaky_start, 1).fill = navy
+    sheet.merge_cells(start_row=sneaky_start, start_column=1, end_row=sneaky_start, end_column=10)
+    for col, value in enumerate(sneaky_headers, 1):
+        _style_header(sheet.cell(sneaky_start + 1, col, value))
+    if not sneaky_props:
+        sheet.merge_cells(start_row=sneaky_start + 2, start_column=1, end_row=sneaky_start + 2, end_column=10)
+        sheet.cell(sneaky_start + 2, 1, "No additional high-upside prop or ladder angle met the evidence threshold.")
+    for offset, pick in enumerate(sneaky_props):
+        row_num = sneaky_start + 2 + offset
+        values = [offset + 1, pick.get("player_or_team", ""), pick.get("bet_description", ""),
+            pick.get("market_line", "NOT VERIFIED — MODEL IDEA ONLY"), pick.get("play_threshold", ""),
+            f"{pick.get('estimated_hit_probability', 0):.1f}%", pick.get("confidence", ""),
+            pick.get("statistical_rationale", ""), pick.get("risk_factors", ""), pick.get("data_quality", "")]
         for col, value in enumerate(values, 1):
             cell = sheet.cell(row=row_num, column=col, value=value)
             cell.alignment = Alignment(wrap_text=True, vertical="top")
             cell.border = Border(bottom=thin_gray)
             if row_num % 2 == 0:
                 cell.fill = light
-        sheet.row_dimensions[row_num].height = 66
+        sheet.row_dimensions[row_num].height = 78
 
-    gap_row = player_pool_start + max(len(player_rows), 1) + 4
+    gap_row = sneaky_start + max(len(sneaky_props), 1) + 4
     sheet.cell(gap_row, 1, "DATA LIMITATIONS")
     sheet.cell(gap_row, 1).font = white_bold
     sheet.cell(gap_row, 1).fill = navy
