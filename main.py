@@ -242,8 +242,15 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         return start_row + len(items) + 3
 
     next_pick_row = write_pick_section(
-        12, "TOP PLAYER PROPS (TARGET: 5; AIM FOR AT LEAST 3)", player_props,
-        "No player props met the evidence threshold for this matchup."
+        12, "VERIFIED PLAYER PROPS (SPORTSBOOK LINE REQUIRED)", player_props,
+        "No verified sportsbook player-prop lines were available for this matchup."
+    )
+    model_only_props = analysis.get("model_only_picks", [])
+    next_pick_row = write_pick_section(
+        next_pick_row,
+        "MODEL-ONLY PROP LEANS (NOT VERIFIED SPORTSBOOK BETS)",
+        model_only_props,
+        "No model-only player-prop leans met the evidence threshold."
     )
     next_pick_row = write_pick_section(
         next_pick_row, "GAME-LEVEL BETS", game_picks,
@@ -593,7 +600,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 3
+                            and cached.get("analysis_version") == 4
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
