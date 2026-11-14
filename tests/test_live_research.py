@@ -155,7 +155,7 @@ class LiveResearchTests(unittest.TestCase):
 
         _core_team_injuries.cache_clear()
 
-    def test_player_research_precedes_injury_reports_in_research_prompt(self):
+    def test_player_research_and_injuries_precede_team_statistics(self):
         summary = {
             "header": {
                 "id": "event-1",
@@ -195,11 +195,11 @@ class LiveResearchTests(unittest.TestCase):
 
         research = result["research_text"]
         self.assertLess(
-            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
             research.index("ESPN CURRENT PLAYER INJURIES"),
+            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
         )
         self.assertLess(
-            research.index("ESPN CURRENT PLAYER INJURIES"),
+            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
             research.index("ESPN GAME SUMMARY INJURY DATA"),
         )
         self.assertIn("MARKET DATA RULE", research)
