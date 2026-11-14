@@ -229,7 +229,7 @@ def _event_cache_key(event_id: str, markets: tuple[str, ...]) -> str:
     return f"{event_id}|us|american|{','.join(markets)}"
 
 
-def _load_fresh_cache(key: str, max_age_minutes: int = 20) -> dict[str, Any] | None:
+def _load_fresh_cache(key: str, max_age_minutes: int = 5) -> dict[str, Any] | None:
     path = _cache_path(key)
     if not path.is_file():
         return None
