@@ -713,7 +713,7 @@ def _separate_unverified_player_props(
                 for token in ("passing yards", "rushing yards", "receiving yards",
                               "receptions", "receiving targets", "rushing attempts",
                               "passing attempts", "completions", "interceptions",
-                              "sacks", "tackles", "passes defended", "longest reception",
+                              "longest reception", "anytime touchdown", "anytime td", "touchdown scorer",
                               "passing touchdowns", "rushing touchdowns", "receiving touchdowns",
                               "tackles for loss", "quarterback hits", "forced fumbles",
                               "fumble recoveries", "field goals made", "field goals attempted", "extra points made", "extra points attempted", "punting yards", "longest punt", "punts", "longest pass", "longest rush")
@@ -848,9 +848,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "must have a structured ESPN game log for that team. "
         "Player props: target the strongest evidence-supported markets, not a fixed count; aim for at least "
         "three when supported. Without a sportsbook line, label model-only, not actionable. Never invent lines. Keep game bets separate; assess all researched offensive and defensive player logs. "
-        "Cover researched attempts, completions, TDs, interceptions, receptions, targets, longest reception, sacks, tackles, TFL, QB hits, passes defended, forced fumbles, fumble recoveries, kicking, punting and other supplied stats. "
+        "Pass 1 core player props prioritize passing yards/TDs/attempts/completions/interceptions, rushing yards/attempts/TDs, receptions, receiving yards/TDs, and ANYTIME TOUCHDOWN SCORER markets. Anytime TD is a core market, not an afterthought. Only label an anytime-TD wager verified when the supplied sportsbook quote identifies that player and price. "
         "Assess full-game/1Q/1H, team totals, spreads and totals when supported. Never scale full-game averages into quarter/half player props; without ESPN period splits, omit or mark Limited, cap confidence at 5/10 and disclose the gap. "
-        "Never invent sportsbook availability or prices. Include alternate lines and ladders only when evidence supports a distinct high-upside angle. "
+        "Pass 2 may examine longest-play and combination markets, plus first-quarter and first-half game markets when the matchup research supports them. Use first-quarter player passing yards only where the feed actually provides it; do not invent unavailable first-half player markets. Never bet player sacks, tackles, kicking points or field goals. Use researched defensive sacks/tackles only as defensive-strength indicators when evaluating opposing offenses. Never invent sportsbook availability or prices. Include alternate lines and ladders only when evidence supports a distinct high-upside angle. "
         "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
         "Do not pair a team's moneyline and spread; retain the stronger. Spread probability cannot exceed that team's moneyline probability. "
         "TDs: compare season totals, carries/targets per game and recent scoring. "
@@ -935,7 +935,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         if (_normalize_name(str(item.get("player_or_team") or "")),
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
-    data["analysis_version"] = 6
+    data["analysis_version"] = 7
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
     data["researched_player_evidence"] = player_usage
     data["sources"] = list(research.get("sources", []))
