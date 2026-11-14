@@ -310,7 +310,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         )
         sheet.cell(
             injury_start + 2, 1,
-            "No meaningful, evidence-supported downstream injury impacts identified.",
+            "No meaningful, evidence-supported injury or news impacts identified.",
         )
         sheet.cell(injury_start + 2, 1).alignment = Alignment(wrap_text=True)
 
