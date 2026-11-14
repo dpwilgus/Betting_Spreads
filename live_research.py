@@ -810,6 +810,7 @@ def _compact_player_gamelog(
         "QB": (
             "passingAttempts", "completions", "passingYards", "passingTouchdowns",
             "interceptions", "rushingAttempts", "rushingYards", "rushingTouchdowns",
+            "longestPass", "sacksTaken",
         ),
         "DEF": (
             "totalTackles", "soloTackles", "assistedTackles", "sacks",
@@ -1073,6 +1074,8 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     sections.append(
                         f"ESPN roster unavailable for {team_name}: {type(exc).__name__}"
                     )
+
+            sections.extend(news_sections)
 
             for team_id, team_name in teams.items():
                 endpoint_name = "statistics"
