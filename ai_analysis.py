@@ -315,6 +315,16 @@ def _filter_player_props_by_usage(
         (r"sacks?", "sacks"),
         (r"tackles?", "totalTackles"),
         (r"passes defended", "passesDefended"),
+        (r"passing touchdowns?", "passingTouchdowns"),
+        (r"rushing touchdowns?", "rushingTouchdowns"),
+        (r"receiving touchdowns?", "receivingTouchdowns"),
+        (r"tackles for loss", "tacklesForLoss"),
+        (r"quarterback hits?", "quarterbackHits"),
+        (r"forced fumbles?", "forcedFumbles"),
+        (r"fumble recoveries?", "fumbleRecoveries"),
+        (r"field goals? made", "fieldGoalsMade"),
+        (r"extra points? made", "extraPointsMade"),
+        (r"punts?", "punts"),
         (r"longest reception", "longReception"),
     )
     retained = []
@@ -355,7 +365,7 @@ def _filter_player_props_by_usage(
         recent_average = (
             sum(recent_values) / len(recent_values) if recent_values else season_average
         )
-        if any(period in description for period in ("first quarter", "1st quarter", "first half", "1st half")):
+        if any(period in description for period in ("first quarter", "1st quarter", "first qtr", "1q", "first half", "1st half", "first-half", "1h")):
             retained.append(pick)
             continue
         is_over = bool(re.search(r"\bover\b", description))
@@ -818,7 +828,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Player props: target the strongest evidence-supported markets, not a fixed count; aim for at least "
         "three when supported. If no sportsbook line exists, label the idea model-only, not an actionable "
         "bet. Never invent a line. Keep game bets separate. Evaluate every researched offensive player and defensive starter/leader log. "
-        "Expand across evidence-supported markets: attempts, completions, interceptions, receptions, targets, sacks, tackles, passes defended, longest reception, and other researched stats. "
+        "Expand across evidence-supported markets: passing/rushing/receiving attempts, completions, passing/rushing/receiving TDs, interceptions, receptions, targets, longest reception, sacks, tackles, tackles for loss, QB hits, passes defended, forced fumbles, fumble recoveries, kicker field goals/extra points, punter volume, and other researched stats. "
         "Evaluate full-game, first-quarter, first-half, team-total, spread, and total markets when quotes or matchup evidence support them. "
         "Never invent sportsbook availability or prices. Include alternate lines and ladders only when evidence supports a distinct high-upside angle. "
         "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
