@@ -1298,8 +1298,8 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     # Player usage is essential for prop/TD evaluation. Keep it ahead of injury
     # context so prompt trimming cannot silently remove one team's game logs.
     sections.extend(player_stat_sections)
-    sections.extend(team_stat_sections)
     sections.extend(injury_sections)
+    sections.extend(team_stat_sections)
 
     seen, unique = set(), []
     for source in sources:
