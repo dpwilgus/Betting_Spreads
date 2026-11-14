@@ -1353,6 +1353,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
+                                    "research_reason": player.get("research_reason", ""),
                                     "game_log_unavailable": "skipped after repeated ESPN player-log errors",
                                 })
                                 continue
@@ -1367,6 +1368,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
+                                    "research_reason": player.get("research_reason", ""),
                                     "usage_and_recent_stats": _compact_player_gamelog(
                                         gamelog, player["position"]
                                     ),
@@ -1383,6 +1385,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
+                                    "research_reason": player.get("research_reason", ""),
                                     "game_log_unavailable": type(exc).__name__,
                                 })
                         if player_records:
