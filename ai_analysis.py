@@ -609,7 +609,8 @@ def _filter_injury_impacts(
                 f"Removed injury impact for {affected_player}: an injured player cannot be listed as their own beneficiary."
             )
             continue
-        if player_usage is not None and affected_player_key not in player_usage:
+        unit_impact = affected_player_key in {"teamunit", "offensiveunit", "defensiveunit", "specialteamsunit"}
+        if player_usage is not None and affected_player_key not in player_usage and not unit_impact:
             gaps.append(
                 f"Removed injury impact for {affected_player}: no structured game-log evidence was collected for the proposed beneficiary."
             )
@@ -634,8 +635,10 @@ def _filter_injury_impacts(
         elif not impact.get("evidence"):
             gaps.append(f"Removed news impact for {affected_player}: supporting evidence was missing.")
             continue
-        if affected_team_key not in team_lookup or \
-                _normalize_name(affected_player) not in roster_sets.get(affected_team_key, set()):
+        if affected_team_key not in team_lookup or (
+                not unit_impact
+                and _normalize_name(affected_player) not in roster_sets.get(affected_team_key, set())
+        ):
             gaps.append(
                 f"Removed injury impact for {affected_player}: affected player was not found on the stated team's roster."
             )
@@ -704,6 +707,10 @@ def _separate_unverified_player_props(
             )
     data["picks"] = actionable
     data["model_only_picks"] = model_only
+    # Sneaky player-prop lines are not treated as quoted sportsbook markets.
+    for pick in data.get("sneaky_props", []):
+        if pick.get("market_type") == "Player Prop":
+            pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
     return gaps
 
 def _deduplicate_correlated_game_picks(
@@ -815,7 +822,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "TDs: compare every researched player's season TDs, carries/targets per game, and recent scoring. "
         "Passing TDs do not count for a QB's anytime TD; require at least one rushing TD or 3+ rush attempts/game. "
         "Never select a QB just for being the starter. For injury impacts, never list the injured player "
-        "as their own affected_player. Include meaningful absences for offensive starters and high-impact defensive leaders (tackles, sacks, interceptions, pressure), plus verified news/role changes such as starting-QB changes even when the subject is not injured. Assess downstream beneficiaries including replacement TEs/WRs/RBs gaining snaps or targets. For an injured QB/RB/WR/TE, assess the next available same-position "
+        "as their own affected_player. Include meaningful absences for offensive starters and high-impact defensive leaders (tackles, sacks, interceptions, pressure), plus verified news/role changes such as starting-QB changes even when the subject is not injured. Assess downstream beneficiaries including replacement TEs/WRs/RBs gaining snaps or targets. If no individual beneficiary is supported, use affected_player='Team unit' rather than omitting a material starter absence. For an injured QB/RB/WR/TE, assess the next available same-position "
         "candidates explicitly marked as potential replacements; for defensive injuries, assess the opposing "
         "team's researched offensive players. A replacement is a candidate, not an automatic positive impact. "
         "The matchup summary must compare both defenses using supplied passing/rushing efficiency, yards or "
