@@ -542,7 +542,7 @@ class LiveResearchTests(unittest.TestCase):
         selected = _select_research_players(roster, chart)
         self.assertEqual(
             [player["name"] for player in selected],
-            ["Starting QB", "Starting RB", "Starting WR", "Starting TE"],
+            ["Starting QB", "Backup QB", "Starting RB", "Starting WR", "Starting TE"],
         )
 
     def test_player_selection_includes_multiple_running_backs_and_receivers(self):
