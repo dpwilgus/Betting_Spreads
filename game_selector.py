@@ -51,8 +51,23 @@ def select_games_gui(games: list[dict[str, Any]]) -> list[dict[str, Any]]:
     controls.pack(fill="x", padx=18, pady=(0, 8))
     count_label = tk.Label(controls, text="")
     count_label.pack(side="left")
-    list_frame = tk.Frame(root, bd=1, relief="solid")
-    list_frame.pack(fill="both", expand=True, padx=18, pady=4)
+    list_container = tk.Frame(root, bd=1, relief="solid")
+    list_container.pack(fill="both", expand=True, padx=18, pady=4)
+    canvas = tk.Canvas(list_container, highlightthickness=0)
+    scrollbar = tk.Scrollbar(list_container, orient="vertical", command=canvas.yview)
+    canvas.configure(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side="right", fill="y")
+    canvas.pack(side="left", fill="both", expand=True)
+    list_frame = tk.Frame(canvas)
+    canvas_window = canvas.create_window((0, 0), window=list_frame, anchor="nw")
+    list_frame.bind(
+        "<Configure>",
+        lambda _event: canvas.configure(scrollregion=canvas.bbox("all"))
+    )
+    canvas.bind(
+        "<Configure>",
+        lambda event: canvas.itemconfigure(canvas_window, width=event.width)
+    )
 
     def refresh_games() -> None:
         nonlocal selected_vars
