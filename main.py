@@ -722,7 +722,11 @@ def main() -> int:
             games = select_games_gui(games)
         if not reuse_cache:
             ensure_configured()
-            ensure_api_key_configured()
+            cli_mode = any(
+                flag in command_args
+                for flag in ("--matchup", "--refresh-incomplete", "--no-gui")
+            )
+            ensure_api_key_configured(use_gui=not cli_mode)
         analyses = []
         failures = []
         progress_window = ProgressWindow(len(games))
