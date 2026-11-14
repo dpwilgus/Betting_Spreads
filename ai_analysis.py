@@ -580,7 +580,7 @@ def _separate_unverified_player_props(
         player_key = _normalize_name(str(pick.get("player_or_team") or ""))
         description = str(pick.get("bet_description") or "").casefold()
         matched = None
-        for quote in verified_quotes if isinstance(verified_quotes, list) else []:
+        for quote in (verified_quotes if isinstance(verified_quotes, list) else []):
             if not isinstance(quote, dict):
                 continue
             quote_player = _normalize_name(str(quote.get("player") or ""))
