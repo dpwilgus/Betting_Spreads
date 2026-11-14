@@ -580,8 +580,9 @@ def _filter_injury_impacts(
     rosters: dict[str, list[str]] | None,
     team_names: tuple[str, str],
     player_usage: dict[str, dict[str, Any]] | None = None,
+    news_evidence_text: str | None = None,
 ) -> list[str]:
-    """Keep only impacts grounded in the named injury report and an available affected player."""
+    """Keep impacts grounded in ESPN injury reports or the supplied team-news headlines."""
     reports = {
         (_normalize_name(str(item.get("team") or "")),
          _normalize_name(str(item.get("player") or ""))): item
@@ -632,8 +633,11 @@ def _filter_injury_impacts(
                     f"Removed injury impact for {affected_player}: no meaningful injury designation was verified."
                 )
                 continue
-        elif not impact.get("evidence"):
-            gaps.append(f"Removed news impact for {affected_player}: supporting evidence was missing.")
+        elif not impact.get("evidence") or (
+            news_evidence_text is not None
+            and _normalize_name(affected_player) not in _normalize_name(news_evidence_text)
+        ):
+            gaps.append(f"Removed news impact for {affected_player}: no matching ESPN team-news evidence was found.")
             continue
         if affected_team_key not in team_lookup or (
                 not unit_impact
@@ -875,9 +879,13 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     sneaky_usage_gaps = _filter_player_props_by_usage(sneaky_usage_data, player_usage)
     data["sneaky_props"] = sneaky_usage_data.get("picks", [])
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
+    news_evidence_text = "\\n".join(
+        line for line in str(research.get("research_text", "")).splitlines()
+        if "ESPN RECENT TEAM NEWS" in line
+    )
     impact_gaps = _filter_injury_impacts(
         data, research.get("injury_statuses", []), research.get("rosters"),
-        team_names, player_usage=player_usage
+        team_names, player_usage=player_usage, news_evidence_text=news_evidence_text
     )
     market_gaps = _separate_unverified_player_props(data, research)
     quality_gaps = injury_gaps + sneaky_status_gaps + prop_gaps + sneaky_usage_gaps + td_gaps + impact_gaps + market_gaps
