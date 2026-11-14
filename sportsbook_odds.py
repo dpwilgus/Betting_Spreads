@@ -30,19 +30,19 @@ PASS1_MARKETS = (
     "player_pass_tds",
     "player_pass_attempts",
     "player_pass_completions",
-    "player_pass_interceptions",
     "player_rush_yds",
     "player_rush_attempts",
     "player_receptions",
     "player_reception_yds",
-    "player_reception_tds",
-    "player_rush_tds",
     "player_anytime_td",
 )
 
 # Pass 2: only targeted, evidence-supported markets. Defensive player props
 # (sacks/tackles) are intentionally absent; those remain ESPN research inputs.
 PASS2_MARKETS = (
+    "player_pass_interceptions",
+    "player_rush_tds",
+    "player_reception_tds",
     "player_reception_longest",
     "player_pass_longest_completion",
     "player_rush_longest",
@@ -151,7 +151,33 @@ def ensure_api_key_configured() -> bool:
 
 
 def _cache_dir() -> Path:
-    return Path(__file__).resolve().parent / "odds_cache"
+    # Keep writable app data outside a packaged .app/.exe bundle.
+    return Path.home() / ".betting_spreads" / "odds_cache"
+
+
+def _quota_state_path() -> Path:
+    return _cache_dir() / "quota_state.json"
+
+
+def _known_remaining_credits() -> int | None:
+    try:
+        state = json.loads(_quota_state_path().read_text(encoding="utf-8"))
+        value = state.get("requests_remaining")
+        return int(value) if value not in (None, "") else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _save_quota_state(headers: dict[str, str]) -> None:
+    remaining = headers.get("x-requests-remaining")
+    if remaining in (None, ""):
+        return
+    path = _quota_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "requests_remaining": remaining,
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }, indent=2), encoding="utf-8")
 
 
 def _cache_path(key: str) -> Path:
@@ -294,6 +320,15 @@ def fetch_event_quotes(
     """Fetch/cache quotes for one matchup. Events lookup is free; odds cost is market-based."""
     if not get_api_key():
         return {"quotes": [], "status": "no_api_key", "usage": {}}
+    remaining = _known_remaining_credits()
+    # Keep a 25-credit monthly safety buffer. The requested-market count is a
+    # conservative upper bound; actual billing uses markets returned by the API.
+    if remaining is not None and remaining < len(markets) + 25:
+        return {
+            "quotes": [], "status": "quota_reserve_reached",
+            "message": f"Skipped odds refresh to preserve the 25-credit reserve ({remaining} credits reported remaining).",
+            "usage": {"requests_remaining": remaining},
+        }
     cache_key = _event_cache_key(str(game.get("event_id") or ""), markets)
     cached = None if refresh else _load_fresh_cache(cache_key)
     if cached:
@@ -323,6 +358,7 @@ def fetch_event_quotes(
         params,
     )
     retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    _save_quota_state(headers)
     record = {
         "cached_at": retrieved_at,
         "quotes": _parse_quotes(payload if isinstance(payload, dict) else {}, retrieved_at),
