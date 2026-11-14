@@ -1255,6 +1255,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             if isinstance(report, dict) and report.get("player") and report.get("status"):
                                 injury_statuses.append({
                                     "player": str(report["player"]),
+                                    "position": str(report.get("position") or ""),
                                     "team": str(team_name),
                                     "status": str(report["status"]),
                                     "report_date": str(report.get("report_date") or ""),
@@ -1263,7 +1264,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         injury_sections.append(
                             f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
                             + json.dumps(
-                                team_injuries,
+                                _compact_injury_prompt_reports(team_injuries),
                                 ensure_ascii=False,
                                 separators=(",", ":"),
                             )
@@ -1293,11 +1294,11 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             sections.append(f"ESPN game-summary request failed: {exc}")
 
-    # Injury evidence is more time-sensitive than season aggregates. Place it
-    # before team statistics because the AI prompt has a hard research-text ceiling.
-    sections.extend(injury_sections)
+    # Player usage is essential for prop/TD evaluation. Keep it ahead of injury
+    # context so prompt trimming cannot silently remove one team's game logs.
     sections.extend(player_stat_sections)
     sections.extend(team_stat_sections)
+    sections.extend(injury_sections)
 
     seen, unique = set(), []
     for source in sources:
