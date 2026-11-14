@@ -23,6 +23,7 @@ from openpyxl.utils import get_column_letter
 from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
 from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
+from sportsbook_odds import fetch_event_quotes, PASS1_MARKETS, summarize_quotes
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
@@ -617,7 +618,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 6
+                            and cached.get("analysis_version") == 7
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
