@@ -410,7 +410,11 @@ def _extract_roster_players(payload: Any) -> list[dict[str, str]]:
             }.get(position.strip().upper(), position.strip().upper())
             name = value.get("fullName") or value.get("displayName")
             athlete_id = value.get("id")
-            if name and position:
+            placeholder_names = {
+                "quarterback", "running back", "wide receiver", "tight end",
+                "qb", "rb", "wr", "te", "receiver", "back",
+            }
+            if name and position and str(name).strip().casefold() not in placeholder_names:
                 key = str(athlete_id or str(name).strip().casefold())
                 if key not in seen:
                     seen.add(key)
@@ -609,11 +613,19 @@ def _select_research_players(
     depth_chart: dict[str, Any] | None = None,
 ) -> list[dict[str, str]]:
     """Research primary and secondary offensive contributors, not just one starter."""
-    roster_by_id = {player.get("id"): player for player in players if player.get("id")}
+    placeholder_names = {
+        "quarterback", "running back", "wide receiver", "tight end",
+        "qb", "rb", "wr", "te", "receiver", "back",
+    }
+    roster_by_id = {
+        player.get("id"): player for player in players
+        if player.get("id")
+        and str(player.get("name") or "").strip().casefold() not in placeholder_names
+    }
     depth_ids = _extract_depth_chart_ids(depth_chart or {})
-    # Secondary backs and receivers can lead their team in actual usage or scoring.
-    # Use depth-chart order first, then fill any missing slots from the current roster.
-    limits = {"QB": 1, "RB": 2, "WR": 2, "TE": 1}
+    # Research enough skill players to compare real scoring roles, not just depth-chart labels.
+    # Depth-chart entries are matched to named roster athletes; missing slots are filled from roster.
+    limits = {"QB": 1, "RB": 2, "WR": 3, "TE": 1}
     selected: list[dict[str, str]] = []
     selected_ids: set[str] = set()
     for position, limit in limits.items():
@@ -916,6 +928,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             if isinstance(report, dict) and report.get("player") and report.get("status"):
                                 injury_statuses.append({
                                     "player": str(report["player"]),
+                                    "position": str(report.get("position") or ""),
                                     "team": str(team_name),
                                     "status": str(report["status"]),
                                     "report_date": str(report.get("report_date") or ""),
@@ -924,7 +937,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         injury_sections.append(
                             f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
                             + json.dumps(
-                                team_injuries,
+                                _compact_injury_prompt_reports(team_injuries),
                                 ensure_ascii=False,
                                 separators=(",", ":"),
                             )
@@ -954,11 +967,11 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         except Exception as exc:
             sections.append(f"ESPN game-summary request failed: {exc}")
 
-    # Injury evidence is more time-sensitive than season aggregates. Place it
-    # before team statistics because the AI prompt has a hard research-text ceiling.
-    sections.extend(injury_sections)
+    # Player usage is essential for prop/TD evaluation. Keep it ahead of injury
+    # context so prompt trimming cannot silently remove one team's game logs.
     sections.extend(player_stat_sections)
     sections.extend(team_stat_sections)
+    sections.extend(injury_sections)
 
     seen, unique = set(), []
     for source in sources:
@@ -1028,6 +1041,30 @@ def reset_research_cache() -> None:
     _core_team_injuries.cache_clear()
     _player_gamelog_failures = 0
     _player_gamelogs_disabled = False
+
+def _compact_injury_prompt_reports(
+    reports: list[dict[str, Any]],
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    """Keep concise, newest injury designations for the AI while retaining full statuses separately."""
+    ordered = sorted(
+        (item for item in reports if isinstance(item, dict)),
+        key=lambda item: str(item.get("report_date") or ""),
+        reverse=True,
+    )
+    compact = []
+    for report in ordered[:limit]:
+        details = report.get("injury_details") or {}
+        compact.append({
+            "player": report.get("player", ""),
+            "position": report.get("position", ""),
+            "status": report.get("status", ""),
+            "report_date": report.get("report_date", ""),
+            "injury": details.get("type", "") if isinstance(details, dict) else "",
+            "comment": str(report.get("comment") or "")[:90],
+        })
+    return compact
+
 
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     event_id = str(game.get("event_id", "")).strip()
