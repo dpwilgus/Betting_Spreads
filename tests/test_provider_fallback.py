@@ -645,5 +645,30 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(len(data["injury_impact"]), 1)
 
 
+    def test_td_filter_keeps_only_three_highest_scoring_skill_candidates(self):
+        usage = {}
+        scorers = []
+        for index, (player, touchdowns, targets) in enumerate([
+            ("Receiver One", 5, 80),
+            ("Receiver Two", 4, 75),
+            ("Receiver Three", 3, 70),
+            ("Receiver Four", 1, 50),
+        ]):
+            key = _normalize_name(player)
+            usage[key] = {
+                "player":player,"position":"WR","games_available":9,
+                "season":{"receivingTouchdowns":touchdowns,"receivingTargets":targets},
+                "recent":[]
+            }
+            scorers.append({"player":player,"estimated_td_probability":20+index})
+        data = {"touchdown_scorers":scorers}
+        _filter_td_scorers_by_usage(data, usage)
+        self.assertEqual(len(data["touchdown_scorers"]), 3)
+        self.assertEqual(
+            [item["player"] for item in data["touchdown_scorers"]],
+            ["Receiver One","Receiver Two","Receiver Three"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
