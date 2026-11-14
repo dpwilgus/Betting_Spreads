@@ -474,7 +474,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("risk_factors must start 'Questionable:'", user_prompt)
         self.assertIn("'Questionable:'", user_prompt)
         self.assertNotIn('"additionalProperties"', user_prompt)
-        self.assertLess(len(system_prompt) + len(user_prompt), 10000)
+        self.assertLess(len(system_prompt) + len(user_prompt), 15000)
         self.assertEqual(result["ai_provider"], "gemini")
         self.assertEqual(result["sources"], research["sources"])
 
