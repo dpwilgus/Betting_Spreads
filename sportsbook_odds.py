@@ -39,6 +39,8 @@ PASS1_MARKETS = (
 
 # Pass 2: only targeted, evidence-supported markets. Defensive player props
 # (sacks/tackles) are intentionally absent; those remain ESPN research inputs.
+PASS2_TD_MARKETS = ("player_1st_td",)
+
 PASS2_MARKETS = (
     "player_pass_interceptions",
     "player_rush_tds",
@@ -50,6 +52,7 @@ PASS2_MARKETS = (
     "player_rush_reception_yds",
     "player_pass_rush_reception_yds",
     "player_pass_yds_q1",
+    "player_1st_td",
     "h2h_q1",
     "spreads_q1",
     "totals_q1",
@@ -71,6 +74,7 @@ MARKET_LABELS = {
     "player_reception_tds": "receiving touchdowns",
     "player_rush_tds": "rushing touchdowns",
     "player_anytime_td": "anytime touchdown",
+    "player_1st_td": "first touchdown scorer",
     "player_reception_longest": "longest reception",
     "player_pass_longest_completion": "longest pass completion",
     "player_rush_longest": "longest rush",
