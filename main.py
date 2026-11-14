@@ -23,7 +23,10 @@ from openpyxl.utils import get_column_letter
 from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
 from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
-from sportsbook_odds import fetch_event_quotes, PASS1_MARKETS, summarize_quotes, ensure_api_key_configured
+from sportsbook_odds import (
+    fetch_event_quotes, PASS1_MARKETS, PASS2_TD_MARKETS,
+    summarize_quotes, ensure_api_key_configured, research_supports_first_td,
+)
 from game_selector import select_games_gui
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
@@ -406,6 +409,30 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.freeze_panes = "A14"
 
 
+def attach_sportsbook_quotes(game: dict, research: dict) -> None:
+    """Attach Pass 1 quotes and research-gated Pass 2 first-TD quotes."""
+    pass1 = fetch_event_quotes(game, PASS1_MARKETS)
+    quotes = list(pass1.get("quotes", []))
+    pass2_status = "not_eligible"
+    pass2_usage = {}
+    if research_supports_first_td(research.get("research_text", "")):
+        pass2 = fetch_event_quotes(game, PASS2_TD_MARKETS)
+        quotes.extend(pass2.get("quotes", []))
+        pass2_status = pass2.get("status", "unknown")
+        pass2_usage = pass2.get("usage", {})
+    research["verified_player_prop_markets"] = quotes
+    if quotes:
+        research["research_text"] += "\\n\\n" + summarize_quotes(quotes)
+        research.setdefault("sources", []).append({
+            "title": "The Odds API live NFL player props",
+            "url": "https://the-odds-api.com/sports/nfl-odds.html",
+        })
+    research["odds_api_status"] = (
+        f"Pass 1: {pass1.get('status', 'unknown')}; Pass 2 first TD: {pass2_status}"
+    )
+    research["odds_api_usage"] = pass2_usage or pass1.get("usage", {})
+
+
 def write_workbook(games: list[dict], analyses: list[dict], season: object, week: object) -> Path:
     output = application_directory() / "NFL_Weekly_Matchups.xlsx"
     workbook = Workbook()
@@ -630,7 +657,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 7
+                            and cached.get("analysis_version") == 8
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
@@ -638,16 +665,7 @@ def main() -> int:
                         else:
                             research = collect_game_research(game)
                             try:
-                                odds_result = fetch_event_quotes(game, PASS1_MARKETS)
-                                research["verified_player_prop_markets"] = odds_result.get("quotes", [])
-                                if odds_result.get("quotes"):
-                                    research["research_text"] += "\n\n" + summarize_quotes(odds_result["quotes"])
-                                    research.setdefault("sources", []).append({
-                                        "title": "The Odds API live NFL player props",
-                                        "url": "https://the-odds-api.com/sports/nfl-odds.html",
-                                    })
-                                research["odds_api_status"] = odds_result.get("status")
-                                research["odds_api_usage"] = odds_result.get("usage", {})
+                                attach_sportsbook_quotes(game, research)
                             except Exception as odds_exc:
                                 research["verified_player_prop_markets"] = []
                                 research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
@@ -656,16 +674,7 @@ def main() -> int:
                     else:
                         research = collect_game_research(game)
                         try:
-                            odds_result = fetch_event_quotes(game, PASS1_MARKETS)
-                            research["verified_player_prop_markets"] = odds_result.get("quotes", [])
-                            if odds_result.get("quotes"):
-                                research["research_text"] += "\n\n" + summarize_quotes(odds_result["quotes"])
-                                research.setdefault("sources", []).append({
-                                    "title": "The Odds API live NFL player props",
-                                    "url": "https://the-odds-api.com/sports/nfl-odds.html",
-                                })
-                            research["odds_api_status"] = odds_result.get("status")
-                            research["odds_api_usage"] = odds_result.get("usage", {})
+                            attach_sportsbook_quotes(game, research)
                         except Exception as odds_exc:
                             research["verified_player_prop_markets"] = []
                             research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
