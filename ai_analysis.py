@@ -9,7 +9,7 @@ from typing import Any
 from ai_providers import generate_json
 from live_research import collect_game_research
 
-MAX_RESEARCH_PROMPT_CHARS = 20000
+MAX_RESEARCH_PROMPT_CHARS = 40000
 
 
 def _bounded_research_text(research_text: str) -> tuple[str, bool]:
@@ -32,14 +32,14 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
             priority = 0
         elif upper.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
             priority = 1
+        elif upper.startswith("ESPN RECENT TEAM NEWS"):
+            priority = 1
         elif upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS"):
             priority = 2
-        elif upper.startswith("ESPN CURRENT PLAYER INJURIES"):
+        elif upper.startswith("ESPN CURRENT PLAYER INJURIES") or upper.startswith("ESPN GAME SUMMARY INJURY DATA"):
             priority = 3
         elif upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS"):
             priority = 4
-        elif upper.startswith("ESPN GAME SUMMARY INJURY DATA"):
-            priority = 5
         else:
             priority = 6
         prioritized.append((priority, index, section))
@@ -557,9 +557,16 @@ def _filter_injury_impacts(
         injured_team = str(impact.get("team") or "")
         affected_player = str(impact.get("affected_player") or "")
         affected_team = str(impact.get("affected_team") or "")
+        injured_player_key = _normalize_name(injured_player)
+        affected_player_key = _normalize_name(affected_player)
         injured_team_key = _normalize_name(injured_team)
         affected_team_key = _normalize_name(affected_team)
-        report = reports.get((injured_team_key, _normalize_name(injured_player)))
+        if injured_player_key and injured_player_key == affected_player_key:
+            gaps.append(
+                f"Removed injury impact for {affected_player}: an injured player cannot be listed as their own beneficiary."
+            )
+            continue
+        report = reports.get((injured_team_key, injured_player_key))
         if injured_team_key not in team_lookup or report is None:
             gaps.append(
                 f"Removed injury impact for {affected_player}: injured player/team did not match an ESPN injury report."
@@ -800,7 +807,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         data.setdefault("data_gaps", []).append(
             "Overlapping same-team moneyline/spread recommendations were deduplicated; only the higher-confidence option was retained."
         )
-    data["analysis_version"] = 4
+    data["analysis_version"] = 5
     data["sources"] = list(research.get("sources", []))
     data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
