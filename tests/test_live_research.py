@@ -837,14 +837,17 @@ class LiveResearchTests(unittest.TestCase):
         self.assertTrue(any("cannot be listed as their own beneficiary" in gap for gap in gaps))
 
     def test_team_news_compaction_preserves_headline_date_and_source(self):
-        from live_research import _compact_team_news
+        from live_research import _team_news
 
-        result = _compact_team_news({"articles":[{
+        _team_news.cache_clear()
+        with patch("live_research._get_json", return_value={"articles":[{
             "headline":"Team acquires veteran quarterback",
             "description":"A veteran quarterback returns to the team.",
             "published":"2026-11-13T15:00:00Z",
             "links":{"web":{"href":"https://example.com/story"}},
-        }]})
+        }]}):
+            result = _team_news("123")
+        _team_news.cache_clear()
         self.assertEqual(result["articles"][0]["headline"], "Team acquires veteran quarterback")
         self.assertEqual(result["articles"][0]["published"], "2026-11-13T15:00:00Z")
         self.assertEqual(result["articles"][0]["url"], "https://example.com/story")
