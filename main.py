@@ -625,10 +625,38 @@ def main() -> int:
                             analysis = _load_cached_analysis(game)
                         else:
                             research = collect_game_research(game)
+                            try:
+                                odds_result = fetch_event_quotes(game, PASS1_MARKETS)
+                                research["verified_player_prop_markets"] = odds_result.get("quotes", [])
+                                if odds_result.get("quotes"):
+                                    research["research_text"] += "\n\n" + summarize_quotes(odds_result["quotes"])
+                                    research.setdefault("sources", []).append({
+                                        "title": "The Odds API live NFL player props",
+                                        "url": "https://the-odds-api.com/sports/nfl-odds.html",
+                                    })
+                                research["odds_api_status"] = odds_result.get("status")
+                                research["odds_api_usage"] = odds_result.get("usage", {})
+                            except Exception as odds_exc:
+                                research["verified_player_prop_markets"] = []
+                                research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
                             analysis = analyze_game(game, research)
                             _save_cached_analysis(game, analysis)
                     else:
                         research = collect_game_research(game)
+                        try:
+                            odds_result = fetch_event_quotes(game, PASS1_MARKETS)
+                            research["verified_player_prop_markets"] = odds_result.get("quotes", [])
+                            if odds_result.get("quotes"):
+                                research["research_text"] += "\n\n" + summarize_quotes(odds_result["quotes"])
+                                research.setdefault("sources", []).append({
+                                    "title": "The Odds API live NFL player props",
+                                    "url": "https://the-odds-api.com/sports/nfl-odds.html",
+                                })
+                            research["odds_api_status"] = odds_result.get("status")
+                            research["odds_api_usage"] = odds_result.get("usage", {})
+                        except Exception as odds_exc:
+                            research["verified_player_prop_markets"] = []
+                            research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
                         analysis = analyze_game(game, research)
                         _save_cached_analysis(game, analysis)
                     analyses.append(analysis)
