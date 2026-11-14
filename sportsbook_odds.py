@@ -162,6 +162,9 @@ def _quota_state_path() -> Path:
 def _known_remaining_credits() -> int | None:
     try:
         state = json.loads(_quota_state_path().read_text(encoding="utf-8"))
+        updated = datetime.fromisoformat(state.get("updated_at", ""))
+        if datetime.now(timezone.utc) - updated > timedelta(hours=24):
+            return None
         value = state.get("requests_remaining")
         return int(value) if value not in (None, "") else None
     except (OSError, ValueError, TypeError):
