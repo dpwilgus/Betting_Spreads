@@ -315,6 +315,7 @@ def _filter_player_props_by_usage(
         (r"sacks?", "sacks"),
         (r"tackles?", "totalTackles"),
         (r"passes defended", "passesDefended"),
+        (r"longest reception", "longReception"),
     )
     retained = []
     gaps = []
@@ -595,17 +596,25 @@ def _filter_injury_impacts(
                 f"Removed injury impact for {affected_player}: no structured game-log evidence was collected for the proposed beneficiary."
             )
             continue
+        impact_type = str(impact.get("impact_type") or "Injury")
         report = reports.get((injured_team_key, injured_player_key))
-        if injured_team_key not in team_lookup or report is None:
-            gaps.append(
-                f"Removed injury impact for {affected_player}: injured player/team did not match an ESPN injury report."
-            )
+        if injured_team_key not in team_lookup:
+            gaps.append(f"Removed impact for {affected_player}: subject team is outside this matchup.")
             continue
-        if not _is_unavailable_status(str(report.get("status") or "")) and \
-                "questionable" not in str(report.get("status") or "").casefold():
-            gaps.append(
-                f"Removed injury impact for {affected_player}: no meaningful injury designation was verified."
-            )
+        if impact_type == "Injury":
+            if report is None:
+                gaps.append(
+                    f"Removed injury impact for {affected_player}: injured player/team did not match an ESPN injury report."
+                )
+                continue
+            if not _is_unavailable_status(str(report.get("status") or "")) and \
+                    "questionable" not in str(report.get("status") or "").casefold():
+                gaps.append(
+                    f"Removed injury impact for {affected_player}: no meaningful injury designation was verified."
+                )
+                continue
+        elif not impact.get("evidence"):
+            gaps.append(f"Removed news impact for {affected_player}: supporting evidence was missing.")
             continue
         if affected_team_key not in team_lookup or \
                 _normalize_name(affected_player) not in roster_sets.get(affected_team_key, set()):
