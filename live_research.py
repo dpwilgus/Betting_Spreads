@@ -1253,7 +1253,7 @@ def reset_research_cache() -> None:
 
 def _compact_injury_prompt_reports(
     reports: list[dict[str, Any]],
-    limit: int = 8,
+    limit: int = 20,
 ) -> list[dict[str, Any]]:
     """Keep concise, newest injury designations for the AI while retaining full statuses separately."""
     ordered = sorted(
