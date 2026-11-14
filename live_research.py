@@ -1422,6 +1422,9 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             selected_players = _select_research_players(
                                 roster_players, injury_reports=team_injuries, team_name=team_name
                             )
+                            selected_players.extend(
+                                _select_special_teams_research_players(roster_players)
+                            )
                             selection_basis = (
                                 f"roster-order offensive fallback; depth chart unavailable "
                                 f"({type(exc).__name__}); defensive starters not selected"
