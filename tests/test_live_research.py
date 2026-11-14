@@ -602,7 +602,7 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(compact["usage_status"], "established_volume")
         self.assertEqual(compact["season"]["receivingTargets"], "42")
         self.assertNotIn("passingAttempts", compact["season"])
-        self.assertNotIn("longReception", compact["recent"][0]["stats"])
+        self.assertEqual(compact["recent"][0]["stats"]["longReception"], "30")
         self.assertEqual(len(compact["recent"]), 3)
 
 
