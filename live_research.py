@@ -802,6 +802,20 @@ def _select_defensive_research_players(
                     break
     return selected
 
+
+
+def _select_special_teams_research_players(
+    players: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    """Include the active roster kicker and punter for their player-specific markets."""
+    selected = []
+    for position in ("K", "P"):
+        player = next((item for item in players if item.get("position", "").upper() == position and item.get("id")), None)
+        if player:
+            candidate = dict(player)
+            candidate["research_reason"] = f"Special-teams starter candidate ({position})"
+            selected.append(candidate)
+    return selected
 def _compact_player_gamelog(
     gamelog: dict[str, Any],
     position: str,
@@ -819,6 +833,9 @@ def _compact_player_gamelog(
             "interceptions", "passesDefended", "tacklesForLoss", "quarterbackHits",
             "forcedFumbles", "fumbleRecoveries",
         ),
+        "K": ("fieldGoalsMade", "fieldGoalsAttempted", "fieldGoalPct",
+              "extraPointsMade", "extraPointsAttempted"),
+        "P": ("punts", "puntingYards", "netPuntingYards", "longPunt"),
         "RB": (
             "rushingAttempts", "rushingYards", "rushingTouchdowns",
             "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
@@ -1391,9 +1408,10 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             defensive_players = _select_defensive_research_players(
                                 roster_players, depth_chart
                             )
+                            special_teams_players = _select_special_teams_research_players(roster_players)
                             selected_ids = {str(player.get("id")) for player in selected_players}
                             selected_players.extend(
-                                player for player in defensive_players
+                                player for player in defensive_players + special_teams_players
                                 if str(player.get("id")) not in selected_ids
                             )
                             selection_basis = (
