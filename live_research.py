@@ -705,7 +705,7 @@ def _select_research_players(
                     str(player["id"]) for player in valid_players[:injured_roster_index]
                     if player.get("position", "").upper() == position
                 }
-                injured_index = len([item for item in same_position if item in prior_ids]) - 1
+                injured_index = len([item for item in same_position if item in prior_ids])
                 ordered_ids = same_position
         # Add the next two available depth-chart options, even beyond the base
         # position limit. These are candidates to evaluate, not assumed beneficiaries.
