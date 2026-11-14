@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 import ssl
 import urllib.request
@@ -54,6 +55,9 @@ STAT_FIELDS = {
     },
     "defensive": {
         "sacks", "passesDefended", "tacklesForLoss", "quarterbackHits",
+        "interceptions", "passingYardsAllowed", "rushingYardsAllowed",
+        "totalYardsAllowed", "yardsPerPlayAllowed", "pointsAllowed",
+        "opponentPasserRating", "thirdDownPct", "redZonePct",
     },
     "defensiveInterceptions": {
         "interceptions", "interceptionTouchdowns",
@@ -611,47 +615,103 @@ def _compact_player_data(value: Any, depth: int = 0) -> Any:
 def _select_research_players(
     players: list[dict[str, str]],
     depth_chart: dict[str, Any] | None = None,
+    injury_reports: list[dict[str, Any]] | None = None,
+    team_name: str | None = None,
 ) -> list[dict[str, str]]:
-    """Research primary and secondary offensive contributors, not just one starter."""
+    """Select core offensive contributors plus depth-chart replacements for injured teammates."""
     placeholder_names = {
         "quarterback", "running back", "wide receiver", "tight end",
-        "qb", "rb", "wr", "te", "receiver", "back",
+        "qb", "rb", "wr", "te", "receiver", "back", "offense",
     }
-    roster_by_id = {
-        player.get("id"): player for player in players
+    valid_players = [
+        player for player in players
         if player.get("id")
         and str(player.get("name") or "").strip().casefold() not in placeholder_names
-    }
+        and player.get("position", "").upper() in {"QB", "RB", "WR", "TE"}
+    ]
+    roster_by_id = {str(player["id"]): player for player in valid_players}
     depth_ids = _extract_depth_chart_ids(depth_chart or {})
-    # Research enough skill players to compare real scoring roles, not just depth-chart labels.
-    # Depth-chart entries are matched to named roster athletes; missing slots are filled from roster.
-    limits = {"QB": 1, "RB": 2, "WR": 3, "TE": 1}
+    position_ids: dict[str, list[str]] = {}
+    for position in ("QB", "RB", "WR", "TE"):
+        ordered = depth_ids.get(position, [])
+        seen = set(ordered)
+        ordered.extend(
+            str(player["id"]) for player in valid_players
+            if player.get("position", "").upper() == position
+            and str(player["id"]) not in seen
+        )
+        position_ids[position] = ordered
+
+    # Broad enough to cover the main passing/rushing options, without querying
+    # every inactive/developmental roster player for every game in a full slate.
+    limits = {"QB": 2, "RB": 3, "WR": 5, "TE": 2}
     selected: list[dict[str, str]] = []
     selected_ids: set[str] = set()
+
+    def add_player(athlete_id: str) -> None:
+        player = roster_by_id.get(str(athlete_id))
+        if player is not None and str(athlete_id) not in selected_ids:
+            selected.append(player)
+            selected_ids.add(str(athlete_id))
+
     for position, limit in limits.items():
-        added = 0
-        for athlete_id in depth_ids.get(position, []):
-            player = roster_by_id.get(athlete_id)
-            if player is not None and athlete_id not in selected_ids:
-                selected.append(player)
-                selected_ids.add(athlete_id)
-                added += 1
-                if added >= limit:
-                    break
-        if added < limit:
-            for player in players:
-                athlete_id = str(player.get("id") or "")
-                if (
-                    player.get("position", "").upper() == position
-                    and str(player.get("name") or "").strip().casefold() not in placeholder_names
-                    and athlete_id
-                    and athlete_id not in selected_ids
-                ):
-                    selected.append(player)
-                    selected_ids.add(athlete_id)
-                    added += 1
-                    if added >= limit:
-                        break
+        for athlete_id in position_ids[position][:limit]:
+            add_player(athlete_id)
+
+    def normalize(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+    # Injury beneficiaries are added after the normal starter/usage pool so a
+    # third-string replacement (e.g. Gavin Bartholomew behind T.J. Hockenson)
+    # cannot be crowded out by a fixed position cap.
+    for report in injury_reports or []:
+        if not isinstance(report, dict):
+            continue
+        report_team = normalize(report.get("team"))
+        if team_name and report_team and report_team != normalize(team_name):
+            continue
+        status = str(report.get("status") or "").casefold()
+        if not (
+            any(term in status for term in ("out", "doubtful", "injured reserve", "ir", "pup", "nfi"))
+            or "questionable" in status
+        ):
+            continue
+        position = str(report.get("position") or "").upper()
+        if position not in position_ids:
+            continue
+
+        injured_name = normalize(report.get("player"))
+        injured_id = next(
+            (athlete_id for athlete_id, player in roster_by_id.items()
+             if normalize(player.get("name")) == injured_name),
+            None,
+        )
+        ordered_ids = position_ids[position]
+        if injured_id in ordered_ids:
+            injured_index = ordered_ids.index(injured_id)
+        else:
+            same_position = [
+                str(player["id"]) for player in valid_players
+                if player.get("position", "").upper() == position
+            ]
+            injured_index = -1
+            injured_roster_index = next(
+                (i for i, player in enumerate(valid_players)
+                 if normalize(player.get("name")) == injured_name),
+                None,
+            )
+            if injured_roster_index is not None:
+                prior_ids = {
+                    str(player["id"]) for player in valid_players[:injured_roster_index]
+                    if player.get("position", "").upper() == position
+                }
+                injured_index = len([item for item in same_position if item in prior_ids]) - 1
+                ordered_ids = same_position
+        # Add the next two available depth-chart options, even beyond the base
+        # position limit. These are candidates to evaluate, not assumed beneficiaries.
+        for athlete_id in ordered_ids[injured_index + 1:injured_index + 3]:
+            add_player(athlete_id)
+
     return selected
 
 def _compact_player_gamelog(
@@ -730,11 +790,40 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
     )
     return _compact_team_stats(_get_json(endpoint_url, timeout=15))
 
+@lru_cache(maxsize=32)
+def _team_news(team_id: str) -> dict[str, Any]:
+    """Fetch the latest ESPN team news headlines for roster and quarterback developments."""
+    url = (
+        "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+        f"teams/{team_id}/news"
+    )
+    payload = _get_json(url, timeout=15)
+    articles = payload.get("articles") or payload.get("news") or []
+    compact = []
+    for article in articles[:10]:
+        if not isinstance(article, dict):
+            continue
+        headline = article.get("headline") or article.get("title")
+        if not headline:
+            continue
+        links = article.get("links") or {}
+        web_link = links.get("web") or {}
+        href = web_link.get("href") if isinstance(web_link, dict) else ""
+        compact.append({
+            "headline": str(headline)[:220],
+            "description": str(article.get("description") or article.get("summary") or "")[:420],
+            "published": article.get("published") or article.get("lastModified"),
+            "url": href,
+        })
+    return {"articles": compact}
+
+
 
 def reset_research_cache() -> None:
     """Clear per-slate ESPN caches so a later run never reuses stale data."""
     global _player_gamelog_failures, _player_gamelogs_disabled
     _team_statistics.cache_clear()
+    _team_news.cache_clear()
     _team_roster_players.cache_clear()
     _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
@@ -1092,8 +1181,10 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     team_stat_sections: list[str] = []
     player_stat_sections: list[str] = []
     injury_sections: list[str] = []
+    news_sections: list[str] = []
     injury_statuses: list[dict[str, Any]] = []
     rosters: dict[str, list[str]] = {}
+    selected_player_candidates: dict[str, list[dict[str, str]]] = {}
 
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
@@ -1141,6 +1232,40 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             f"CURRENT ESPN ACTIVE TEAM ROSTER — {team_name}: "
                             + ", ".join(roster_names)
                         )
+                        team_injuries = []
+                        core_url = (
+                            "https://sports.core.api.espn.com/v2/sports/football/"
+                            f"leagues/nfl/teams/{team_id}/injuries?limit=100"
+                        )
+                        try:
+                            team_injuries = _core_team_injuries(team_id)
+                            for report in team_injuries:
+                                if isinstance(report, dict) and report.get("player") and report.get("status"):
+                                    injury_statuses.append({
+                                        "player": str(report["player"]),
+                                        "position": str(report.get("position") or ""),
+                                        "team": str(team_name),
+                                        "status": str(report["status"]),
+                                        "report_date": str(report.get("report_date") or ""),
+                                        "comment": str(report.get("comment") or ""),
+                                    })
+                            if team_injuries:
+                                injury_sections.append(
+                                    f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
+                                    + json.dumps(
+                                        _compact_injury_prompt_reports(team_injuries),
+                                        ensure_ascii=False, separators=(",", ":"),
+                                    )
+                                )
+                        except Exception as exc:
+                            sections.append(
+                                f"ESPN Core API injury data unavailable for {team_name}: "
+                                f"{type(exc).__name__}"
+                            )
+                        sources.append({
+                            "title": f"ESPN Core API player injuries — {team_name}",
+                            "url": core_url,
+                        })
                         try:
                             depth_chart = _team_depth_chart(team_id)
                             depth_chart_url = (
@@ -1152,15 +1277,23 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 "url": depth_chart_url,
                             })
                             selected_players = _select_research_players(
-                                roster_players, depth_chart
+                                roster_players, depth_chart, team_injuries, team_name
                             )
-                            selection_basis = "ESPN depth-chart order plus secondary roster candidates"
+                            selection_basis = (
+                                "depth-chart/roster leaders plus injury-replacement candidates"
+                            )
                         except Exception as exc:
-                            selected_players = _select_research_players(roster_players)
+                            selected_players = _select_research_players(
+                                roster_players, injury_reports=team_injuries, team_name=team_name
+                            )
                             selection_basis = (
                                 f"roster-order fallback; depth chart unavailable "
                                 f"({type(exc).__name__})"
                             )
+                        selected_player_candidates[team_name] = [
+                            {"name": player["name"], "position": player["position"]}
+                            for player in selected_players
+                        ]
                         player_records = []
                         for player in selected_players:
                             global _player_gamelog_failures, _player_gamelogs_disabled
@@ -1201,20 +1334,42 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                     "game_log_unavailable": type(exc).__name__,
                                 })
                         if player_records:
-                            player_stat_sections.append(
-                                f"ESPN CURRENT-SEASON PLAYER GAME LOGS — {team_name} "
-                                f"(selected by {selection_basis}; retrieved {retrieved_at}; regular season): "
-                                + json.dumps(
-                                    player_records,
-                                    ensure_ascii=False,
-                                    separators=(",", ":"),
+                            # Keep each player's evidence as its own prompt section.
+                            # This prevents one oversized team block from causing all
+                            # players for that team to be dropped during prompt trimming.
+                            for record in player_records:
+                                player_stat_sections.append(
+                                    f"ESPN CURRENT-SEASON PLAYER GAME LOGS — {team_name} "
+                                    f"(selected by {selection_basis}; retrieved {retrieved_at}; regular season): "
+                                    + json.dumps([record], ensure_ascii=False, separators=(",", ":"))
                                 )
-                            )
                     else:
                         sections.append(f"ESPN roster returned no player names for {team_name}.")
                 except Exception as exc:
                     sections.append(
                         f"ESPN roster unavailable for {team_name}: {type(exc).__name__}"
+                    )
+
+            for team_id, team_name in teams.items():
+                news_url = (
+                    "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
+                    f"teams/{team_id}/news"
+                )
+                try:
+                    team_news = _team_news(team_id)
+                    articles = team_news.get("articles", [])
+                    if articles:
+                        news_sections.append(
+                            f"ESPN RECENT TEAM NEWS — {team_name}: "
+                            + json.dumps(articles, ensure_ascii=False, separators=(",", ":"))
+                        )
+                    sources.append({
+                        "title": f"ESPN recent team news — {team_name}",
+                        "url": news_url,
+                    })
+                except Exception as exc:
+                    sections.append(
+                        f"ESPN recent team news unavailable for {team_name}: {type(exc).__name__}"
                     )
 
             for team_id, team_name in teams.items():
@@ -1241,44 +1396,6 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     sections.append(
                         f"ESPN {endpoint_name} endpoint unavailable for {team_name}: {exc}"
                     )
-            core_injuries_found = False
-            # Core API includes current reports and older injured-reserve records.
-            for team_id, team_name in teams.items():
-                core_url = (
-                    "https://sports.core.api.espn.com/v2/sports/football/"
-                    f"leagues/nfl/teams/{team_id}/injuries?limit=100"
-                )
-                try:
-                    team_injuries = _core_team_injuries(team_id)
-                    if team_injuries:
-                        core_injuries_found = True
-                        for report in team_injuries:
-                            if isinstance(report, dict) and report.get("player") and report.get("status"):
-                                injury_statuses.append({
-                                    "player": str(report["player"]),
-                                    "position": str(report.get("position") or ""),
-                                    "team": str(team_name),
-                                    "status": str(report["status"]),
-                                    "report_date": str(report.get("report_date") or ""),
-                                    "comment": str(report.get("comment") or ""),
-                                })
-                        injury_sections.append(
-                            f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
-                            + json.dumps(
-                                _compact_injury_prompt_reports(team_injuries),
-                                ensure_ascii=False,
-                                separators=(",", ":"),
-                            )
-                        )
-                    sources.append({
-                        "title": f"ESPN Core API player injuries — {team_name}",
-                        "url": core_url,
-                    })
-                except Exception as exc:
-                    sections.append(
-                        f"ESPN Core API injury data unavailable for {team_name}: "
-                        f"{type(exc).__name__}"
-                    )
             # Keep game-summary injuries as supplemental evidence even when
             # the Core API returns injuries for only one of the two teams.
             summary_injuries = _compact_injuries(data.get("injuries", []))
@@ -1299,6 +1416,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     # context so prompt trimming cannot silently remove one team's game logs.
     sections.extend(player_stat_sections)
     sections.extend(injury_sections)
+    sections.extend(news_sections)
     sections.extend(team_stat_sections)
 
     seen, unique = set(), []
@@ -1312,4 +1430,5 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         "sources": unique,
         "rosters": rosters,
         "injury_statuses": injury_statuses,
+        "selected_player_candidates": selected_player_candidates,
     }
