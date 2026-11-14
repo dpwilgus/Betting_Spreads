@@ -758,6 +758,48 @@ def _select_research_players(
 
     return selected
 
+
+def _select_defensive_research_players(
+    players: list[dict[str, str]],
+    depth_chart: dict[str, Any] | None = None,
+) -> list[dict[str, str]]:
+    """Select published defensive starters at high-impact positions for individual stat research."""
+    roster = {str(player.get("id")): player for player in players if player.get("id")}
+    selected: list[dict[str, str]] = []
+    seen: set[str] = set()
+    priority = {"LB": 2, "ILB": 1, "OLB": 1, "DE": 1, "EDGE": 1,
+                "DT": 1, "NT": 1, "CB": 1, "S": 1, "FS": 1, "SS": 1}
+    charts = depth_chart.get("depthCharts", []) if isinstance(depth_chart, dict) else []
+    for chart in charts:
+        positions = chart.get("positions", {}) if isinstance(chart, dict) else {}
+        for position_data in positions.values():
+            if not isinstance(position_data, dict):
+                continue
+            position_obj = position_data.get("position") or {}
+            pos = str(position_obj.get("abbreviation", "") if isinstance(position_obj, dict) else position_obj).upper()
+            limit = priority.get(pos, 0)
+            if not limit:
+                continue
+            athletes = sorted(
+                position_data.get("athletes", []),
+                key=lambda item: int(item.get("rank", 999)) if str(item.get("rank", "")).isdigit() else 999,
+            )
+            added = 0
+            for item in athletes:
+                athlete = item.get("athlete") or {}
+                athlete_id = str(athlete.get("id") or "")
+                player = roster.get(athlete_id)
+                if not player or athlete_id in seen:
+                    continue
+                candidate = dict(player)
+                candidate["research_reason"] = f"Defensive depth-chart starter/leader candidate ({pos})"
+                selected.append(candidate)
+                seen.add(athlete_id)
+                added += 1
+                if added >= limit:
+                    break
+    return selected
+
 def _compact_player_gamelog(
     gamelog: dict[str, Any],
     position: str,
@@ -766,8 +808,13 @@ def _compact_player_gamelog(
     """Keep only role-relevant volume/production stats and recent game evidence."""
     stat_keys = {
         "QB": (
-            "passingAttempts", "passingYards", "passingTouchdowns", "interceptions",
-            "rushingAttempts", "rushingYards", "rushingTouchdowns",
+            "passingAttempts", "completions", "passingYards", "passingTouchdowns",
+            "interceptions", "rushingAttempts", "rushingYards", "rushingTouchdowns",
+        ),
+        "DEF": (
+            "totalTackles", "soloTackles", "assistedTackles", "sacks",
+            "interceptions", "passesDefended", "tacklesForLoss", "quarterbackHits",
+            "forcedFumbles", "fumbleRecoveries",
         ),
         "RB": (
             "rushingAttempts", "rushingYards", "rushingTouchdowns",
@@ -781,8 +828,9 @@ def _compact_player_gamelog(
             "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
         ),
     }.get(position.upper(), (
-        "rushingAttempts", "rushingYards", "rushingTouchdowns",
-        "receivingTargets", "receptions", "receivingYards", "receivingTouchdowns",
+        "totalTackles", "soloTackles", "assistedTackles", "sacks",
+        "interceptions", "passesDefended", "tacklesForLoss", "quarterbackHits",
+        "forcedFumbles", "fumbleRecoveries",
     ))
 
     totals_by_category = gamelog.get("season_totals", {})
@@ -1334,16 +1382,25 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             selected_players = _select_research_players(
                                 roster_players, depth_chart, team_injuries, team_name
                             )
+                            defensive_players = _select_defensive_research_players(
+                                roster_players, depth_chart
+                            )
+                            selected_ids = {str(player.get("id")) for player in selected_players}
+                            selected_players.extend(
+                                player for player in defensive_players
+                                if str(player.get("id")) not in selected_ids
+                            )
                             selection_basis = (
-                                "depth-chart/roster leaders plus injury-replacement candidates"
+                                "offensive depth-chart/roster leaders, injury replacements, "
+                                "and defensive starters at high-impact positions"
                             )
                         except Exception as exc:
                             selected_players = _select_research_players(
                                 roster_players, injury_reports=team_injuries, team_name=team_name
                             )
                             selection_basis = (
-                                f"roster-order fallback; depth chart unavailable "
-                                f"({type(exc).__name__})"
+                                f"roster-order offensive fallback; depth chart unavailable "
+                                f"({type(exc).__name__}); defensive starters not selected"
                             )
                         selected_player_candidates[team_name] = [
                             {
