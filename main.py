@@ -587,8 +587,12 @@ def main() -> int:
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
         games = filter_requested_matchup(games, sys.argv[1:])
+        command_args = sys.argv[1:]
+        if not any(flag in command_args for flag in ('--matchup', '--reuse-cache', '--refresh-incomplete', '--no-gui')):
+            games = select_games_gui(games)
         if not reuse_cache:
             ensure_configured()
+            ensure_api_key_configured()
         analyses = []
         failures = []
         progress_window = ProgressWindow(len(games))
