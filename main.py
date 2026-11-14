@@ -94,6 +94,7 @@ def extract_games(data: dict) -> tuple[list[dict], object, object]:
 
         games.append({
             "event_id": str(event.get("id", "")),
+            "event_start_utc": kickoff,
             "away_team_id": str(away.get("team", {}).get("id", "")),
             "home_team_id": str(home.get("team", {}).get("id", "")),
             "Game Date (ET)": kickoff_text,
