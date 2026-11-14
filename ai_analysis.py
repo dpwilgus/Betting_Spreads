@@ -676,7 +676,9 @@ def _separate_unverified_player_props(
             market_match = any(
                 token in description and token in quote_market
                 for token in ("passing yards", "rushing yards", "receiving yards",
-                              "receptions", "receiving targets", "rushing attempts")
+                              "receptions", "receiving targets", "rushing attempts",
+                              "passing attempts", "completions", "interceptions",
+                              "sacks", "tackles", "passes defended", "longest reception")
             )
             if (
                 quote_player == player_key and market_match
