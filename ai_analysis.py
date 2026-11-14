@@ -366,7 +366,7 @@ def _filter_player_props_by_usage(
         recent_average = (
             sum(recent_values) / len(recent_values) if recent_values else season_average
         )
-        if any(period in description for period in ("first quarter", "1st quarter", "first qtr", "1q", "first half", "1st half", "first-half", "1h")):
+        if any(period in description for period in ("first quarter", "1st quarter", "first qtr", "1st qtr", "first-quarter", "1q", "q1", "first half", "1st half", "first-half", "1st-half", "1h", "h1")):
             retained.append(pick)
             continue
         is_over = bool(re.search(r"\bover\b", description))
@@ -647,6 +647,7 @@ def _filter_injury_impacts(
         elif not impact.get("evidence") or (
             news_evidence_text is not None
             and _normalize_name(affected_player) not in _normalize_name(news_evidence_text)
+            and _normalize_name(injured_player) not in _normalize_name(news_evidence_text)
         ):
             gaps.append(f"Removed news impact for {affected_player}: no matching ESPN team-news evidence was found.")
             continue
@@ -893,7 +894,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     sneaky_usage_gaps = _filter_player_props_by_usage(sneaky_usage_data, player_usage)
     data["sneaky_props"] = sneaky_usage_data.get("picks", [])
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
-    news_evidence_text = "\\n".join(
+    news_evidence_text = "\n".join(
         line for line in str(research.get("research_text", "")).splitlines()
         if "ESPN RECENT TEAM NEWS" in line
     )
