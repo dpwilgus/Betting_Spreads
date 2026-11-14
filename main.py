@@ -177,9 +177,15 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             prompt_status = f"complete ({research_chars:,} chars)" if isinstance(research_chars, int) else "complete"
         else:
             prompt_status = "not recorded"
+        odds_status = analysis.get("odds_api_status", "not recorded")
+        odds_usage = analysis.get("odds_api_usage", {})
+        odds_remaining = odds_usage.get("requests_remaining") if isinstance(odds_usage, dict) else None
+        odds_label = f"Odds API: {odds_status}" + (
+            f" ({odds_remaining} credits remaining)" if odds_remaining is not None else ""
+        )
         sheet["A3"] = (
             f"AI provider: {provider} | Research: {analysis.get('research_mode', 'Not recorded')} "
-            f"| AI research prompt: {prompt_status} | Live sources are listed at the bottom of this sheet."
+            f"| {odds_label} | AI research prompt: {prompt_status} | Live sources are listed at the bottom of this sheet."
         )
         sheet["A3"].font = Font(italic=True, color="9C6500" if research_truncated is True else "526579")
     sheet["A3"].alignment = Alignment(wrap_text=True)
