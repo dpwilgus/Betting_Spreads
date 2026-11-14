@@ -108,50 +108,96 @@ def save_api_key(value: str) -> None:
     keyring.set_password(SERVICE_NAME, ACCOUNT_NAME, value)
 
 
-def ensure_api_key_configured() -> bool:
-    """Prompt once for the Odds API key and save it to the OS credential store."""
+def _prompt_for_api_key_cli() -> bool:
+    """Prompt visibly in Terminal when the application is running in CLI mode."""
+    import getpass
+    import sys
+
+    if not sys.stdin or not sys.stdin.isatty():
+        print(
+            "The Odds API key is not configured. Set THE_ODDS_API_KEY or run "
+            "the application interactively to configure it. Continuing without "
+            "verified sportsbook quotes.",
+            file=sys.stderr,
+        )
+        return False
+
+    print(
+        "The Odds API key is not configured. The key will be stored securely "
+        "in your OS credential store, not in this project or workbook."
+    )
+    try:
+        value = getpass.getpass(
+            "Paste The Odds API key (press Enter to continue without odds): "
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nContinuing without verified sportsbook quotes.")
+        return False
+
+    if not value:
+        print("Continuing without verified sportsbook quotes.")
+        return False
+    try:
+        save_api_key(value)
+    except Exception as exc:
+        print(f"Could not save The Odds API key: {exc}", file=sys.stderr)
+        return False
+    print("The Odds API key was saved securely.")
+    return True
+
+
+def ensure_api_key_configured(use_gui: bool = True) -> bool:
+    """Prompt for the Odds API key using a GUI or a visible Terminal prompt."""
     if get_api_key():
         return True
+    if not use_gui:
+        return _prompt_for_api_key_cli()
+
     try:
         import tkinter as tk
         from tkinter import messagebox
-    except Exception:
-        return False
-    root = tk.Tk()
-    root.title("Configure The Odds API")
-    root.geometry("560x210")
-    root.resizable(False, False)
-    root.attributes("-topmost", True)
-    tk.Label(
-        root,
-        text=("Paste your The Odds API key. It will be stored in macOS Keychain "
-              "or Windows Credential Manager, not in this project or workbook. "
-              "Leave it blank to continue without verified sportsbook quotes."),
-        wraplength=510, justify="left",
-    ).pack(padx=18, pady=(18, 12), anchor="w")
-    entry = tk.Entry(root, show="*", width=68)
-    entry.pack(padx=18, fill="x")
-    result = {"configured": False}
+        root = tk.Tk()
+        root.title("Configure The Odds API")
+        root.geometry("560x210")
+        root.resizable(False, False)
+        root.attributes("-topmost", True)
+        tk.Label(
+            root,
+            text=("Paste your The Odds API key. It will be stored in macOS Keychain "
+                  "or Windows Credential Manager, not in this project or workbook. "
+                  "Leave it blank to continue without verified sportsbook quotes."),
+            wraplength=510, justify="left",
+        ).pack(padx=18, pady=(18, 12), anchor="w")
+        entry = tk.Entry(root, show="*", width=68)
+        entry.pack(padx=18, fill="x")
+        result = {"configured": False}
 
-    def save() -> None:
-        value = entry.get().strip()
-        if not value:
-            messagebox.showwarning("API key required", "Paste the key or choose Continue without odds.", parent=root)
-            return
-        try:
-            save_api_key(value)
-        except Exception as exc:
-            messagebox.showerror("Could not save API key", str(exc), parent=root)
-            return
-        result["configured"] = True
-        root.destroy()
+        def save() -> None:
+            value = entry.get().strip()
+            if not value:
+                messagebox.showwarning("API key required", "Paste the key or choose Continue without odds.", parent=root)
+                return
+            try:
+                save_api_key(value)
+            except Exception as exc:
+                messagebox.showerror("Could not save API key", str(exc), parent=root)
+                return
+            result["configured"] = True
+            root.destroy()
 
-    buttons = tk.Frame(root)
-    buttons.pack(pady=18)
-    tk.Button(buttons, text="Save key securely", command=save).pack(side="left", padx=6)
-    tk.Button(buttons, text="Continue without odds", command=root.destroy).pack(side="left", padx=6)
-    root.mainloop()
-    return bool(result["configured"] or get_api_key())
+        buttons = tk.Frame(root)
+        buttons.pack(pady=18)
+        tk.Button(buttons, text="Save key securely", command=save).pack(side="left", padx=6)
+        tk.Button(buttons, text="Continue without odds", command=root.destroy).pack(side="left", padx=6)
+        root.mainloop()
+        return bool(result["configured"] or get_api_key())
+    except Exception as exc:
+        import sys
+        print(
+            f"Could not open the API-key window ({exc}). Falling back to Terminal.",
+            file=sys.stderr,
+        )
+        return _prompt_for_api_key_cli()
 
 
 def _cache_dir() -> Path:
