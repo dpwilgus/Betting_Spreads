@@ -345,7 +345,11 @@ def _filter_player_props_by_usage(
             gaps.append(f"Removed {player} player prop: no structured ESPN season game log was available.")
             continue
         description = str(pick.get("bet_description") or "").casefold()
-        if any(term in description for term in ("anytime touchdown", "anytime td", "touchdown scorer")):
+        if any(term in description for term in (
+            "anytime touchdown", "anytime td", "touchdown scorer",
+            "first touchdown", "first td", "first-half touchdown",
+            "first half touchdown", "1st half touchdown",
+        )):
             season = usage.get("season") if isinstance(usage.get("season"), dict) else {}
             games = int(usage.get("games_available") or 0)
             position = str(usage.get("position") or "").upper()
