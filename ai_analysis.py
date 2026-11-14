@@ -34,9 +34,9 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
             priority = 1
         elif upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS"):
             priority = 2
-        elif upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS"):
-            priority = 3
         elif upper.startswith("ESPN CURRENT PLAYER INJURIES"):
+            priority = 3
+        elif upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS"):
             priority = 4
         elif upper.startswith("ESPN GAME SUMMARY INJURY DATA"):
             priority = 5
