@@ -50,13 +50,12 @@ PASS2_MARKETS = (
     "player_rush_reception_yds",
     "player_pass_rush_reception_yds",
     "player_pass_yds_q1",
-    "player_pass_yds_h1",
-    "player_reception_yds_q1",
-    "player_reception_yds_h1",
-    "player_rush_yds_q1",
-    "player_rush_yds_h1",
-    "player_receptions_q1",
-    "player_receptions_h1",
+    "h2h_q1",
+    "spreads_q1",
+    "totals_q1",
+    "h2h_h1",
+    "spreads_h1",
+    "totals_h1",
 )
 
 MARKET_LABELS = {
@@ -79,13 +78,12 @@ MARKET_LABELS = {
     "player_rush_reception_yds": "rushing plus receiving yards",
     "player_pass_rush_reception_yds": "passing, rushing and receiving yards",
     "player_pass_yds_q1": "first quarter passing yards",
-    "player_pass_yds_h1": "first half passing yards",
-    "player_reception_yds_q1": "first quarter receiving yards",
-    "player_reception_yds_h1": "first half receiving yards",
-    "player_rush_yds_q1": "first quarter rushing yards",
-    "player_rush_yds_h1": "first half rushing yards",
-    "player_receptions_q1": "first quarter receptions",
-    "player_receptions_h1": "first half receptions",
+    "h2h_q1": "first quarter moneyline",
+    "spreads_q1": "first quarter spread",
+    "totals_q1": "first quarter total",
+    "h2h_h1": "first half moneyline",
+    "spreads_h1": "first half spread",
+    "totals_h1": "first half total",
 }
 
 
