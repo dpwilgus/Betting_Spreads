@@ -920,7 +920,16 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         data.setdefault("data_gaps", []).append(
             "Overlapping same-team moneyline/spread recommendations were deduplicated; only the higher-confidence option was retained."
         )
-    data["sneaky_props"] = data.get("sneaky_props", [])
+    top_market_keys = {
+        (_normalize_name(str(item.get("player_or_team") or "")),
+         _normalize_name(str(item.get("bet_description") or "")))
+        for item in data.get("picks", [])
+    }
+    data["sneaky_props"] = [
+        item for item in data.get("sneaky_props", [])
+        if (_normalize_name(str(item.get("player_or_team") or "")),
+            _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
+    ]
     data["analysis_version"] = 6
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
     data["researched_player_evidence"] = player_usage
