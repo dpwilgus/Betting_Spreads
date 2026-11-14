@@ -537,6 +537,7 @@ def _filter_injury_impacts(
     injury_statuses: list[dict[str, Any]],
     rosters: dict[str, list[str]] | None,
     team_names: tuple[str, str],
+    player_usage: dict[str, dict[str, Any]] | None = None,
 ) -> list[str]:
     """Keep only impacts grounded in the named injury report and an available affected player."""
     reports = {
@@ -564,6 +565,11 @@ def _filter_injury_impacts(
         if injured_player_key and injured_player_key == affected_player_key:
             gaps.append(
                 f"Removed injury impact for {affected_player}: an injured player cannot be listed as their own beneficiary."
+            )
+            continue
+        if player_usage is not None and affected_player_key not in player_usage:
+            gaps.append(
+                f"Removed injury impact for {affected_player}: no structured game-log evidence was collected for the proposed beneficiary."
             )
             continue
         report = reports.get((injured_team_key, injured_player_key))
@@ -792,7 +798,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     prop_gaps = _filter_player_props_by_usage(data, player_usage)
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
     impact_gaps = _filter_injury_impacts(
-        data, research.get("injury_statuses", []), research.get("rosters"), team_names
+        data, research.get("injury_statuses", []), research.get("rosters"),
+        team_names, player_usage=player_usage
     )
     market_gaps = _separate_unverified_player_props(data, research)
     quality_gaps = injury_gaps + prop_gaps + td_gaps + impact_gaps + market_gaps
