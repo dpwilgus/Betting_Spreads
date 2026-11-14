@@ -866,21 +866,17 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Each Player Prop must name a player with a structured ESPN game log in the supplied research. "
         "Each touchdown_scorer team must exactly match one of the two matchup teams, and the player "
         "must have a structured ESPN game log for that team. "
-        "Player props: target the strongest evidence-supported markets, not a fixed count; aim for at least "
-        "three when supported. Without a sportsbook line, label model-only, not actionable. Never invent lines. Keep game bets separate; assess all researched offensive and defensive player logs. "
-        "Pass 1 core player props prioritize passing yards/TDs/attempts/completions/interceptions, rushing yards/attempts/TDs, receptions, receiving yards/TDs, and ANYTIME TOUCHDOWN SCORER markets. Anytime TD is a core market, not an afterthought. Only label an anytime-TD wager verified when the supplied sportsbook quote identifies that player and price. "
-        "Assess full-game/1Q/1H, team totals, spreads and totals when supported. Never scale full-game averages into quarter/half player props; without ESPN period splits, omit or mark Limited, cap confidence at 5/10 and disclose the gap. "
-        "Pass 2 may examine longest-play and combination markets, plus first-quarter and first-half game markets when the matchup research supports them. Use first-quarter player passing yards only where the feed actually provides it; do not invent unavailable first-half player markets. Never bet player sacks, tackles, kicking points or field goals. Use researched defensive sacks/tackles only as defensive-strength indicators when evaluating opposing offenses. Never invent sportsbook availability or prices. Include alternate lines and ladders only when evidence supports a distinct high-upside angle. "
+        "Target the strongest evidence-backed props (at least three when supported); unquoted player lines are model-only, never actionable. Assess researched offensive players and defensive matchup metrics. "
+        "Pass 1: passing/rushing yards, TDs, attempts, completions, receptions, receiving yards and anytime TD. Verify TD bets only against a named-player sportsbook quote and price. "
+        "Assess supported full-game/1Q/1H game lines. Never scale full-game averages into period player props; without period splits omit them or mark Limited (confidence <=5) and disclose the gap. "
+        "Pass 2: longest-play, combo, first TD scorer, first-half TD opportunities, and supported 1Q/1H game markets. First-half TDs are research-only unless a feed supplies a real quote; do not invent markets. Q1 passing yards only if supplied. No sack/tackle/kicking/field-goal bets; use defensive sacks/tackles only to rate opposing offenses. Alternates/ladders need distinct evidence; never invent prices. "
         "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
         "Do not pair a team's moneyline and spread; retain the stronger. Spread probability cannot exceed that team's moneyline probability. "
-        "TDs: compare season totals, carries/targets per game and recent scoring. "
-        "Passing TDs do not count for a QB's anytime TD; require at least one rushing TD or 3+ rush attempts/game. "
-        "Never select a QB solely for starting. For injury impacts, never list the injured player "
-        "as their own beneficiary. Include offensive-starter and high-impact defensive absences, plus verified news/role changes (including QB changes). Assess downstream beneficiaries and replacement TEs/WRs/RBs gaining opportunity. If none is supported, use affected_player='Team unit'. For QB/RB/WR/TE injuries, assess next available same-position "
-        "replacements; for defensive injuries, assess opposing researched offensive players. Replacements are candidates, not automatic beneficiaries. "
-        "Compare both defenses using supplied efficiency, yards/points allowed, pressure, sacks, takeaways and recent games; explain offensive implications and missing metrics. Include dated team news (QB changes, trades, injuries, moves), separating confirmed facts from speculation. "
-        "Questionable players may "
-        "remain only conditionally, with confidence no higher than 6/10 and explicit risk disclosure. "
+        "TDs: compare season scoring, carries/targets per game and recent scoring. "
+        "Passing TDs do not qualify a QB for anytime TD; require a rushing TD or 3+ rush attempts/game. "
+        "Never select a QB solely for starting. Injury impacts: never make the injured player their own beneficiary. Cover offensive starters, key defensive absences and verified role/QB news; assess downstream skill-player and same-position replacements, but don't assume benefits. Use affected_player='Team unit' if no individual is supported; defensive absences should assess opposing researched offense. "
+        "Compare defenses using supplied efficiency, yards/points allowed, pressure, sacks, takeaways and recent games; explain offensive effects and gaps. Include dated team news, separating confirmed facts from speculation. "
+        "Questionable players are conditional only (confidence <=6) with explicit risk disclosure. "
         "For Questionable TD candidates, risk_factors must start 'Questionable:' "
         "(e.g. 'Questionable: active status unconfirmed'). "
         "Exclude doubtful, out, or injured-reserve players. Never infer active status from roster presence. "
@@ -955,7 +951,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         if (_normalize_name(str(item.get("player_or_team") or "")),
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
-    data["analysis_version"] = 7
+    data["analysis_version"] = 8
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
