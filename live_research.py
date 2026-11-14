@@ -633,7 +633,12 @@ def _select_research_players(
     depth_ids = _extract_depth_chart_ids(depth_chart or {})
     position_ids: dict[str, list[str]] = {}
     for position in ("QB", "RB", "WR", "TE"):
-        ordered = depth_ids.get(position, [])
+        # Discard depth-chart placeholder IDs before applying position limits;
+        # otherwise a generic "Wide Receiver" slot can crowd out a real athlete.
+        ordered = [
+            athlete_id for athlete_id in depth_ids.get(position, [])
+            if athlete_id in roster_by_id
+        ]
         seen = set(ordered)
         ordered.extend(
             str(player["id"]) for player in valid_players
@@ -716,6 +721,10 @@ def _select_research_players(
                 }
                 injured_index = len([item for item in same_position if item in prior_ids])
                 ordered_ids = same_position
+            else:
+                # Without an identity match, do not guess which roster slots follow
+                # the injured player.
+                continue
         # Add the next two available depth-chart options, even beyond the base
         # position limit. These are candidates to evaluate, not assumed beneficiaries.
         for athlete_id in ordered_ids[injured_index + 1:injured_index + 3]:
