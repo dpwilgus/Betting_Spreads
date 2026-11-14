@@ -320,6 +320,11 @@ def fetch_event_quotes(
     """Fetch/cache quotes for one matchup. Events lookup is free; odds cost is market-based."""
     if not get_api_key():
         return {"quotes": [], "status": "no_api_key", "usage": {}}
+    cache_key = _event_cache_key(str(game.get("event_id") or ""), markets)
+    cached = None if refresh else _load_fresh_cache(cache_key)
+    if cached:
+        return {**cached, "status": "cached"}
+
     remaining = _known_remaining_credits()
     # Keep a 25-credit monthly safety buffer. The requested-market count is a
     # conservative upper bound; actual billing uses markets returned by the API.
@@ -329,10 +334,6 @@ def fetch_event_quotes(
             "message": f"Skipped odds refresh to preserve the 25-credit reserve ({remaining} credits reported remaining).",
             "usage": {"requests_remaining": remaining},
         }
-    cache_key = _event_cache_key(str(game.get("event_id") or ""), markets)
-    cached = None if refresh else _load_fresh_cache(cache_key)
-    if cached:
-        return {**cached, "status": "cached"}
 
     events, event_headers = _request_json(
         f"/sports/{SPORT_KEY}/events",
