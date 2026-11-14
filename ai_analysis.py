@@ -313,17 +313,18 @@ def _filter_player_props_by_usage(
         (r"completions?", "completions"),
         (r"interceptions?", "interceptions"),
         (r"sacks?", "sacks"),
+        (r"tackles for loss", "tacklesForLoss"),
+        (r"quarterback hits?", "quarterbackHits"),
         (r"tackles?", "totalTackles"),
         (r"passes defended", "passesDefended"),
         (r"passing touchdowns?", "passingTouchdowns"),
         (r"rushing touchdowns?", "rushingTouchdowns"),
         (r"receiving touchdowns?", "receivingTouchdowns"),
-        (r"tackles for loss", "tacklesForLoss"),
-        (r"quarterback hits?", "quarterbackHits"),
         (r"forced fumbles?", "forcedFumbles"),
         (r"fumble recoveries?", "fumbleRecoveries"),
         (r"field goals? made", "fieldGoalsMade"),
         (r"extra points? made", "extraPointsMade"),
+        (r"punting yards?", "puntingYards"),
         (r"punts?", "punts"),
         (r"longest reception", "longReception"),
     )
@@ -695,7 +696,10 @@ def _separate_unverified_player_props(
                 for token in ("passing yards", "rushing yards", "receiving yards",
                               "receptions", "receiving targets", "rushing attempts",
                               "passing attempts", "completions", "interceptions",
-                              "sacks", "tackles", "passes defended", "longest reception")
+                              "sacks", "tackles", "passes defended", "longest reception",
+                              "passing touchdowns", "rushing touchdowns", "receiving touchdowns",
+                              "tackles for loss", "quarterback hits", "forced fumbles",
+                              "fumble recoveries", "field goals made", "extra points made", "punts")
             )
             if (
                 quote_player == player_key and market_match
