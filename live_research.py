@@ -1125,6 +1125,7 @@ def reset_research_cache() -> None:
     """Clear per-slate ESPN caches so a later run never reuses stale data."""
     global _player_gamelog_failures, _player_gamelogs_disabled
     _team_statistics.cache_clear()
+    _team_news.cache_clear()
     _team_roster_players.cache_clear()
     _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
