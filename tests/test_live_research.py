@@ -766,5 +766,89 @@ class LiveResearchTests(unittest.TestCase):
         self.assertNotIn("CURRENT ESPN ACTIVE TEAM ROSTER", prompt)
 
 
+    def test_injury_replacement_candidates_are_added_beyond_position_caps(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"qb1","name":"Starter QB","position":"QB"},
+            {"id":"qb2","name":"Backup QB","position":"QB"},
+            {"id":"rb1","name":"RB One","position":"RB"},
+            {"id":"rb2","name":"RB Two","position":"RB"},
+            {"id":"rb3","name":"RB Three","position":"RB"},
+            {"id":"wr1","name":"WR One","position":"WR"},
+            {"id":"wr2","name":"WR Two","position":"WR"},
+            {"id":"wr3","name":"WR Three","position":"WR"},
+            {"id":"wr4","name":"WR Four","position":"WR"},
+            {"id":"wr5","name":"WR Five","position":"WR"},
+            {"id":"wr6","name":"WR Six","position":"WR"},
+            {"id":"te1","name":"T.J. Hockenson","position":"TE"},
+            {"id":"te2","name":"TE Two","position":"TE"},
+            {"id":"te3","name":"Gavin Bartholomew","position":"TE"},
+        ]
+        depth = {"depthCharts":[{"positions":{
+            position: {
+                "position":{"abbreviation":position},
+                "athletes":[{"rank":rank,"athlete":{"id":player["id"]}}
+                            for rank, player in enumerate(
+                                [p for p in roster if p["position"] == position], 1)],
+            }
+            for position in ("QB","RB","WR","TE")
+        }}]}
+        injuries = [{
+            "player":"T.J. Hockenson","position":"TE","team":"Minnesota Vikings",
+            "status":"Out",
+        }]
+        selected = _select_research_players(
+            roster, depth, injuries, "Minnesota Vikings"
+        )
+        names = [item["name"] for item in selected]
+        self.assertIn("Gavin Bartholomew", names)
+        self.assertIn("WR Five", names)
+        self.assertNotIn("WR Six", names)
+        self.assertEqual(len(names), 13)
+
+    def test_injury_impact_rejects_injured_player_as_own_beneficiary(self):
+        from ai_analysis import _filter_injury_impacts
+
+        data = {"injury_impact":[
+            {
+                "injured_player":"Jordan Addison","team":"Minnesota Vikings",
+                "affected_player":"Jordan Addison","affected_team":"Minnesota Vikings",
+                "impact_direction":"Mixed",
+            },
+            {
+                "injured_player":"T.J. Hockenson","team":"Minnesota Vikings",
+                "affected_player":"Gavin Bartholomew","affected_team":"Minnesota Vikings",
+                "impact_direction":"Positive",
+            },
+        ]}
+        statuses = [
+            {"player":"Jordan Addison","team":"Minnesota Vikings","status":"Questionable"},
+            {"player":"T.J. Hockenson","team":"Minnesota Vikings","status":"Out"},
+        ]
+        rosters = {"Minnesota Vikings":["Jordan Addison","Gavin Bartholomew"]}
+        usage = {"gavinbartholomew":{"player":"Gavin Bartholomew","position":"TE"}}
+        gaps = _filter_injury_impacts(
+            data, statuses, rosters, ("Minnesota Vikings","Green Bay Packers"),
+            player_usage=usage,
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+        self.assertEqual(data["injury_impact"][0]["affected_player"], "Gavin Bartholomew")
+        self.assertTrue(any("cannot be listed as their own beneficiary" in gap for gap in gaps))
+
+    def test_team_news_compaction_preserves_headline_date_and_source(self):
+        from live_research import _compact_team_news
+
+        result = _compact_team_news({"articles":[{
+            "headline":"Team acquires veteran quarterback",
+            "description":"A veteran quarterback returns to the team.",
+            "published":"2026-11-13T15:00:00Z",
+            "links":{"web":{"href":"https://example.com/story"}},
+        }]})
+        self.assertEqual(result["articles"][0]["headline"], "Team acquires veteran quarterback")
+        self.assertEqual(result["articles"][0]["published"], "2026-11-13T15:00:00Z")
+        self.assertEqual(result["articles"][0]["url"], "https://example.com/story")
+
+
 if __name__ == "__main__":
     unittest.main()
