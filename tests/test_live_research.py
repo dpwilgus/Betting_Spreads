@@ -909,5 +909,101 @@ class LiveResearchTests(unittest.TestCase):
         self.assertNotIn("unneededField", values)
 
 
+
+    def test_defensive_research_selects_depth_chart_leaders(self):
+        from live_research import _select_defensive_research_players
+
+        roster = [
+            {"id": "lb1", "name": "Leading Tackler", "position": "LB"},
+            {"id": "de1", "name": "Top Pass Rusher", "position": "DE"},
+            {"id": "cb1", "name": "Starting Corner", "position": "CB"},
+            {"id": "lb2", "name": "Backup Linebacker", "position": "LB"},
+        ]
+        depth = {"depthCharts": [{"positions": {
+            "linebacker": {"position": {"abbreviation": "LB"}, "athletes": [
+                {"rank": 1, "athlete": {"id": "lb1"}},
+                {"rank": 2, "athlete": {"id": "lb2"}},
+            ]},
+            "defensiveEnd": {"position": {"abbreviation": "DE"}, "athletes": [
+                {"rank": 1, "athlete": {"id": "de1"}},
+            ]},
+            "cornerback": {"position": {"abbreviation": "CB"}, "athletes": [
+                {"rank": 1, "athlete": {"id": "cb1"}},
+            ]},
+        }}]}
+        selected = _select_defensive_research_players(roster, depth)
+        names = [player["name"] for player in selected]
+        self.assertEqual(names, ["Leading Tackler", "Top Pass Rusher", "Starting Corner"])
+
+    def test_defensive_gamelog_compaction_keeps_tackles_sacks_and_takeaways(self):
+        from live_research import _compact_player_gamelog
+
+        compact = _compact_player_gamelog({
+            "games_available": 8,
+            "season_totals": {"Regular Season Stats": {
+                "totalTackles": "72", "soloTackles": "43", "sacks": "5.5",
+                "interceptions": "2", "passesDefended": "7",
+                "tacklesForLoss": "8", "quarterbackHits": "11",
+                "forcedFumbles": "1", "unneededStat": "999",
+            }},
+            "recent_games": [{"week": 8, "stats": {
+                "totalTackles": "10", "sacks": "1", "interceptions": "1",
+                "passesDefended": "2",
+            }}],
+        }, "LB")
+        self.assertEqual(compact["season"]["totalTackles"], "72")
+        self.assertEqual(compact["season"]["sacks"], "5.5")
+        self.assertEqual(compact["season"]["interceptions"], "2")
+        self.assertNotIn("unneededStat", compact["season"])
+
+    def test_news_role_change_impact_does_not_require_injury_report(self):
+        from ai_analysis import _filter_injury_impacts
+
+        data = {"injury_impact": [{
+            "impact_type": "Role Change",
+            "injured_player": "Minnesota Vikings quarterback room",
+            "team": "Minnesota Vikings",
+            "availability": "Confirmed starting quarterback change",
+            "affected_player": "Kirk Cousins",
+            "affected_team": "Minnesota Vikings",
+            "impact_direction": "Positive",
+            "statistical_effect": "Starting snaps and passing volume",
+            "prop_market": "Passing attempts and completions",
+            "evidence": "Dated team report confirms Cousins will start",
+            "confidence": 8,
+            "conditions": "Subject to final active roster",
+        }]}
+        usage = {"kirkcousins": {"player": "Kirk Cousins", "position": "QB"}}
+        gaps = _filter_injury_impacts(
+            data, [], {"Minnesota Vikings": ["Kirk Cousins"]},
+            ("Minnesota Vikings", "Green Bay Packers"), player_usage=usage,
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+        self.assertEqual(data["injury_impact"][0]["affected_player"], "Kirk Cousins")
+        self.assertEqual(gaps, [])
+
+    def test_player_prop_validation_supports_completion_sack_and_period_markets(self):
+        from ai_analysis import _filter_player_props_by_usage
+
+        data = {"picks": [
+            {"market_type": "Player Prop", "player_or_team": "Quarterback One",
+             "bet_description": "Over 25.5 passing completions", "play_threshold": "25.5"},
+            {"market_type": "Player Prop", "player_or_team": "Defender One",
+             "bet_description": "Over 0.5 sacks", "play_threshold": "0.5"},
+            {"market_type": "Player Prop", "player_or_team": "Quarterback One",
+             "bet_description": "Over 125.5 first-half passing yards", "play_threshold": "125.5"},
+        ]}
+        usage = {
+            "quarterbackone": {"player": "Quarterback One", "position": "QB",
+                "games_available": 10, "season": {"completions": "300", "passingYards": "2500"},
+                "recent": [{"stats": {"completions": "30", "passingYards": "250"}}]},
+            "defenderone": {"player": "Defender One", "position": "LB",
+                "games_available": 10, "season": {"sacks": "6"},
+                "recent": [{"stats": {"sacks": "1"}}]},
+        }
+        gaps = _filter_player_props_by_usage(data, usage)
+        self.assertEqual(len(data["picks"]), 3)
+        self.assertEqual(gaps, [])
+
 if __name__ == "__main__":
     unittest.main()
