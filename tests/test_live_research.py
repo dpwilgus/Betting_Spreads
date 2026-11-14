@@ -1003,7 +1003,9 @@ class LiveResearchTests(unittest.TestCase):
         }
         gaps = _filter_player_props_by_usage(data, usage)
         self.assertEqual(len(data["picks"]), 3)
-        self.assertEqual(gaps, [])
+        self.assertEqual(data["picks"][2]["confidence"], 5)
+        self.assertEqual(data["picks"][2]["data_quality"], "Limited")
+        self.assertTrue(any("period-specific prop" in gap for gap in gaps))
 
 if __name__ == "__main__":
     unittest.main()
