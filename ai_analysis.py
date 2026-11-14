@@ -9,21 +9,48 @@ from typing import Any
 from ai_providers import generate_json
 from live_research import collect_game_research
 
-MAX_RESEARCH_PROMPT_CHARS = 16000
+MAX_RESEARCH_PROMPT_CHARS = 20000
 
 
 def _bounded_research_text(research_text: str) -> tuple[str, bool]:
-    """Keep priority-ordered complete sections; skip oversized sections, not later evidence."""
+    """Prioritize player usage and matchup evidence over bulky roster/injury listings."""
     text = str(research_text or "")
     if len(text) <= MAX_RESEARCH_PROMPT_CHARS:
         return text, False
 
+    sections = text.split("\n\n")
+    prioritized = []
+    for index, section in enumerate(sections):
+        upper = section[:120].upper()
+        # Structured rosters are independently validated in code; selected-player
+        # game logs already provide the names the model should evaluate.
+        if upper.startswith("CURRENT ESPN ACTIVE TEAM ROSTER"):
+            continue
+        if upper.startswith("INDEPENDENT LIVE NFL RESEARCH") or upper.startswith("MATCHUP:") \
+                or upper.startswith("KICKOFF") or upper.startswith("SCOREBOARD LINE") \
+                or upper.startswith("RESEARCH RETRIEVED") or upper.startswith("MARKET DATA RULE"):
+            priority = 0
+        elif upper.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
+            priority = 1
+        elif upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS"):
+            priority = 2
+        elif upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS"):
+            priority = 3
+        elif upper.startswith("ESPN CURRENT PLAYER INJURIES"):
+            priority = 4
+        elif upper.startswith("ESPN GAME SUMMARY INJURY DATA"):
+            priority = 5
+        else:
+            priority = 6
+        prioritized.append((priority, index, section))
+
+    prioritized.sort(key=lambda item: (item[0], item[1]))
     kept: list[str] = []
     used = 0
-    omitted = False
-    marker = "[Research truncated.]"
+    omitted = len(prioritized) != len(sections)
+    marker = "[Research truncated: lower-priority sections omitted.]"
     budget = max(0, MAX_RESEARCH_PROMPT_CHARS - len(marker) - 2)
-    for section in text.split("\n\n"):
+    for _, _, section in prioritized:
         separator = 2 if kept else 0
         if len(section) + separator > budget - used:
             omitted = True
@@ -32,7 +59,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
         used += separator + len(section)
 
     if not omitted:
-        return text, False
+        return "\n\n".join(kept), False
     if not kept:
         return marker[:MAX_RESEARCH_PROMPT_CHARS], True
     return "\n\n".join(kept) + "\n\n" + marker, True
@@ -347,8 +374,8 @@ def _filter_td_scorers_by_usage(
         targets = _stat_number(season, "receivingTargets")
         total_td = rush_td + receiving_td
         if position == "QB":
-            eligible = rush_td >= 1 or carries / games >= 3.0
-            score = (rush_td / games) * 3.0 + (carries / games) * 0.20
+            eligible = rush_td >= 3 or (rush_td >= 2 and carries / games >= 3.0)
+            score = (rush_td / games) * 3.0 + (carries / games) * 0.12
         elif position == "RB":
             eligible = total_td >= 1 and (carries + targets) / games >= 4.0
             score = (total_td / games) * 3.0 + ((carries + targets) / games) * 0.08
@@ -479,6 +506,116 @@ def _validate_analysis(
 
 
 
+
+def _filter_injury_impacts(
+    data: dict[str, Any],
+    injury_statuses: list[dict[str, Any]],
+    rosters: dict[str, list[str]] | None,
+    team_names: tuple[str, str],
+) -> list[str]:
+    """Keep only impacts grounded in the named injury report and an available affected player."""
+    reports = {
+        (_normalize_name(str(item.get("team") or "")),
+         _normalize_name(str(item.get("player") or ""))): item
+        for item in injury_statuses
+        if isinstance(item, dict) and item.get("team") and item.get("player")
+    }
+    roster_sets = {
+        _normalize_name(team): {_normalize_name(player) for player in players}
+        for team, players in (rosters or {}).items()
+    }
+    team_lookup = {_normalize_name(team): team for team in team_names}
+    retained = []
+    gaps = []
+    for impact in data.get("injury_impact", []):
+        injured_player = str(impact.get("injured_player") or "")
+        injured_team = str(impact.get("team") or "")
+        affected_player = str(impact.get("affected_player") or "")
+        affected_team = str(impact.get("affected_team") or "")
+        injured_team_key = _normalize_name(injured_team)
+        affected_team_key = _normalize_name(affected_team)
+        report = reports.get((injured_team_key, _normalize_name(injured_player)))
+        if injured_team_key not in team_lookup or report is None:
+            gaps.append(
+                f"Removed injury impact for {affected_player}: injured player/team did not match an ESPN injury report."
+            )
+            continue
+        if not _is_unavailable_status(str(report.get("status") or "")) and \
+                "questionable" not in str(report.get("status") or "").casefold():
+            gaps.append(
+                f"Removed injury impact for {affected_player}: no meaningful injury designation was verified."
+            )
+            continue
+        if affected_team_key not in team_lookup or \
+                _normalize_name(affected_player) not in roster_sets.get(affected_team_key, set()):
+            gaps.append(
+                f"Removed injury impact for {affected_player}: affected player was not found on the stated team's roster."
+            )
+            continue
+        affected_report = reports.get((affected_team_key, _normalize_name(affected_player)))
+        if affected_report and _is_unavailable_status(str(affected_report.get("status") or "")):
+            gaps.append(
+                f"Removed injury impact for {affected_player}: ESPN lists the affected player "
+                f"{affected_report.get('status')}."
+            )
+            continue
+        retained.append(impact)
+    data["injury_impact"] = retained
+    return gaps
+
+
+def _separate_unverified_player_props(
+    data: dict[str, Any],
+    research: dict[str, Any],
+) -> list[str]:
+    """Move model-only thresholds out of actionable sportsbook recommendations."""
+    verified_quotes = research.get("verified_player_prop_markets", [])
+    actionable = []
+    model_only = []
+    gaps = []
+    for pick in data.get("picks", []):
+        if pick.get("market_type") != "Player Prop":
+            actionable.append(pick)
+            continue
+        player_key = _normalize_name(str(pick.get("player_or_team") or ""))
+        description = str(pick.get("bet_description") or "").casefold()
+        matched = None
+        for quote in verified_quotes if isinstance(verified_quotes, list) else []:
+            if not isinstance(quote, dict):
+                continue
+            quote_player = _normalize_name(str(quote.get("player") or ""))
+            quote_market = str(quote.get("market") or "").casefold()
+            market_match = any(
+                token in description and token in quote_market
+                for token in ("passing yards", "rushing yards", "receiving yards",
+                              "receptions", "receiving targets", "rushing attempts")
+            )
+            if (
+                quote_player == player_key and market_match
+                and quote.get("line") not in (None, "")
+                and quote.get("price") not in (None, "")
+                and quote.get("sportsbook") and quote.get("source_url")
+                and quote.get("retrieved_at")
+            ):
+                matched = quote
+                break
+        if matched:
+            pick["market_line"] = (
+                f"{matched['line']} ({matched['price']}) — {matched['sportsbook']}"
+            )
+            pick["market_source"] = matched["source_url"]
+            pick["market_retrieved_at"] = matched["retrieved_at"]
+            actionable.append(pick)
+        else:
+            pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
+            model_only.append(pick)
+            gaps.append(
+                f"{pick.get('player_or_team')} {pick.get('bet_description')}: no verified sportsbook line/price; moved to model-only leans."
+            )
+    data["picks"] = actionable
+    data["model_only_picks"] = model_only
+    return gaps
+
 def _deduplicate_correlated_game_picks(
     picks: list[dict[str, Any]],
     team_names: tuple[str, str],
@@ -574,9 +711,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "confidence (integer 1-10), statistical_rationale, risk_factors, "
         "data_quality (Strong, Moderate, or Limited). Only include evidence-supported picks. "
         f"Only use these matchup teams: {team_names[0]} and {team_names[1]}. "
-        "Each Player Prop must name a player exactly as listed on one of the supplied current ESPN rosters. "
+        "Each Player Prop must name a player with a structured ESPN game log in the supplied research. "
         "Each touchdown_scorer team must exactly match one of the two matchup teams, and the player "
-        "must exactly match that team's supplied roster. "
+        "must have a structured ESPN game log for that team. "
         "Player props: target five; aim for at least three when supported; fewer only when fewer qualify; "
         "more than five only when justified. Never pad. Keep game bets separate. Evaluate all researched "
         "QB/RB/WR/TE logs, including secondary players and injury beneficiaries. Compare season/recent "
@@ -623,7 +760,11 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     player_usage = _research_player_usage(research.get("research_text", ""))
     prop_gaps = _filter_player_props_by_usage(data, player_usage)
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
-    quality_gaps = injury_gaps + prop_gaps + td_gaps
+    impact_gaps = _filter_injury_impacts(
+        data, research.get("injury_statuses", []), research.get("rosters"), team_names
+    )
+    market_gaps = _separate_unverified_player_props(data, research)
+    quality_gaps = injury_gaps + prop_gaps + td_gaps + impact_gaps + market_gaps
     if quality_gaps:
         existing_gaps = data.setdefault("data_gaps", [])
         existing_gaps.extend(quality_gaps[:max(0, 6 - len(existing_gaps))])
@@ -635,7 +776,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         data.setdefault("data_gaps", []).append(
             "Overlapping same-team moneyline/spread recommendations were deduplicated; only the higher-confidence option was retained."
         )
-    data["analysis_version"] = 3
+    data["analysis_version"] = 4
     data["sources"] = list(research.get("sources", []))
     data["independent_research"] = str(research.get("research_text", ""))
     data["ai_provider"] = provider_name
