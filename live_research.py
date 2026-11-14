@@ -643,6 +643,7 @@ def _select_research_players(
                 athlete_id = str(player.get("id") or "")
                 if (
                     player.get("position", "").upper() == position
+                    and str(player.get("name") or "").strip().casefold() not in placeholder_names
                     and athlete_id
                     and athlete_id not in selected_ids
                 ):
