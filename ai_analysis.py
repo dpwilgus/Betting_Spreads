@@ -499,7 +499,7 @@ def _validate_analysis(
                     "AI suggested a player prop for someone not found on either current ESPN roster: "
                     + str(item.get("player_or_team", ""))
                 )
-    sneaky = data.get("sneaky_props")
+    sneaky = data.setdefault("sneaky_props", [])
     if not isinstance(sneaky, list) or len(sneaky) > 8:
         raise RuntimeError("AI sneaky_props must be a list of at most eight ideas.")
     for item in sneaky:
