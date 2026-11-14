@@ -94,7 +94,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
             },
         },
         "touchdown_scorers": {
-            "type": "array", "minItems": 0, "maxItems": 3,
+            "type": "array", "minItems": 0, "maxItems": 5,
             "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {
@@ -393,7 +393,7 @@ def _filter_td_scorers_by_usage(
             continue
         ranked.append((score, scorer))
     ranked.sort(key=lambda item: item[0], reverse=True)
-    data["touchdown_scorers"] = [scorer for _, scorer in ranked]
+    data["touchdown_scorers"] = [scorer for _, scorer in ranked[:3]]
     for rank, scorer in enumerate(data["touchdown_scorers"], 1):
         scorer["rank"] = rank
     return gaps
@@ -410,8 +410,8 @@ def _validate_analysis(
     scorers = data.get("touchdown_scorers")
     if not isinstance(picks, list):
         raise RuntimeError("AI response betting opportunities must be a list.")
-    if not isinstance(scorers, list) or len(scorers) > 3:
-        raise RuntimeError("AI response may contain at most three touchdown candidates.")
+    if not isinstance(scorers, list) or len(scorers) > 5:
+        raise RuntimeError("AI response may contain at most five preliminary touchdown candidates.")
     for item in picks:
         probability = float(item.get("estimated_hit_probability", -1))
         confidence = int(item.get("confidence", 0))
@@ -704,7 +704,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "injuries, player statistics, market prices, sources, or source timestamps.\n\n"
         "Return one JSON object only, with exactly these top-level keys: "
         "summary (string), game_script (string), picks (array), "
-        "touchdown_scorers (array of up to 3), injury_impact (array), "
+        "touchdown_scorers (array of up to 5 preliminary candidates), injury_impact (array), "
         "data_gaps (array of strings). Each pick object must contain: rank (integer), "
         "market_type (Player Prop or Game Prop), player_or_team, bet_description, "
         "market_line, play_threshold, estimated_hit_probability (number 0-100), "
