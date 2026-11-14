@@ -4,8 +4,9 @@ import urllib.error
 from unittest.mock import patch
 
 from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_text,
-                         _filter_player_props_by_usage, _filter_td_scorers_by_usage,
-                         _research_player_usage, _validate_analysis, analyze_game)
+                         _filter_injury_impacts, _filter_player_props_by_usage, _filter_td_scorers_by_usage,
+                         _research_player_usage, _separate_unverified_player_props,
+                         _validate_analysis, analyze_game)
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
                           get_provider_usage_stats, reset_provider_run_state)
 from live_research import collect_game_research, _extract_roster_names
@@ -541,7 +542,7 @@ class ProviderFallbackTests(unittest.TestCase):
         usage = {
             "jordanlove": {
                 "player":"Jordan Love","position":"QB","games_available":9,
-                "season":{"rushingAttempts":5,"rushingTouchdowns":0},
+                "season":{"rushingAttempts":12,"rushingTouchdowns":2},
                 "recent":[]
             },
             "justinjefferson": {
@@ -574,6 +575,74 @@ class ProviderFallbackTests(unittest.TestCase):
         _apply_independent_injury_statuses(data, [])
         self.assertEqual(data["touchdown_scorers"][0]["availability"], "Not independently verified")
         self.assertIn("not independently verified", data["picks"][0]["risk_factors"].casefold())
+
+
+    def test_model_only_player_props_are_not_actionable_sportsbook_picks(self):
+        data = {"picks":[{
+            "market_type":"Player Prop","player_or_team":"Jordan Love",
+            "bet_description":"Passing Yards Over","market_line":"Not verified",
+            "play_threshold":"255.5",
+        }]}
+        gaps = _separate_unverified_player_props(data, {"verified_player_prop_markets":[]})
+        self.assertEqual(data["picks"], [])
+        self.assertEqual(len(data["model_only_picks"]), 1)
+        self.assertIn("NOT VERIFIED", data["model_only_picks"][0]["market_line"])
+        self.assertTrue(any("no verified sportsbook line" in gap for gap in gaps))
+
+    def test_player_prop_with_independent_sportsbook_quote_remains_actionable(self):
+        data = {"picks":[{
+            "market_type":"Player Prop","player_or_team":"Jordan Love",
+            "bet_description":"Passing Yards Over","market_line":"Not verified",
+            "play_threshold":"255.5",
+        }]}
+        quote = {
+            "player":"Jordan Love","market":"Passing Yards","line":"250.5",
+            "price":"-110","sportsbook":"ExampleBook",
+            "source_url":"https://sportsbook.example/market",
+            "retrieved_at":"2026-11-14T00:00:00Z",
+        }
+        _separate_unverified_player_props(data, {"verified_player_prop_markets":[quote]})
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["picks"][0]["market_line"], "250.5 (-110) — ExampleBook")
+        self.assertEqual(data["model_only_picks"], [])
+
+    def test_injury_impact_drops_affected_player_who_is_out(self):
+        data = {"injury_impact":[{
+            "injured_player":"Blake Cashman","team":"Minnesota Vikings",
+            "affected_player":"Josh Jacobs","affected_team":"Green Bay Packers",
+            "impact_direction":"Positive",
+        }]}
+        statuses = [
+            {"player":"Blake Cashman","team":"Minnesota Vikings","status":"Out","position":"LB"},
+            {"player":"Josh Jacobs","team":"Green Bay Packers","status":"Out","position":"RB"},
+        ]
+        rosters = {
+            "Minnesota Vikings":["Blake Cashman"],
+            "Green Bay Packers":["Josh Jacobs"],
+        }
+        gaps = _filter_injury_impacts(
+            data,statuses,rosters,("Minnesota Vikings","Green Bay Packers")
+        )
+        self.assertEqual(data["injury_impact"], [])
+        self.assertTrue(any("Josh Jacobs" in gap and "Out" in gap for gap in gaps))
+
+    def test_injury_impact_keeps_cross_team_matchup_effect_for_available_player(self):
+        data = {"injury_impact":[{
+            "injured_player":"Blake Cashman","team":"Minnesota Vikings",
+            "affected_player":"Matthew Golden","affected_team":"Green Bay Packers",
+            "impact_direction":"Positive",
+        }]}
+        statuses = [
+            {"player":"Blake Cashman","team":"Minnesota Vikings","status":"Out","position":"LB"},
+        ]
+        rosters = {
+            "Minnesota Vikings":["Blake Cashman"],
+            "Green Bay Packers":["Matthew Golden"],
+        }
+        _filter_injury_impacts(
+            data,statuses,rosters,("Minnesota Vikings","Green Bay Packers")
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
 
 
 if __name__ == "__main__":
