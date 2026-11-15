@@ -12,57 +12,83 @@ from live_research import collect_game_research
 MAX_RESEARCH_PROMPT_CHARS = 40000
 
 
+def _compact_matchup_evidence(section: str) -> str:
+    """Drop bulky recap trees while preserving venue, weather, markets and ATS evidence."""
+    if not section.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
+        return section
+    prefix, separator, payload_text = section.partition(":")
+    if not separator:
+        return section
+    try:
+        payload = json.loads(payload_text.strip())
+    except (TypeError, ValueError):
+        return section
+    keep = ("retrieved_at_utc", "header", "game_info", "pickcenter_markets",
+            "against_the_spread", "omitted_oversized_sections")
+    compact = {key: payload[key] for key in keep if key in payload}
+    return prefix + ": " + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
+
+
 def _bounded_research_text(research_text: str) -> tuple[str, bool]:
-    """Prioritize player usage and matchup evidence over bulky roster/injury listings."""
+    """Keep every player log, injury, news and team-stat section before optional recaps."""
     text = str(research_text or "")
     if len(text) <= MAX_RESEARCH_PROMPT_CHARS:
         return text, False
 
     sections = text.split("\n\n")
     prioritized = []
-    for index, section in enumerate(sections):
-        upper = section[:120].upper()
-        # Structured rosters are independently validated in code; selected-player
-        # game logs already provide the names the model should evaluate.
+    for index, original in enumerate(sections):
+        upper = original[:120].upper()
         if upper.startswith("CURRENT ESPN ACTIVE TEAM ROSTER"):
             continue
-        if upper.startswith("INDEPENDENT LIVE NFL RESEARCH") or upper.startswith("MATCHUP:") \
-                or upper.startswith("KICKOFF") or upper.startswith("SCOREBOARD LINE") \
-                or upper.startswith("RESEARCH RETRIEVED") or upper.startswith("MARKET DATA RULE"):
+        section = _compact_matchup_evidence(original)
+        upper = section[:120].upper()
+        if (upper.startswith("INDEPENDENT LIVE NFL RESEARCH")
+                or upper.startswith("MATCHUP:") or upper.startswith("KICKOFF")
+                or upper.startswith("SCOREBOARD LINE") or upper.startswith("RESEARCH RETRIEVED")
+                or upper.startswith("MARKET DATA RULE")
+                or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")
+                or upper.startswith("ESPN CURRENT PLAYER INJURIES")
+                or upper.startswith("ESPN GAME SUMMARY INJURY DATA")
+                or upper.startswith("ESPN RECENT TEAM NEWS")):
             priority = 0
-        elif upper.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
-            priority = 1
-        elif upper.startswith("ESPN RECENT TEAM NEWS"):
-            priority = 1
-        elif upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS"):
-            priority = 2
-        elif upper.startswith("ESPN CURRENT PLAYER INJURIES") or upper.startswith("ESPN GAME SUMMARY INJURY DATA"):
-            priority = 3
         elif upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS"):
-            priority = 4
+            priority = 1
+        elif upper.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
+            priority = 2
         else:
-            priority = 6
+            priority = 3
         prioritized.append((priority, index, section))
 
     prioritized.sort(key=lambda item: (item[0], item[1]))
-    kept: list[str] = []
+    kept = []
     used = 0
-    omitted = len(prioritized) != len(sections)
-    marker = "[Research truncated.]"
+    essential_omitted = False
+    optional_omitted = False
+    marker = "[Essential research truncated: some player, injury, news or team-stat evidence did not fit.]"
     budget = max(0, MAX_RESEARCH_PROMPT_CHARS - len(marker) - 2)
-    for _, _, section in prioritized:
+    for priority, _, section in prioritized:
         separator = 2 if kept else 0
         if len(section) + separator > budget - used:
-            omitted = True
+            if priority <= 1:
+                essential_omitted = True
+            else:
+                optional_omitted = True
             continue
         kept.append(section)
         used += separator + len(section)
 
-    if not omitted:
-        return "\n\n".join(kept), False
-    if not kept:
-        return marker[:MAX_RESEARCH_PROMPT_CHARS], True
-    return "\n\n".join(kept) + "\n\n" + marker, True
+    result = "\n\n".join(kept)
+    if essential_omitted:
+        result += ("\n\n" if result else "") + marker
+    elif optional_omitted:
+        result += (
+            "\n\n[Optional historical matchup recap compacted; player logs, injuries, "
+            "news and current team statistics were retained.]"
+        )
+    return result[:MAX_RESEARCH_PROMPT_CHARS], essential_omitted
+
+
 ANALYSIS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
