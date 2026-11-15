@@ -95,6 +95,24 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
     "properties": {
         "summary": {"type": "string"},
         "game_script": {"type": "string"},
+        "underdog_analysis": {
+            "type": "array", "maxItems": 1,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "properties": {
+                    "underdog": {"type": "string"},
+                    "spread": {"type": "string"},
+                    "cover_probability": {"type": "number"},
+                    "upset_probability": {"type": "number"},
+                    "recommendation": {"type": "string", "enum": ["Bet underdog spread", "Upset moneyline", "Monitor", "Pass"]},
+                    "rationale": {"type": "string"},
+                    "risk_factors": {"type": "string"},
+                    "evidence_quality": {"type": "string", "enum": ["Strong", "Moderate", "Limited"]},
+                },
+                "required": ["underdog", "spread", "cover_probability", "upset_probability",
+                    "recommendation", "rationale", "risk_factors", "evidence_quality"],
+            },
+        },
         "picks": {
             "type": "array", "minItems": 0,
             "items": {
@@ -188,7 +206,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "data_gaps": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
     },
     "required": [
-        "summary", "game_script", "picks", "sneaky_props", "touchdown_scorers",
+        "summary", "game_script", "underdog_analysis", "picks", "sneaky_props", "touchdown_scorers",
         "injury_impact", "data_gaps",
     ],
 }
@@ -538,6 +556,20 @@ def _validate_analysis(
         raise RuntimeError("AI response is missing the matchup summary or game script.")
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
+    underdog_rows = data.get("underdog_analysis")
+    if not isinstance(underdog_rows, list) or len(underdog_rows) > 1:
+        raise RuntimeError("AI underdog analysis must be a list with at most one matchup underdog.")
+    for row in underdog_rows:
+        cover = float(row.get("cover_probability", -1))
+        upset = float(row.get("upset_probability", -1))
+        if not 0 <= cover <= 100 or not 0 <= upset <= 100:
+            raise RuntimeError("AI returned invalid underdog cover or upset probability.")
+        if team_names is not None and _normalize_name(row.get("underdog", "")) not in {
+            _normalize_name(team) for team in team_names
+        }:
+            raise RuntimeError("AI underdog analysis named a team outside this matchup.")
+        if row.get("evidence_quality") not in ("Strong", "Moderate", "Limited"):
+            raise RuntimeError("AI returned an unsupported underdog evidence-quality label.")
     if not isinstance(picks, list):
         raise RuntimeError("AI response betting opportunities must be a list.")
     if not isinstance(scorers, list) or len(scorers) > 5:
@@ -937,11 +969,12 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Assess supported full-game/1Q/1H game lines. Never scale full-game averages into period player props; without period splits omit them or mark Limited (confidence <=5) and disclose the gap. "
         "Pass 2: longest-play, combo, first TD scorer, first-half TD opportunities, and supported 1Q/1H game markets. First-half TDs are research-only unless a feed supplies a real quote; do not invent markets. Q1 passing yards only if supplied. No sack/tackle/kicking/field-goal bets; use defensive sacks/tackles only to rate opposing offenses. Alternates/ladders need distinct evidence; never invent prices. "
         "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
-        "Do not pair a team's moneyline and spread; retain the stronger. Spread probability cannot exceed that team's moneyline probability. "
+        "Do not pair a team's moneyline and spread; spread probability cannot exceed its moneyline probability. "
+        "Assess the underdog's cover and outright-upset probabilities separately for every supplied spread; recommend only a demonstrable priced edge, otherwise Monitor/Pass. Never force an underdog bet or analyze only the favorite. "
         "TDs: compare season scoring, carries/targets per game and recent scoring. "
         "Passing TDs do not qualify a QB for anytime TD; require a rushing TD or 3+ rush attempts/game. "
         "Never select a QB solely for starting. Injury impacts: never make the injured player their own beneficiary. Cover offensive starters, key defensive absences and verified role/QB news; assess downstream skill-player and same-position replacements, but don't assume benefits. Use affected_player='Team unit' if no individual is supported; defensive absences should assess opposing researched offense. "
-        "Compare defenses using supplied efficiency, yards/points allowed, pressure, sacks, takeaways and recent games; explain offensive effects and gaps. Include dated team news, separating confirmed facts from speculation. "
+        "Compare pass/rush/points defense separately; no 'elite' label without current supplied rankings or clear metrics. Verify neutral/international venue, QB experience and former-team ties. Heritage narratives are context, never a quantified performance edge alone. Use dated news, separating fact from inference. "
         "Questionable players are conditional only (confidence <=6) with explicit risk disclosure. "
         "For Questionable TD candidates, risk_factors must start 'Questionable:' "
         "(e.g. 'Questionable: active status unconfirmed'). "
@@ -1017,7 +1050,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         if (_normalize_name(str(item.get("player_or_team") or "")),
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
-    data["analysis_version"] = 8
+    data["analysis_version"] = 9
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
@@ -1027,5 +1060,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     data["ai_provider"] = provider_name
     data["research_mode"] = "independent_espn_plus_ai"
     data["research_truncated_for_prompt"] = research_truncated
+    data["research_compacted_for_prompt"] = (
+        len(prompt_research) < len(str(research.get("research_text", "")))
+        and not research_truncated
+    )
     data["research_prompt_characters"] = len(prompt_research)
     return data
