@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -556,7 +557,10 @@ def _filter_td_scorers_by_usage(
 def _sanitize_underdog_analysis(data: dict[str, Any], team_names: tuple[str, str] | None) -> None:
     """Normalize or discard malformed underdog output without losing matchup analysis."""
     rows = data.get("underdog_analysis", [])
-    gaps = data.setdefault("data_gaps", [])
+    gaps = data.get("data_gaps")
+    if not isinstance(gaps, list):
+        gaps = []
+        data["data_gaps"] = gaps
     if not isinstance(rows, list):
         rows = []
     accepted = []
@@ -1039,12 +1043,16 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     prompt_metadata: dict[str, tuple[bool, bool, int]] = {}
 
     def prompts_for_provider(provider_name: str) -> tuple[str, str]:
-        # Groq's 8k TPM tier counts prompt + completion tokens. A 22k-character
-        # combined input budget leaves room for the configured 1.6k output cap.
-        combined_budget = 22000 if provider_name == "groq" else (
-            len(instructions) + len(user_prefix) + MAX_RESEARCH_PROMPT_CHARS
+        if provider_name == "groq":
+            # Leave 500 TPM tokens as a safety margin for estimation variance.
+            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600"))
+            input_token_budget = max(1000, 8000 - output_tokens - 500)
+            combined_budget = int(input_token_budget * 3.5)
+        else:
+            combined_budget = len(instructions) + len(user_prefix) + MAX_RESEARCH_PROMPT_CHARS
+        research_budget = max(
+            1000, combined_budget - len(instructions) - len(user_prefix) - 48
         )
-        research_budget = max(1000, combined_budget - len(instructions) - len(user_prefix))
         bounded, was_truncated = _bounded_research_text(original_research, research_budget)
         prompt_metadata[provider_name] = (
             was_truncated,
