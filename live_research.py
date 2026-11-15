@@ -6,6 +6,8 @@ import json
 import re
 from functools import lru_cache
 import ssl
+import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any
@@ -584,6 +586,18 @@ def _player_gamelog(athlete_id: str, season: int) -> dict[str, Any]:
     return _normalize_player_gamelog(_get_json(url, timeout=15))
 
 
+def _fetch_player_gamelog(athlete_id: str, season: int) -> dict[str, Any]:
+    """Retry one transient player-log failure once; never disable other players."""
+    try:
+        return _player_gamelog(athlete_id, season)
+    except urllib.error.HTTPError:
+        # A 4xx/5xx response is explicit; do not amplify provider throttling.
+        raise
+    except (urllib.error.URLError, TimeoutError, ssl.SSLError, ValueError):
+        time.sleep(0.35)
+        return _player_gamelog(athlete_id, season)
+
+
 def _compact_player_data(value: Any, depth: int = 0) -> Any:
     """Bound player game-log payloads while retaining labels, dates, opponents and stats."""
     if depth > 6:
@@ -1040,7 +1054,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
                             )
                             try:
-                                gamelog = _player_gamelog(
+                                gamelog = _fetch_player_gamelog(
                                     player["id"], datetime.now(timezone.utc).year
                                 )
                                 player_records.append({
