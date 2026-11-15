@@ -161,10 +161,14 @@ class AnalysisQualityTests(unittest.TestCase):
             analysis, team_names=("New England Patriots", "Detroit Lions")
         )
         analysis["underdog_analysis"][0]["upset_probability"] = 120
-        with self.assertRaisesRegex(RuntimeError, "invalid underdog"):
-            _validate_analysis(
-                analysis, team_names=("New England Patriots", "Detroit Lions")
-            )
+        _validate_analysis(
+            analysis, team_names=("New England Patriots", "Detroit Lions")
+        )
+        self.assertEqual(analysis["underdog_analysis"], [])
+        self.assertTrue(any(
+            "Underdog assessment unavailable" in gap
+            for gap in analysis["data_gaps"]
+        ))
 
     def test_same_team_moneyline_and_spread_keep_only_higher_confidence_pick(self):
         moneyline = {
