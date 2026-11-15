@@ -434,9 +434,7 @@ class LiveResearchTests(unittest.TestCase):
         self.assertTrue(all("/gamelog?season=2026" in item["url"] for item in player_sources))
 
 
-    def test_repeated_player_log_errors_stop_extra_requests_for_the_slate(self):
-        from live_research import PLAYER_GAMELOG_FAILURE_LIMIT
-
+    def test_player_log_errors_are_isolated_and_remaining_players_are_attempted(self):
         reset_research_cache()
         summary = {
             "header": {
@@ -475,9 +473,20 @@ class LiveResearchTests(unittest.TestCase):
                 "home_team_id": "2",
             })
 
-        self.assertEqual(get_gamelog.call_count, PLAYER_GAMELOG_FAILURE_LIMIT)
-        self.assertIn("skipped after repeated ESPN player-log errors", result["research_text"])
+        self.assertEqual(get_gamelog.call_count, 8)
+        self.assertNotIn("skipped after repeated ESPN player-log errors", result["research_text"])
+        self.assertEqual(result["research_text"].count('"game_log_unavailable"'), 8)
         reset_research_cache()
+
+    def test_transient_player_log_error_is_retried_once(self):
+        from live_research import _fetch_player_gamelog
+
+        with patch("live_research._player_gamelog", side_effect=[
+            TimeoutError("temporary timeout"), {"games_available": 1}
+        ]) as fetch, patch("live_research.time.sleep"):
+            result = _fetch_player_gamelog("123", 2026)
+        self.assertEqual(result, {"games_available": 1})
+        self.assertEqual(fetch.call_count, 2)
 
 
     def test_depth_chart_extractor_orders_players_by_position_rank(self):
