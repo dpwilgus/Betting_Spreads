@@ -79,7 +79,7 @@ def _bounded_research_text(
     for priority, _, section in prioritized:
         separator = 2 if kept else 0
         if len(section) + separator > budget - used:
-            if priority <= 1:
+            if priority <= 2:
                 essential_omitted = True
             else:
                 optional_omitted = True
