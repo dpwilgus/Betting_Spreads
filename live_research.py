@@ -1523,6 +1523,12 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             f"ESPN RECENT TEAM NEWS — {team_name}: "
                             + json.dumps(articles, ensure_ascii=False, separators=(",", ":"))
                         )
+                        for article in articles:
+                            if isinstance(article, dict) and article.get("url"):
+                                sources.append({
+                                    "title": str(article.get("headline") or "ESPN team news"),
+                                    "url": str(article["url"]),
+                                })
                     sources.append({
                         "title": f"ESPN recent team news — {team_name}",
                         "url": news_url,
