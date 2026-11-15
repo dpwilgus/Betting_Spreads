@@ -676,6 +676,30 @@ def _save_cached_analysis(game: dict, analysis: dict) -> None:
     path.write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _cached_analysis_is_complete(cached: dict | None) -> bool:
+    """Only reuse versioned cache entries that contain at least one usable analysis section."""
+    if not isinstance(cached, dict):
+        return False
+    structurally_complete = (
+        isinstance(cached.get("picks"), list)
+        and isinstance(cached.get("touchdown_scorers"), list)
+        and len(cached["touchdown_scorers"]) <= 3
+        and cached.get("analysis_version") == 11
+        and isinstance(cached.get("underdog_analysis"), list)
+        and bool(cached.get("ai_provider"))
+    )
+    if not structurally_complete:
+        return False
+    usable_sections = (
+        "picks", "touchdown_scorers", "sneaky_props",
+        "injury_impact", "underdog_analysis",
+    )
+    return any(
+        isinstance(cached.get(section), list) and bool(cached[section])
+        for section in usable_sections
+    )
+
+
 def _load_cached_analysis(game: dict) -> dict:
     path = _analysis_cache_path(game)
     if not path.is_file():
@@ -784,15 +808,7 @@ def main() -> int:
                     elif refresh_incomplete:
                         cache_path = _analysis_cache_path(game)
                         cached = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else None
-                        is_complete = (
-                            cached is not None
-                            and isinstance(cached.get("picks"), list)
-                            and isinstance(cached.get("touchdown_scorers"), list)
-                            and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 11
-                            and isinstance(cached.get("underdog_analysis"), list)
-                            and bool(cached.get("ai_provider"))
-                        )
+                        is_complete = _cached_analysis_is_complete(cached)
                         if is_complete:
                             analysis = _load_cached_analysis(game)
                         else:
