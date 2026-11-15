@@ -669,12 +669,38 @@ def _validate_analysis(
     sneaky_response = data.get("sneaky_props", [])
     injury_response = data.get("injury_impact", [])
     underdog_response = data.get("underdog_analysis", [])
-    attempted_underdog_response = (
-        isinstance(raw_underdog_response, list) and bool(raw_underdog_response)
-    )
+    # An invalid raw underdog row is not usable analysis: only count it
+    # after _sanitize_underdog_analysis has retained a valid assessment.
+    # Likewise, count injury impacts only when both teams belong to this
+    # matchup and the proposed beneficiary is on the stated roster (or is
+    # an explicitly permitted unit-level impact).
+    valid_injury_response = False
+    if isinstance(injury_response, list):
+        valid_team_keys = {_normalize_name(team) for team in team_names} if team_names else None
+        roster_lookup = {
+            _normalize_name(team): {_normalize_name(player) for player in players}
+            for team, players in (rosters or {}).items()
+        }
+        for impact in injury_response:
+            if not isinstance(impact, dict):
+                continue
+            subject_team = _normalize_name(impact.get("team", ""))
+            beneficiary_team = _normalize_name(impact.get("affected_team", ""))
+            beneficiary = _normalize_name(impact.get("affected_player", ""))
+            unit_impact = beneficiary in {"teamunit", "offensiveunit", "defensiveunit", "specialteamsunit"}
+            if not subject_team or not beneficiary_team or not beneficiary:
+                continue
+            if valid_team_keys is not None and (
+                subject_team not in valid_team_keys or beneficiary_team not in valid_team_keys
+            ):
+                continue
+            if rosters is not None and not unit_impact and beneficiary not in roster_lookup.get(beneficiary_team, set()):
+                continue
+            valid_injury_response = True
+            break
     if not any((
-        picks, scorers, sneaky_response, injury_response,
-        underdog_response, attempted_underdog_response, require_underdog,
+        picks, scorers, sneaky_response if isinstance(sneaky_response, list) else [],
+        valid_injury_response, underdog_response, require_underdog,
     )):
         raise RuntimeError(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
