@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import ssl
@@ -32,6 +33,11 @@ def reset_provider_run_state() -> None:
 
 class IncompleteResponseError(RuntimeError):
     """A provider explicitly reported that its generated response was truncated."""
+
+
+def _estimate_prompt_tokens(system_prompt: str, user_prompt: str) -> int:
+    """Conservative character-based estimate used for provider TPM preflight checks."""
+    return math.ceil((len(system_prompt or "") + len(user_prompt or "")) / 3.5)
 
 
 @dataclass(frozen=True)
@@ -380,6 +386,15 @@ def generate_json(
         provider_system, provider_user = (
             prompt_factory(provider.name) if prompt_factory else (system_prompt, user_prompt)
         )
+        if provider.name == "groq":
+            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600"))
+            estimated_total = _estimate_prompt_tokens(provider_system, provider_user) + output_tokens
+            if estimated_total > 7500:
+                failures.append(
+                    "groq: request skipped by local TPM preflight "
+                    f"(estimated prompt + output {estimated_total} tokens; 8,000 TPM limit)."
+                )
+                continue
         for attempt in range(3):
             try:
                 result = _call_provider(provider, key, provider_system, provider_user)
