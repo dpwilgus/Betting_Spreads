@@ -111,6 +111,25 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertEqual(analysis["underdog_analysis"][0]["recommendation"], "Monitor")
         self.assertEqual(analysis["underdog_analysis"][0]["evidence_quality"], "Moderate")
 
+
+    def test_favorite_spread_row_is_not_mislabeled_as_underdog(self):
+        analysis = {
+            "summary": "Test", "game_script": "Test", "picks": [],
+            "touchdown_scorers": [], "injury_impact": [], "data_gaps": [],
+            "underdog_analysis": [
+                {"underdog": "Detroit Lions", "spread": "-2.5",
+                 "cover_probability": 60, "upset_probability": 40,
+                 "recommendation": "Pass", "rationale": "Favorite row",
+                 "risk_factors": "Risk", "evidence_quality": "Strong"},
+                {"underdog": "New England Patriots", "spread": "+2.5",
+                 "cover_probability": 54, "upset_probability": 38,
+                 "recommendation": "Monitor", "rationale": "Dog row",
+                 "risk_factors": "Risk", "evidence_quality": "Moderate"},
+            ],
+        }
+        _validate_analysis(analysis, team_names=("New England Patriots", "Detroit Lions"))
+        self.assertEqual(analysis["underdog_analysis"][0]["underdog"], "New England Patriots")
+
     def test_invalid_underdog_row_is_dropped_without_rejecting_matchup(self):
         analysis = {
             "summary": "Test", "game_script": "Test", "picks": [],
