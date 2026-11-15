@@ -462,10 +462,13 @@ class ProviderFallbackTests(unittest.TestCase):
         ) as generate:
             result = analyze_game(game, research=research)
 
-        system_prompt, user_prompt = generate.call_args.args[:2]
+        system_prompt, base_user_prompt = generate.call_args.args[:2]
+        prompt_factory = generate.call_args.kwargs["prompt_factory"]
+        system_prompt, user_prompt = prompt_factory("gemini")
         self.assertIn("Target five verified player props", system_prompt)
         self.assertIn("model-only", system_prompt)
         self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
+        self.assertIn("Analyze this upcoming NFL matchup", base_user_prompt)
         self.assertIn("statistical_rationale", user_prompt)
         self.assertIn("touchdown_scorers", user_prompt)
         self.assertIn("underdog_analysis", user_prompt)
