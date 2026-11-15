@@ -76,6 +76,29 @@ def _bounded_research_text(
         prioritized.append((priority, index, section))
 
     prioritized.sort(key=lambda item: (item[0], item[1]))
+
+    # Player logs are emitted one player per section. A simple stable sort lets
+    # the first team's logs consume the entire provider budget before the second
+    # team's candidates are considered. Interleave log sections by team so both
+    # sides retain comparable evidence under tight free-tier TPM limits.
+    priority_zero = [item for item in prioritized if item[0] == 0]
+    player_logs = [item for item in prioritized if item[0] == 1]
+    remaining = [item for item in prioritized if item[0] > 1]
+    logs_by_team: dict[str, list[tuple[int, int, str]]] = {}
+    for item in player_logs:
+        match = re.match(
+            r"ESPN CURRENT-SEASON PLAYER GAME LOGS — (.+?) \\(",
+            item[2],
+        )
+        team_key = _normalize_name(match.group(1)) if match else "__unassigned__"
+        logs_by_team.setdefault(team_key, []).append(item)
+    balanced_player_logs = []
+    while any(logs_by_team.values()):
+        for team_key in list(logs_by_team):
+            if logs_by_team[team_key]:
+                balanced_player_logs.append(logs_by_team[team_key].pop(0))
+    prioritized = priority_zero + balanced_player_logs + remaining
+
     kept = []
     used = 0
     essential_omitted = False
