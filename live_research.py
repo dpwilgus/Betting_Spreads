@@ -1035,6 +1035,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             )
                         player_records = []
                         for player in selected_players:
+                            gamelog_url = (
                                 "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
                                 f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
                             )
@@ -1046,7 +1047,9 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                     "player": player["name"],
                                     "position": player["position"],
                                     "research_reason": player.get("research_reason", ""),
-                                    "usage_and_recent_stats": _compact_player_gamelog(gamelog, player["position"]),
+                                    "usage_and_recent_stats": _compact_player_gamelog(
+                                        gamelog, player["position"]
+                                    ),
                                 })
                                 sources.append({
                                     "title": f"ESPN player game log — {player['name']}",
@@ -1415,6 +1418,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         ]
                         player_records = []
                         for player in selected_players:
+                            gamelog_url = (
                                 "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
                                 f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
                             )
