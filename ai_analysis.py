@@ -798,9 +798,9 @@ def _expected_market_key(description: str) -> str | None:
         (r"receiving touchdowns?", "player_reception_tds"),
         (r"receiving yards?", "player_reception_yds"),
         (r"receptions?", "player_receptions"),
-        (r"longest reception", "player_longest_reception"),
-        (r"longest rush", "player_longest_rush"),
-        (r"longest pass|longest completion", "player_longest_pass"),
+        (r"longest reception", "player_reception_longest"),
+        (r"longest rush", "player_rush_longest"),
+        (r"longest pass|longest completion", "player_pass_longest_completion"),
     )
     return next((key for pattern, key in patterns if re.search(pattern, text)), None)
 
