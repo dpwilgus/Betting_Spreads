@@ -87,7 +87,7 @@ def _bounded_research_text(
     logs_by_team: dict[str, list[tuple[int, int, str]]] = {}
     for item in player_logs:
         match = re.match(
-            r"ESPN CURRENT-SEASON PLAYER GAME LOGS — (.+?) \\(",
+            r"ESPN CURRENT-SEASON PLAYER GAME LOGS — (.+?) \(",
             item[2],
         )
         team_key = _normalize_name(match.group(1)) if match else "__unassigned__"
@@ -660,13 +660,11 @@ def _validate_analysis(
         raise RuntimeError("AI response betting opportunities must be a list.")
     if not isinstance(scorers, list) or len(scorers) > 5:
         raise RuntimeError("AI response may contain at most five preliminary touchdown candidates.")
-    sneaky_response = data.get("sneaky_props")
-    injury_response = data.get("injury_impact")
-    underdog_response = data.get("underdog_analysis")
-    if not isinstance(sneaky_response, list) or not isinstance(injury_response, list):
-        raise RuntimeError("AI response is missing required sneaky-prop or injury-impact lists.")
-    if not isinstance(underdog_response, list):
-        raise RuntimeError("AI response underdog assessment must be a list.")
+    # These are optional output sections. Treat omitted sections as empty rather
+    # than rejecting otherwise valid analyses that contain picks or TD candidates.
+    sneaky_response = data.get("sneaky_props", [])
+    injury_response = data.get("injury_impact", [])
+    underdog_response = data.get("underdog_analysis", [])
     if not any((picks, scorers, sneaky_response, injury_response, underdog_response)):
         raise RuntimeError(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
