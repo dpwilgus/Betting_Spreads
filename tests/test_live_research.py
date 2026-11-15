@@ -852,7 +852,7 @@ class LiveResearchTests(unittest.TestCase):
             "ESPN CURRENT-SEASON PLAYER GAME LOGS — Minnesota Vikings: " + ("M"*5000),
             "ESPN CURRENT-SEASON PLAYER GAME LOGS — Green Bay Packers: " + ("G"*5000),
             "ESPN CURRENT-SEASON TEAM STATISTICS — Minnesota Vikings: " + ("T"*1000),
-            "ESPN CURRENT PLAYER INJURIES — Minnesota Vikings: " + ("I"*5000),
+            "ESPN CURRENT PLAYER INJURIES — Minnesota Vikings: " + ("I"*4000),
         ])
         with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 15000):
             prompt, truncated = _bounded_research_text(research)
