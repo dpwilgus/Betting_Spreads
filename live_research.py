@@ -938,7 +938,6 @@ def reset_research_cache() -> None:
     _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
-    _player_gamelogs_disabled = False
 
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     event_id = str(game.get("event_id", "")).strip()
@@ -1229,7 +1228,6 @@ def reset_research_cache() -> None:
     _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
-    _player_gamelogs_disabled = False
 
 def _compact_injury_prompt_reports(
     reports: list[dict[str, Any]],
