@@ -1014,7 +1014,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         validator=lambda result: _validate_analysis(
             result, rosters=rosters, team_names=team_names,
             require_underdog=bool(re.search(
-                r"[+-]\\s*\\d+(?:\\.\\d+)?", str(game.get("Betting Line") or "")
+                r"[+-]\s*\d+(?:\.\d+)?", str(game.get("Betting Line") or "")
             )),
         ),
     )
