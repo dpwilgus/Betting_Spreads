@@ -581,7 +581,7 @@ def _sanitize_underdog_analysis(data: dict[str, Any], team_names: tuple[str, str
         candidate["spread"] = str(candidate.get("spread") or "").strip()
         if not candidate["underdog"] or not candidate["spread"]:
             continue
-        spread_match = re.search(r"[+-]?\\d+(?:\\.\\d+)?", candidate["spread"])
+        spread_match = re.search(r"[+-]?\d+(?:\.\d+)?", candidate["spread"])
         if not spread_match or float(spread_match.group(0)) <= 0:
             continue
         if valid_teams is not None and _normalize_name(candidate["underdog"]) not in valid_teams:
