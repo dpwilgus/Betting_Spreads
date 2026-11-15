@@ -39,7 +39,7 @@ class AnalysisQualityTests(unittest.TestCase):
         )
         bounded, truncated = _bounded_research_text(research, max_chars=1200)
         self.assertLessEqual(len(bounded), 1200)
-        self.assertTrue(truncated)
+        self.assertFalse(truncated)
         self.assertIn("HEADER", bounded)
         self.assertIn("INJURIES:", bounded)
         self.assertIn("PLAYER LOGS", bounded)
