@@ -49,22 +49,24 @@ def _bounded_research_text(
         upper = section[:120].upper()
         if (upper.startswith("HEADER") or upper.startswith("INJURIES:")
                 or upper.startswith("CURRENT INJURY EVIDENCE")
-                or upper.startswith("PLAYER LOGS")
                 or upper.startswith("INDEPENDENT LIVE NFL RESEARCH")
                 or upper.startswith("MATCHUP:") or upper.startswith("KICKOFF")
                 or upper.startswith("SCOREBOARD LINE") or upper.startswith("RESEARCH RETRIEVED")
                 or upper.startswith("MARKET DATA RULE")
-                or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")
                 or upper.startswith("ESPN CURRENT PLAYER INJURIES")
                 or upper.startswith("ESPN GAME SUMMARY INJURY DATA")
                 or upper.startswith("ESPN RECENT TEAM NEWS")):
             priority = 0
-        elif (upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS") or upper.startswith("TEAM STATS:")):
+        elif (upper.startswith("PLAYER LOGS")
+                or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")):
             priority = 1
-        elif upper.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
+        elif (upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS")
+                or upper.startswith("TEAM STATS:")):
             priority = 2
-        else:
+        elif upper.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
             priority = 3
+        else:
+            priority = 4
         prioritized.append((priority, index, section))
 
     prioritized.sort(key=lambda item: (item[0], item[1]))
