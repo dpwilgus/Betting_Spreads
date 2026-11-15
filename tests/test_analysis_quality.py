@@ -77,6 +77,23 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertEqual(data["picks"][0]["market_line"], "Over 89.5 (-110) — DraftKings")
         self.assertEqual(data["model_only_picks"], [])
 
+    def test_completely_empty_model_response_is_rejected(self):
+        analysis = {
+            "summary": "No supported opportunities found.",
+            "game_script": "Insufficient evidence to assess this matchup.",
+            "picks": [],
+            "sneaky_props": [],
+            "touchdown_scorers": [],
+            "injury_impact": [],
+            "underdog_analysis": [],
+            "data_gaps": ["No player game logs or market prices were available."],
+        }
+        with self.assertRaisesRegex(RuntimeError, "contains no usable matchup analysis"):
+            _validate_analysis(
+                analysis,
+                team_names=("San Francisco 49ers", "Dallas Cowboys"),
+            )
+
     def test_missing_underdog_assessment_does_not_discard_matchup(self):
         analysis = {
             "summary": "Test", "game_script": "Test",
