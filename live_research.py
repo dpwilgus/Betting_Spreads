@@ -335,10 +335,14 @@ def _compact_team_stats(data: dict[str, Any]) -> dict[str, Any]:
         selected = []
         for stat in category.get("stats", []):
             if stat.get("name") in allowed:
-                selected.append({
+                item = {
                     "name": stat.get("name"),
                     "value": stat.get("displayValue", stat.get("value")),
-                })
+                }
+                rank = stat.get("rankDisplayValue", stat.get("rank"))
+                if rank not in (None, ""):
+                    item["rank"] = rank
+                selected.append(item)
         if selected:
             result["categories"][category_name] = selected
     return result
