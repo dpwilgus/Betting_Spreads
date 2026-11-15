@@ -365,6 +365,7 @@ def _call_provider(
 def generate_json(
     system_prompt: str, user_prompt: str,
     validator: Callable[[dict[str, Any]], None] | None = None,
+    prompt_factory: Callable[[str], tuple[str, str]] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Try configured providers in order; retry transient failures with bounded waits, then fall back."""
     configured = [
@@ -376,9 +377,12 @@ def generate_json(
 
     failures = []
     for provider, key in configured:
+        provider_system, provider_user = (
+            prompt_factory(provider.name) if prompt_factory else (system_prompt, user_prompt)
+        )
         for attempt in range(3):
             try:
-                result = _call_provider(provider, key, system_prompt, user_prompt)
+                result = _call_provider(provider, key, provider_system, provider_user)
                 if not isinstance(result, dict):
                     raise RuntimeError("The AI response was not a JSON object.")
                 if validator is not None:
