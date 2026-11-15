@@ -983,7 +983,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "TDs: compare season scoring, carries/targets per game and recent scoring. "
         "Passing TDs do not qualify a QB for anytime TD; require a rushing TD or 3+ rush attempts/game. "
         "Never select a QB solely for starting. Injury impacts: never make the injured player their own beneficiary. Cover offensive starters, key defensive absences and verified role/QB news; assess downstream skill-player and same-position replacements, but don't assume benefits. Use affected_player='Team unit' if no individual is supported; defensive absences should assess opposing researched offense. "
-        "Compare pass/rush/points defense separately; no 'elite' label without current supplied rankings or clear metrics. Verify neutral/international venue, QB experience and former-team ties. Heritage narratives are context, never a quantified performance edge alone. Use dated news, separating fact from inference. "
+        "Compare pass/rush/points defense separately; no 'elite' label without current metrics. Verify neutral/international venue and QB experience/former-team ties. Add sourced QB-reunion or heritage/international News impacts; use affected_player='Team unit' if no individual, narrative only, no assumed boost. "
         "Questionable players are conditional only (confidence <=6) with explicit risk disclosure. "
         "For Questionable TD candidates, risk_factors must start 'Questionable:' "
         "(e.g. 'Questionable: active status unconfirmed'). "
