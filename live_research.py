@@ -1551,7 +1551,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     if not report_date or news_date < report_date:
                         continue
                     injury_statuses.remove(report)
-                    sections.append(
+                    news_sections.append(
                         f"CONFIRMED STARTING QB ROLE — {team_name}: {player_name} "
                         f"named to start in dated team news ({confirmation['published']}): "
                         f"{confirmation['headline']}. This supersedes the older {report.get('status')} "
