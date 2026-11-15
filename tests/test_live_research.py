@@ -1147,8 +1147,6 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(data["picks"][2]["data_quality"], "Limited")
         self.assertTrue(any("period-specific prop" in gap for gap in gaps))
 
-if __name__ == "__main__":
-    unittest.main()
 
     def test_empty_analysis_rejects_injury_impact_from_outside_matchup(self):
         from ai_analysis import _validate_analysis
@@ -1211,3 +1209,6 @@ if __name__ == "__main__":
             rosters={"Dallas Cowboys": ["Starter One", "Backup One"]},
             team_names=("San Francisco 49ers", "Dallas Cowboys"),
         )
+
+if __name__ == "__main__":
+    unittest.main()
