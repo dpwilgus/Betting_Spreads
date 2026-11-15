@@ -15,9 +15,6 @@ import certifi
 HEADERS = {"User-Agent": "Betting-Spreads/3.0 (independent NFL research)"}
 
 SUMMARY_MAX_CHARS = 12000
-PLAYER_GAMELOG_FAILURE_LIMIT = 4
-_player_gamelog_failures = 0
-_player_gamelogs_disabled = False
 
 ESPN_SUMMARY = (
     "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
@@ -935,14 +932,12 @@ def _team_news(team_id: str) -> dict[str, Any]:
 
 def reset_research_cache() -> None:
     """Clear per-slate ESPN caches so a later run never reuses stale data."""
-    global _player_gamelog_failures, _player_gamelogs_disabled
     _team_statistics.cache_clear()
     _team_news.cache_clear()
     _team_roster_players.cache_clear()
     _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
-    _player_gamelog_failures = 0
     _player_gamelogs_disabled = False
 
 def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
@@ -1041,16 +1036,6 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             )
                         player_records = []
                         for player in selected_players:
-                            global _player_gamelog_failures, _player_gamelogs_disabled
-                            if _player_gamelogs_disabled:
-                                player_records.append({
-                                    "player": player["name"],
-                                    "position": player["position"],
-                                    "research_reason": player.get("research_reason", ""),
-                                    "game_log_unavailable": "skipped after repeated ESPN player-log errors",
-                                })
-                                continue
-                            gamelog_url = (
                                 "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
                                 f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
                             )
@@ -1064,15 +1049,11 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                     "research_reason": player.get("research_reason", ""),
                                     "usage_and_recent_stats": _compact_player_gamelog(gamelog, player["position"]),
                                 })
-                                _player_gamelog_failures = 0
                                 sources.append({
                                     "title": f"ESPN player game log — {player['name']}",
                                     "url": gamelog_url,
                                 })
                             except Exception as exc:
-                                _player_gamelog_failures += 1
-                                if _player_gamelog_failures >= PLAYER_GAMELOG_FAILURE_LIMIT:
-                                    _player_gamelogs_disabled = True
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
@@ -1242,14 +1223,12 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
 
 def reset_research_cache() -> None:
     """Clear per-slate ESPN caches so a later run never reuses stale data."""
-    global _player_gamelog_failures, _player_gamelogs_disabled
     _team_statistics.cache_clear()
     _team_news.cache_clear()
     _team_roster_players.cache_clear()
     _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
-    _player_gamelog_failures = 0
     _player_gamelogs_disabled = False
 
 def _compact_injury_prompt_reports(
@@ -1409,10 +1388,9 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                             defensive_players = _select_defensive_research_players(
                                 roster_players, depth_chart
                             )
-                            special_teams_players = _select_special_teams_research_players(roster_players)
                             selected_ids = {str(player.get("id")) for player in selected_players}
                             selected_players.extend(
-                                player for player in defensive_players + special_teams_players
+                                player for player in defensive_players
                                 if str(player.get("id")) not in selected_ids
                             )
                             selection_basis = (
@@ -1424,7 +1402,6 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 roster_players, injury_reports=team_injuries, team_name=team_name
                             )
                             selected_players.extend(
-                                _select_special_teams_research_players(roster_players)
                             )
                             selection_basis = (
                                 f"roster-order offensive fallback; depth chart unavailable "
@@ -1440,16 +1417,6 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         ]
                         player_records = []
                         for player in selected_players:
-                            global _player_gamelog_failures, _player_gamelogs_disabled
-                            if _player_gamelogs_disabled:
-                                player_records.append({
-                                    "player": player["name"],
-                                    "position": player["position"],
-                                    "research_reason": player.get("research_reason", ""),
-                                    "game_log_unavailable": "skipped after repeated ESPN player-log errors",
-                                })
-                                continue
-                            gamelog_url = (
                                 "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
                                 f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
                             )
@@ -1465,15 +1432,11 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                         gamelog, player["position"]
                                     ),
                                 })
-                                _player_gamelog_failures = 0
                                 sources.append({
                                     "title": f"ESPN player game log — {player['name']}",
                                     "url": gamelog_url,
                                 })
                             except Exception as exc:
-                                _player_gamelog_failures += 1
-                                if _player_gamelog_failures >= PLAYER_GAMELOG_FAILURE_LIMIT:
-                                    _player_gamelogs_disabled = True
                                 player_records.append({
                                     "player": player["name"],
                                     "position": player["position"],
