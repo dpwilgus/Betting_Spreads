@@ -341,7 +341,7 @@ class AnalysisQualityTests(unittest.TestCase):
             + ("D" * 1000),
         ]
         prompt, truncated = _bounded_research_text(
-            "\\n\\n".join(research), max_chars=2300
+            "\n\n".join(research), max_chars=2300
         )
 
         self.assertTrue(truncated)
