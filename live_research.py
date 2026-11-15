@@ -915,6 +915,35 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
     )
     return _compact_team_stats(_get_json(endpoint_url, timeout=15))
 
+def _confirmed_starting_qb_news(
+    player_name: str,
+    articles: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Find dated team-news evidence explicitly saying this QB will start."""
+    for article in articles:
+        if not isinstance(article, dict):
+            continue
+        headline = str(article.get("headline") or article.get("title") or "")
+        description = str(article.get("description") or article.get("summary") or "")
+        text = f"{headline} {description}"
+        if not re.search(re.escape(player_name), text, flags=re.I):
+            continue
+        if re.search(
+            r"\b(?:will start|to start|named (?:the )?starter|named .*starting quarterback|starting quarterback|starting QB|start Sunday|start this week)\b",
+            text,
+            flags=re.I,
+        ):
+            published = str(article.get("published") or article.get("lastModified") or "")
+            if published:
+                return {
+                    "headline": headline,
+                    "published": published,
+                    "url": str(article.get("url") or ""),
+                    "description": description,
+                }
+    return None
+
+
 @lru_cache(maxsize=32)
 def _team_news(team_id: str) -> dict[str, Any]:
     """Fetch the latest ESPN team news headlines for roster and quarterback developments."""
@@ -1299,6 +1328,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     injury_statuses: list[dict[str, Any]] = []
     rosters: dict[str, list[str]] = {}
     selected_player_candidates: dict[str, list[dict[str, str]]] = {}
+    news_articles_by_team: dict[str, list[dict[str, Any]]] = {}
 
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
@@ -1482,6 +1512,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                 try:
                     team_news = _team_news(team_id)
                     articles = team_news.get("articles", [])
+                    news_articles_by_team[team_name] = articles if isinstance(articles, list) else []
                     if articles:
                         news_sections.append(
                             f"ESPN RECENT TEAM NEWS — {team_name}: "
@@ -1494,6 +1525,37 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                 except Exception as exc:
                     sections.append(
                         f"ESPN recent team news unavailable for {team_name}: {type(exc).__name__}"
+                    )
+
+            # A newer, dated team announcement that a QB will start supersedes
+            # an older injury-feed designation; preserve both sources in research.
+            for team_name, candidates in selected_player_candidates.items():
+                for candidate in candidates:
+                    if str(candidate.get("position") or "").upper() != "QB":
+                        continue
+                    player_name = str(candidate.get("name") or "")
+                    confirmation = _confirmed_starting_qb_news(
+                        player_name, news_articles_by_team.get(team_name, [])
+                    )
+                    if not confirmation:
+                        continue
+                    report = next((
+                        item for item in injury_statuses
+                        if item.get("team") == team_name
+                        and str(item.get("player", "")).casefold() == player_name.casefold()
+                    ), None)
+                    if not report:
+                        continue
+                    news_date = confirmation["published"][:10]
+                    report_date = str(report.get("report_date") or "")[:10]
+                    if not report_date or news_date < report_date:
+                        continue
+                    injury_statuses.remove(report)
+                    sections.append(
+                        f"CONFIRMED STARTING QB ROLE — {team_name}: {player_name} "
+                        f"named to start in dated team news ({confirmation['published']}): "
+                        f"{confirmation['headline']}. This supersedes the older {report.get('status')} "
+                        f"injury-feed entry dated {report_date}."
                     )
 
             for team_id, team_name in teams.items():
