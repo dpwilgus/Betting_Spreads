@@ -176,6 +176,8 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         research_chars = analysis.get("research_prompt_characters")
         if research_truncated is True:
             prompt_status = f"TRUNCATED ({research_chars:,} chars)" if isinstance(research_chars, int) else "TRUNCATED"
+        elif analysis.get("research_compacted_for_prompt") is True:
+            prompt_status = f"COMPACTED ({research_chars:,} chars)" if isinstance(research_chars, int) else "COMPACTED"
         elif research_truncated is False:
             prompt_status = f"complete ({research_chars:,} chars)" if isinstance(research_chars, int) else "complete"
         else:
@@ -268,7 +270,36 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         next_pick_row, "GAME-LEVEL BETS (FULL GAME / 1ST HALF / 1ST QUARTER)", game_picks,
         "No game-level bets met the evidence threshold for this matchup."
     )
-    td_start = max(16, next_pick_row + 1)
+    underdog_rows = analysis.get("underdog_analysis", [])
+    underdog_start = max(16, next_pick_row + 1)
+    sheet.cell(underdog_start, 1, "UNDERDOG / UPSET WATCH")
+    sheet.cell(underdog_start, 1).font = white_bold
+    sheet.cell(underdog_start, 1).fill = navy
+    sheet.merge_cells(start_row=underdog_start, start_column=1, end_row=underdog_start, end_column=8)
+    underdog_headers = [
+        "Underdog", "Spread", "Cover Probability", "Outright Upset Probability",
+        "Assessment", "Rationale", "Risk Factors", "Evidence Quality",
+    ]
+    for col, value in enumerate(underdog_headers, 1):
+        _style_header(sheet.cell(underdog_start + 1, col, value))
+    if not underdog_rows:
+        sheet.merge_cells(start_row=underdog_start + 2, start_column=1, end_row=underdog_start + 2, end_column=8)
+        sheet.cell(underdog_start + 2, 1, "No supported underdog assessment was returned; do not infer a value bet.")
+        sheet.cell(underdog_start + 2, 1).alignment = Alignment(wrap_text=True)
+    for row_num, dog in enumerate(underdog_rows, underdog_start + 2):
+        values = [
+            dog.get("underdog", ""), dog.get("spread", "Not verified"),
+            f"{float(dog.get('cover_probability', 0)):.1f}%",
+            f"{float(dog.get('upset_probability', 0)):.1f}%",
+            dog.get("recommendation", "Pass"), dog.get("rationale", ""),
+            dog.get("risk_factors", ""), dog.get("evidence_quality", "Limited"),
+        ]
+        for col, value in enumerate(values, 1):
+            cell = sheet.cell(row_num, col, value)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = Border(bottom=thin_gray)
+        sheet.row_dimensions[row_num].height = 62
+    td_start = underdog_start + max(len(underdog_rows), 1) + 4
     sheet.cell(td_start, 1, "ANYTIME TOUCHDOWN SCORERS")
     sheet.cell(td_start, 1).font = white_bold
     sheet.cell(td_start, 1).fill = navy
@@ -758,7 +789,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 8
+                            and cached.get("analysis_version") == 9
                             and bool(cached.get("ai_provider"))
                         )
                         if is_complete:
