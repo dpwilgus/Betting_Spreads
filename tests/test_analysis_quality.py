@@ -60,18 +60,54 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertEqual(data["picks"][0]["market_line"], "Over 89.5 (-110) — DraftKings")
         self.assertEqual(data["model_only_picks"], [])
 
-    def test_supplied_spread_requires_underdog_analysis(self):
+    def test_missing_underdog_assessment_does_not_discard_matchup(self):
         analysis = {
             "summary": "Test", "game_script": "Test",
             "picks": [], "touchdown_scorers": [], "injury_impact": [],
             "data_gaps": [], "underdog_analysis": [],
         }
-        with self.assertRaisesRegex(RuntimeError, "requires an explicit underdog"):
-            _validate_analysis(
-                analysis,
-                team_names=("New England Patriots", "Detroit Lions"),
-                require_underdog=True,
-            )
+        _validate_analysis(
+            analysis, team_names=("New England Patriots", "Detroit Lions"),
+            require_underdog=True,
+        )
+        self.assertEqual(analysis["picks"], [])
+        self.assertEqual(analysis["underdog_analysis"], [])
+        self.assertTrue(any("Underdog assessment unavailable" in gap for gap in analysis["data_gaps"]))
+
+    def test_multiple_underdog_rows_keep_one_normalized_row(self):
+        analysis = {
+            "summary": "Test", "game_script": "Test", "picks": [],
+            "touchdown_scorers": [], "injury_impact": [], "data_gaps": [],
+            "underdog_analysis": [
+                {"underdog": "New England Patriots", "spread": "+2.5",
+                 "cover_probability": "54", "upset_probability": "38",
+                 "recommendation": "monitor", "rationale": "Pressure matchup",
+                 "risk_factors": "Turnover variance", "evidence_quality": "medium"},
+                {"underdog": "Detroit Lions", "spread": "-2.5",
+                 "cover_probability": 60, "upset_probability": 40,
+                 "recommendation": "Pass", "rationale": "Other row",
+                 "risk_factors": "Risk", "evidence_quality": "Strong"},
+            ],
+        }
+        _validate_analysis(analysis, team_names=("New England Patriots", "Detroit Lions"))
+        self.assertEqual(len(analysis["underdog_analysis"]), 1)
+        self.assertEqual(analysis["underdog_analysis"][0]["recommendation"], "Monitor")
+        self.assertEqual(analysis["underdog_analysis"][0]["evidence_quality"], "Moderate")
+
+    def test_invalid_underdog_row_is_dropped_without_rejecting_matchup(self):
+        analysis = {
+            "summary": "Test", "game_script": "Test", "picks": [],
+            "touchdown_scorers": [], "injury_impact": [], "data_gaps": [],
+            "underdog_analysis": [{
+                "underdog": "Not a matchup team", "spread": "+2.5",
+                "cover_probability": 54, "upset_probability": 38,
+                "recommendation": "Maybe", "rationale": "Reason",
+                "risk_factors": "Risk", "evidence_quality": "Moderate",
+            }],
+        }
+        _validate_analysis(analysis, team_names=("New England Patriots", "Detroit Lions"))
+        self.assertEqual(analysis["underdog_analysis"], [])
+        self.assertTrue(any("Underdog assessment unavailable" in gap for gap in analysis["data_gaps"]))
 
     def test_underdog_analysis_is_validated(self):
         analysis = {
