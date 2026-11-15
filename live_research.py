@@ -1149,44 +1149,6 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     sections.append(
                         f"ESPN {endpoint_name} endpoint unavailable for {team_name}: {exc}"
                     )
-            core_injuries_found = False
-            # Core API includes current reports and older injured-reserve records.
-            for team_id, team_name in teams.items():
-                core_url = (
-                    "https://sports.core.api.espn.com/v2/sports/football/"
-                    f"leagues/nfl/teams/{team_id}/injuries?limit=100"
-                )
-                try:
-                    team_injuries = _core_team_injuries(team_id)
-                    if team_injuries:
-                        core_injuries_found = True
-                        for report in team_injuries:
-                            if isinstance(report, dict) and report.get("player") and report.get("status"):
-                                injury_statuses.append({
-                                    "player": str(report["player"]),
-                                    "position": str(report.get("position") or ""),
-                                    "team": str(team_name),
-                                    "status": str(report["status"]),
-                                    "report_date": str(report.get("report_date") or ""),
-                                    "comment": str(report.get("comment") or ""),
-                                })
-                        injury_sections.append(
-                            f"ESPN CURRENT PLAYER INJURIES — {team_name}: "
-                            + json.dumps(
-                                _compact_injury_prompt_reports(team_injuries),
-                                ensure_ascii=False,
-                                separators=(",", ":"),
-                            )
-                        )
-                    sources.append({
-                        "title": f"ESPN Core API player injuries — {team_name}",
-                        "url": core_url,
-                    })
-                except Exception as exc:
-                    sections.append(
-                        f"ESPN Core API injury data unavailable for {team_name}: "
-                        f"{type(exc).__name__}"
-                    )
             # Keep game-summary injuries as supplemental evidence even when
             # the Core API returns injuries for only one of the two teams.
             summary_injuries = _compact_injuries(data.get("injuries", []))
