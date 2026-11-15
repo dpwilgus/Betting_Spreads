@@ -3,11 +3,84 @@ import unittest
 from ai_analysis import (
     _apply_independent_injury_statuses,
     _deduplicate_correlated_game_picks,
+    _separate_unverified_player_props,
     _validate_analysis,
 )
 
 
 class AnalysisQualityTests(unittest.TestCase):
+    def _prop_pick(self, line):
+        return {
+            "market_type": "Player Prop",
+            "player_or_team": "Jahmyr Gibbs",
+            "bet_description": f"Over {line} rushing yards",
+            "market_line": "Not verified",
+            "play_threshold": f"Over {line}",
+        }
+
+    def _gibbs_quote(self, point, side="Over", market_key="player_rush_yds"):
+        return {
+            "player": "Jahmyr Gibbs", "market": "rushing yards",
+            "market_key": market_key, "side": side, "point": point,
+            "line": f"{side} {point}", "price": "-110",
+            "sportsbook": "DraftKings", "source_url": "https://the-odds-api.com/",
+            "retrieved_at": "2026-11-15T12:00:00+00:00",
+        }
+
+    def test_player_prop_quote_with_different_threshold_is_not_verified(self):
+        data = {"picks": [self._prop_pick("85.5")], "sneaky_props": []}
+        research = {"verified_player_prop_markets": [self._gibbs_quote("89.5")]}
+        gaps = _separate_unverified_player_props(data, research)
+        self.assertEqual(data["picks"], [])
+        self.assertEqual(len(data["model_only_picks"]), 1)
+        self.assertIn("exact player market, side and line", gaps[0])
+
+    def test_player_prop_requires_exact_side_and_market_key(self):
+        data = {"picks": [self._prop_pick("89.5")], "sneaky_props": []}
+        research = {"verified_player_prop_markets": [
+            self._gibbs_quote("89.5", side="Under")
+        ]}
+        _separate_unverified_player_props(data, research)
+        self.assertEqual(data["picks"], [])
+        self.assertEqual(len(data["model_only_picks"]), 1)
+
+        data = {"picks": [self._prop_pick("89.5")], "sneaky_props": []}
+        research = {"verified_player_prop_markets": [
+            self._gibbs_quote("89.5", market_key="player_reception_yds")
+        ]}
+        _separate_unverified_player_props(data, research)
+        self.assertEqual(data["picks"], [])
+        self.assertEqual(len(data["model_only_picks"]), 1)
+
+    def test_exact_player_prop_quote_remains_verified(self):
+        data = {"picks": [self._prop_pick("89.5")], "sneaky_props": []}
+        research = {"verified_player_prop_markets": [self._gibbs_quote("89.5")]}
+        _separate_unverified_player_props(data, research)
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["picks"][0]["market_line"], "Over 89.5 (-110) — DraftKings")
+        self.assertEqual(data["model_only_picks"], [])
+
+    def test_underdog_analysis_is_validated(self):
+        analysis = {
+            "summary": "Balanced matchup", "game_script": "Competitive game",
+            "picks": [], "touchdown_scorers": [], "injury_impact": [],
+            "data_gaps": [],
+            "underdog_analysis": [{
+                "underdog": "New England Patriots", "spread": "+2.5",
+                "cover_probability": 54, "upset_probability": 38,
+                "recommendation": "Monitor", "rationale": "Pass rush creates matchup pressure",
+                "risk_factors": "Turnover variance", "evidence_quality": "Moderate",
+            }],
+        }
+        _validate_analysis(
+            analysis, team_names=("New England Patriots", "Detroit Lions")
+        )
+        analysis["underdog_analysis"][0]["upset_probability"] = 120
+        with self.assertRaisesRegex(RuntimeError, "invalid underdog"):
+            _validate_analysis(
+                analysis, team_names=("New England Patriots", "Detroit Lions")
+            )
+
     def test_same_team_moneyline_and_spread_keep_only_higher_confidence_pick(self):
         moneyline = {
             "rank": 1, "market_type": "Game Prop", "player_or_team": "Detroit Lions",
