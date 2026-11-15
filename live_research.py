@@ -1509,24 +1509,39 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     )
                     if not confirmation:
                         continue
-                    report = next((
+                    matching_reports = [
                         item for item in injury_statuses
                         if item.get("team") == team_name
                         and str(item.get("player", "")).casefold() == player_name.casefold()
-                    ), None)
-                    if not report:
+                    ]
+                    if not matching_reports:
                         continue
                     news_date = confirmation["published"][:10]
-                    report_date = str(report.get("report_date") or "")[:10]
-                    if not report_date or news_date < report_date:
+                    superseded_reports = [
+                        item for item in matching_reports
+                        if str(item.get("report_date") or "")[:10]
+                        and news_date >= str(item.get("report_date") or "")[:10]
+                    ]
+                    if not superseded_reports:
                         continue
-                    injury_statuses.remove(report)
+                    # A feed can contain duplicate entries for the same player.
+                    # Remove every dated entry superseded by the newer confirmation,
+                    # rather than leaving a stale duplicate active downstream.
+                    superseded_ids = {id(item) for item in superseded_reports}
+                    injury_statuses[:] = [
+                        item for item in injury_statuses if id(item) not in superseded_ids
+                    ]
                     confirmed_starting_qbs[team_name] = player_name
+                    latest_report = max(
+                        superseded_reports,
+                        key=lambda item: str(item.get("report_date") or ""),
+                    )
                     news_sections.append(
                         f"CONFIRMED STARTING QB ROLE — {team_name}: {player_name} "
                         f"named to start in dated team news ({confirmation['published']}): "
-                        f"{confirmation['headline']}. This supersedes the older {report.get('status')} "
-                        f"injury-feed entry dated {report_date}."
+                        f"{confirmation['headline']}. This supersedes the older "
+                        f"{latest_report.get('status')} injury-feed entry dated "
+                        f"{latest_report.get('report_date')}."
                     )
 
             if confirmed_starting_qbs:
