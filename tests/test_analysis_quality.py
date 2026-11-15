@@ -311,6 +311,30 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertEqual(analysis["picks"][0]["confidence"], 6)
         self.assertIn("Questionable", analysis["picks"][0]["risk_factors"])
 
+    def test_prompt_trimming_interleaves_player_logs_from_both_teams(self):
+        research = [
+            "INDEPENDENT LIVE NFL RESEARCH",
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — San Francisco 49ers (starter): "
+            + ("A" * 1000),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — San Francisco 49ers (backup): "
+            + ("B" * 1000),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Dallas Cowboys (starter): "
+            + ("C" * 1000),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Dallas Cowboys (backup): "
+            + ("D" * 1000),
+        ]
+        prompt, truncated = _bounded_research_text(
+            "\\n\\n".join(research), max_chars=2300
+        )
+
+        self.assertTrue(truncated)
+        self.assertIn("San Francisco 49ers", prompt)
+        self.assertIn("Dallas Cowboys", prompt)
+        self.assertIn("A" * 1000, prompt)
+        self.assertIn("C" * 1000, prompt)
+        self.assertNotIn("B" * 1000, prompt)
+        self.assertNotIn("D" * 1000, prompt)
+
 
 if __name__ == "__main__":
     unittest.main()
