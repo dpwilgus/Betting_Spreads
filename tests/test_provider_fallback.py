@@ -470,7 +470,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("touchdown_scorers", user_prompt)
         self.assertIn("underdog_analysis", user_prompt)
         self.assertIn("Never default to the favorite", system_prompt)
-        self.assertIn("no 'elite' label", system_prompt)
+        self.assertIn("unit elite", system_prompt)
         self.assertIn("heritage", system_prompt)
         self.assertIn("summary <= 90 words", user_prompt)
         self.assertIn("statistical_rationale <= 24 words", user_prompt)
