@@ -565,6 +565,15 @@ def _validate_analysis(
         upset = float(row.get("upset_probability", -1))
         if not 0 <= cover <= 100 or not 0 <= upset <= 100:
             raise RuntimeError("AI returned invalid underdog cover or upset probability.")
+        if not all(row.get(field) not in (None, "") for field in (
+            "underdog", "spread", "recommendation", "rationale", "risk_factors",
+            "evidence_quality",
+        )):
+            raise RuntimeError("AI underdog analysis is missing a required field.")
+        if row.get("recommendation") not in (
+            "Bet underdog spread", "Upset moneyline", "Monitor", "Pass"
+        ):
+            raise RuntimeError("AI returned an unsupported underdog recommendation.")
         if team_names is not None and _normalize_name(row.get("underdog", "")) not in {
             _normalize_name(team) for team in team_names
         }:
@@ -970,7 +979,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Pass 2: longest-play, combo, first TD scorer, first-half TD opportunities, and supported 1Q/1H game markets. First-half TDs are research-only unless a feed supplies a real quote; do not invent markets. Q1 passing yards only if supplied. No sack/tackle/kicking/field-goal bets; use defensive sacks/tackles only to rate opposing offenses. Alternates/ladders need distinct evidence; never invent prices. "
         "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
         "Do not pair a team's moneyline and spread; spread probability cannot exceed its moneyline probability. Never call a veteran QB inexperienced solely due to a recent trade. "
-        "Assess the underdog's cover and outright-upset probabilities separately for every supplied spread; recommend only a demonstrable priced edge, otherwise Monitor/Pass. Never force an underdog bet or analyze only the favorite. "
+        "Assess underdog cover and upset probabilities separately for each spread; only a priced edge earns Bet underdog spread/Upset moneyline, otherwise Monitor/Pass. Include actionable dog bets in picks; never force one. "
         "TDs: compare season scoring, carries/targets per game and recent scoring. "
         "Passing TDs do not qualify a QB for anytime TD; require a rushing TD or 3+ rush attempts/game. "
         "Never select a QB solely for starting. Injury impacts: never make the injured player their own beneficiary. Cover offensive starters, key defensive absences and verified role/QB news; assess downstream skill-player and same-position replacements, but don't assume benefits. Use affected_player='Team unit' if no individual is supported; defensive absences should assess opposing researched offense. "
