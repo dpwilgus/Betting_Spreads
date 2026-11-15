@@ -31,11 +31,17 @@ def _compact_matchup_evidence(section: str) -> str:
 
 
 def _bounded_research_text(
-    research_text: str, max_chars: int = MAX_RESEARCH_PROMPT_CHARS
+    research_text: str, max_chars: int | None = None
 ) -> tuple[str, bool]:
-    """Keep priority evidence within a provider-specific character budget."""
+    """Keep priority evidence within a provider-specific character budget.
+
+    Resolve the module default at call time so tests and runtime configuration
+    can safely override MAX_RESEARCH_PROMPT_CHARS after import.
+    """
     text = str(research_text or "")
-    max_chars = max(1000, int(max_chars))
+    if max_chars is None:
+        max_chars = MAX_RESEARCH_PROMPT_CHARS
+    max_chars = max(100, int(max_chars))
     if len(text) <= max_chars:
         return text, False
 
