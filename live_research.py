@@ -1435,7 +1435,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                                 f"athletes/{player['id']}/gamelog?season={datetime.now(timezone.utc).year}&seasontype=2"
                             )
                             try:
-                                gamelog = _player_gamelog(
+                                gamelog = _fetch_player_gamelog(
                                     player["id"], datetime.now(timezone.utc).year
                                 )
                                 player_records.append({
