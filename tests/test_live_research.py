@@ -478,6 +478,59 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(result["research_text"].count('"game_log_unavailable"'), 8)
         reset_research_cache()
 
+    def test_newer_confirmed_starting_qb_news_overrides_older_injury_status(self):
+        summary = {
+            "header": {
+                "competitions": [{
+                    "competitors": [
+                        {"team": {"id": "1", "displayName": "Away"}},
+                        {"team": {"id": "2", "displayName": "Home"}},
+                    ]
+                }]
+            }
+        }
+        roster = (
+            {"id": "10", "name": "Veteran QB", "position": "QB"},
+        )
+        with patch("live_research._get_json", return_value=summary), patch(
+            "live_research._team_roster_players", return_value=roster
+        ), patch(
+            "live_research._team_depth_chart", return_value={}
+        ), patch(
+            "live_research._player_gamelog",
+            return_value={"games_available": 1, "season_totals": {"Regular Season Stats": {}}},
+        ), patch(
+            "live_research._core_team_injuries",
+            side_effect=[
+                [{"player": "Veteran QB", "position": "QB", "status": "Out",
+                  "report_date": "2026-11-12", "comment": "Older status"}],
+                [],
+            ],
+        ), patch(
+            "live_research._team_news",
+            side_effect=[
+                {"articles": [{
+                    "headline": "Veteran QB to start Sunday",
+                    "description": "Coach confirms the veteran will start.",
+                    "published": "2026-11-13T16:00:00Z",
+                    "url": "https://example.test/qb-news",
+                }]},
+                {"articles": []},
+            ],
+        ), patch(
+            "live_research._team_statistics", return_value={"team": "Team"}
+        ):
+            result = collect_game_research({
+                "event_id": "event-1", "Away Team": "Away", "Home Team": "Home",
+                "away_team_id": "1", "home_team_id": "2",
+            })
+
+        self.assertFalse(any(
+            item.get("player") == "Veteran QB" for item in result["injury_statuses"]
+        ))
+        self.assertIn("CONFIRMED STARTING QB ROLE", result["research_text"])
+        self.assertIn("Veteran QB to start Sunday", result["research_text"])
+
     def test_transient_player_log_error_is_retried_once(self):
         from live_research import _fetch_player_gamelog
 
