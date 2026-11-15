@@ -1,6 +1,7 @@
 import unittest
 
 from ai_analysis import (
+    _bounded_research_text,
     _apply_independent_injury_statuses,
     _deduplicate_correlated_game_picks,
     _separate_unverified_player_props,
@@ -26,6 +27,22 @@ class AnalysisQualityTests(unittest.TestCase):
             "sportsbook": "DraftKings", "source_url": "https://the-odds-api.com/",
             "retrieved_at": "2026-11-15T12:00:00+00:00",
         }
+
+
+    def test_provider_specific_research_budget_is_respected(self):
+        research = (
+            "HEADER: current game\n\n"
+            "INJURIES: current injury report\n\n"
+            "PLAYER LOGS: current player usage\n\n"
+            "TEAM STATS: current team metrics\n\n"
+            + ("OPTIONAL HISTORICAL RECAP: old game details\n\n" * 200)
+        )
+        bounded, truncated = _bounded_research_text(research, max_chars=1200)
+        self.assertLessEqual(len(bounded), 1200)
+        self.assertTrue(truncated)
+        self.assertIn("HEADER", bounded)
+        self.assertIn("INJURIES:", bounded)
+        self.assertIn("PLAYER LOGS", bounded)
 
     def test_player_prop_quote_with_different_threshold_is_not_verified(self):
         data = {"picks": [self._prop_pick("85.5")], "sneaky_props": []}
