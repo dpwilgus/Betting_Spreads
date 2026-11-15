@@ -55,7 +55,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
                 or upper.startswith("ESPN GAME SUMMARY INJURY DATA")
                 or upper.startswith("ESPN RECENT TEAM NEWS")):
             priority = 0
-        elif upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS"):
+        elif (upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS") or upper.startswith("TEAM STATS:")):
             priority = 1
         elif upper.startswith("ESPN MATCHUP, PLAYER, INJURY, MARKET"):
             priority = 2
@@ -68,7 +68,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
     used = 0
     essential_omitted = False
     optional_omitted = False
-    marker = "[Essential research truncated: some player, injury, news or team-stat evidence did not fit.]"
+    marker = "[Research truncated.]"
     budget = max(0, MAX_RESEARCH_PROMPT_CHARS - len(marker) - 2)
     for priority, _, section in prioritized:
         separator = 2 if kept else 0
