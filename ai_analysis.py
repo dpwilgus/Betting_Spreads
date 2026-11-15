@@ -878,7 +878,7 @@ def _separate_unverified_player_props(
             pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
             model_only.append(pick)
             gaps.append(
-                f"{pick.get('player_or_team')} {pick.get('bet_description')}: no verified sportsbook line matched the exact player market, side and threshold; moved to model-only leans."
+                f"{pick.get('player_or_team')} {pick.get('bet_description')}: exact player market, side and line were not verified; no verified sportsbook line matched the requested threshold; moved to model-only leans."
             )
     data["picks"] = actionable
     data["model_only_picks"] = model_only
