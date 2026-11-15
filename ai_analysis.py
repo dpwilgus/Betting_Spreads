@@ -29,10 +29,13 @@ def _compact_matchup_evidence(section: str) -> str:
     return prefix + ": " + json.dumps(compact, ensure_ascii=False, separators=(",", ":"))
 
 
-def _bounded_research_text(research_text: str) -> tuple[str, bool]:
-    """Keep every player log, injury, news and team-stat section before optional recaps."""
+def _bounded_research_text(
+    research_text: str, max_chars: int = MAX_RESEARCH_PROMPT_CHARS
+) -> tuple[str, bool]:
+    """Keep priority evidence within a provider-specific character budget."""
     text = str(research_text or "")
-    if len(text) <= MAX_RESEARCH_PROMPT_CHARS:
+    max_chars = max(1000, int(max_chars))
+    if len(text) <= max_chars:
         return text, False
 
     sections = text.split("\n\n")
@@ -69,7 +72,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
     essential_omitted = False
     optional_omitted = False
     marker = "[Research truncated.]"
-    budget = max(0, MAX_RESEARCH_PROMPT_CHARS - len(marker) - 2)
+    budget = max(0, max_chars - len(marker) - 2)
     for priority, _, section in prioritized:
         separator = 2 if kept else 0
         if len(section) + separator > budget - used:
@@ -89,7 +92,7 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
             "\n\n[Optional historical matchup recap compacted; player logs, injuries, "
             "news and current team statistics were retained.]"
         )
-    return result[:MAX_RESEARCH_PROMPT_CHARS], essential_omitted
+    return result[:max_chars], essential_omitted
 
 
 ANALYSIS_SCHEMA: dict[str, Any] = {
@@ -550,6 +553,59 @@ def _filter_td_scorers_by_usage(
     return gaps
 
 
+def _sanitize_underdog_analysis(data: dict[str, Any], team_names: tuple[str, str] | None) -> None:
+    """Normalize or discard malformed underdog output without losing matchup analysis."""
+    rows = data.get("underdog_analysis", [])
+    gaps = data.setdefault("data_gaps", [])
+    if not isinstance(rows, list):
+        rows = []
+    accepted = []
+    valid_teams = {_normalize_name(team) for team in team_names} if team_names else None
+    recommendations = {
+        "bet underdog spread": "Bet underdog spread", "underdog spread": "Bet underdog spread",
+        "bet the spread": "Bet underdog spread", "upset moneyline": "Upset moneyline",
+        "underdog moneyline": "Upset moneyline", "moneyline upset": "Upset moneyline",
+        "monitor": "Monitor", "watch": "Monitor", "pass": "Pass", "no bet": "Pass",
+    }
+    qualities = {"strong": "Strong", "high": "Strong", "moderate": "Moderate",
+                 "medium": "Moderate", "limited": "Limited", "low": "Limited"}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        candidate = dict(row)
+        candidate["underdog"] = str(candidate.get("underdog") or "").strip()
+        candidate["spread"] = str(candidate.get("spread") or "").strip()
+        if not candidate["underdog"] or not candidate["spread"]:
+            continue
+        if valid_teams is not None and _normalize_name(candidate["underdog"]) not in valid_teams:
+            continue
+        try:
+            cover = float(candidate.get("cover_probability"))
+            upset = float(candidate.get("upset_probability"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= cover <= 100 and 0 <= upset <= cover):
+            continue
+        recommendation = str(candidate.get("recommendation") or "").strip().casefold()
+        quality = str(candidate.get("evidence_quality") or "").strip().casefold()
+        if recommendation not in recommendations or quality not in qualities:
+            continue
+        if not str(candidate.get("rationale") or "").strip() or not str(candidate.get("risk_factors") or "").strip():
+            continue
+        candidate.update({
+            "cover_probability": cover, "upset_probability": upset,
+            "recommendation": recommendations[recommendation],
+            "evidence_quality": qualities[quality],
+        })
+        accepted.append(candidate)
+        break
+    data["underdog_analysis"] = accepted
+    if not accepted:
+        warning = "Underdog assessment unavailable: model output was missing, incomplete, or invalid."
+        if warning not in gaps:
+            gaps.append(warning)
+
+
 def _validate_analysis(
     data: dict[str, Any],
     rosters: dict[str, list[str]] | None = None,
@@ -559,35 +615,9 @@ def _validate_analysis(
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
         raise RuntimeError("AI response is missing the matchup summary or game script.")
+    _sanitize_underdog_analysis(data, team_names)
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
-    underdog_rows = data.get("underdog_analysis")
-    if not isinstance(underdog_rows, list) or len(underdog_rows) > 1:
-        raise RuntimeError("AI underdog analysis must be a list with at most one matchup underdog.")
-    if require_underdog and not underdog_rows:
-        raise RuntimeError("A supplied spread requires an explicit underdog cover/upset assessment.")
-    if any(not isinstance(row, dict) for row in underdog_rows):
-        raise RuntimeError("AI underdog analysis rows must be objects.")
-    for row in underdog_rows:
-        cover = float(row.get("cover_probability", -1))
-        upset = float(row.get("upset_probability", -1))
-        if not 0 <= cover <= 100 or not 0 <= upset <= 100 or upset > cover:
-            raise RuntimeError("AI returned invalid underdog cover or upset probability.")
-        if not all(row.get(field) not in (None, "") for field in (
-            "underdog", "spread", "recommendation", "rationale", "risk_factors",
-            "evidence_quality",
-        )):
-            raise RuntimeError("AI underdog analysis is missing a required field.")
-        if row.get("recommendation") not in (
-            "Bet underdog spread", "Upset moneyline", "Monitor", "Pass"
-        ):
-            raise RuntimeError("AI returned an unsupported underdog recommendation.")
-        if team_names is not None and _normalize_name(row.get("underdog", "")) not in {
-            _normalize_name(team) for team in team_names
-        }:
-            raise RuntimeError("AI underdog analysis named a team outside this matchup.")
-        if row.get("evidence_quality") not in ("Strong", "Moderate", "Limited"):
-            raise RuntimeError("AI returned an unsupported underdog evidence-quality label.")
     if not isinstance(picks, list):
         raise RuntimeError("AI response betting opportunities must be a list.")
     if not isinstance(scorers, list) or len(scorers) > 5:
@@ -959,11 +989,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     )
     matchup = f"{game['Away Team']} at {game['Home Team']}"
     team_names = (str(game["Away Team"]), str(game["Home Team"]))
-    prompt_research, research_truncated = _bounded_research_text(
-        research.get("research_text", "No independent research was available.")
-    )
+    original_research = research.get("research_text", "No independent research was available.")
 
-    user_input = (
+    user_prefix = (
         f"Analyze this upcoming NFL matchup: {matchup}.\n"
         f"Kickoff: {game.get('Game Date (ET)', 'Not supplied')}.\n"
         f"ESPN game line: {game.get('Betting Line', 'Unavailable')}.\n"
@@ -1006,20 +1034,36 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "affected_team, impact_direction (Positive, Negative, or Mixed), "
         "statistical_effect, prop_market, evidence, confidence (integer 1-10), "
         "conditions. Include every listed field; use empty arrays when appropriate.\n"
-        "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n"
-        + prompt_research
     )
+
+    prompt_metadata: dict[str, tuple[bool, bool, int]] = {}
+
+    def prompts_for_provider(provider_name: str) -> tuple[str, str]:
+        # Groq's 8k TPM tier counts prompt + completion tokens. A 22k-character
+        # combined input budget leaves room for the configured 1.6k output cap.
+        combined_budget = 22000 if provider_name == "groq" else (
+            len(instructions) + len(user_prefix) + MAX_RESEARCH_PROMPT_CHARS
+        )
+        research_budget = max(1000, combined_budget - len(instructions) - len(user_prefix))
+        bounded, was_truncated = _bounded_research_text(original_research, research_budget)
+        prompt_metadata[provider_name] = (
+            was_truncated,
+            len(bounded) < len(str(original_research or "")) and not was_truncated,
+            len(bounded),
+        )
+        return instructions, user_prefix + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded
 
     rosters = research.get("rosters")
     data, provider_name = generate_json(
         instructions,
-        user_input,
+        user_prefix,
         validator=lambda result: _validate_analysis(
-            result, rosters=rosters, team_names=team_names,
-            require_underdog=bool(re.search(
-                r"[+-]\s*\d+(?:\.\d+)?", str(game.get("Betting Line") or "")
-            )),
+            result, rosters=rosters, team_names=team_names
         ),
+        prompt_factory=prompts_for_provider,
+    )
+    research_truncated, research_compacted, prompt_research_characters = prompt_metadata.get(
+        provider_name, (False, False, 0)
     )
     injury_gaps = _apply_independent_injury_statuses(
         data, research.get("injury_statuses", [])
@@ -1076,9 +1120,6 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     data["ai_provider"] = provider_name
     data["research_mode"] = "independent_espn_plus_ai"
     data["research_truncated_for_prompt"] = research_truncated
-    data["research_compacted_for_prompt"] = (
-        len(prompt_research) < len(str(research.get("research_text", "")))
-        and not research_truncated
-    )
-    data["research_prompt_characters"] = len(prompt_research)
+    data["research_compacted_for_prompt"] = research_compacted
+    data["research_prompt_characters"] = prompt_research_characters
     return data
