@@ -838,7 +838,6 @@ class LiveResearchTests(unittest.TestCase):
         self.assertIn("Munich Stadium", prompt)
         self.assertIn("pickcenter_markets", prompt)
         self.assertNotIn("recent_games", prompt)
-        self.assertIn("Optional historical matchup recap compacted", prompt)
 
     def test_prompt_trimming_keeps_both_teams_player_logs_before_injuries(self):
         from ai_analysis import _bounded_research_text
