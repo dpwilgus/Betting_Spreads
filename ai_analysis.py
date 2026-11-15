@@ -43,7 +43,10 @@ def _bounded_research_text(research_text: str) -> tuple[str, bool]:
             continue
         section = _compact_matchup_evidence(original)
         upper = section[:120].upper()
-        if (upper.startswith("INDEPENDENT LIVE NFL RESEARCH")
+        if (upper.startswith("HEADER") or upper.startswith("INJURIES:")
+                or upper.startswith("CURRENT INJURY EVIDENCE")
+                or upper.startswith("PLAYER LOGS")
+                or upper.startswith("INDEPENDENT LIVE NFL RESEARCH")
                 or upper.startswith("MATCHUP:") or upper.startswith("KICKOFF")
                 or upper.startswith("SCOREBOARD LINE") or upper.startswith("RESEARCH RETRIEVED")
                 or upper.startswith("MARKET DATA RULE")
@@ -875,7 +878,7 @@ def _separate_unverified_player_props(
             pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
             model_only.append(pick)
             gaps.append(
-                f"{pick.get('player_or_team')} {pick.get('bet_description')}: exact player market, side and line were not verified; moved to model-only leans."
+                f"{pick.get('player_or_team')} {pick.get('bet_description')}: no verified sportsbook line matched the exact player market, side and threshold; moved to model-only leans."
             )
     data["picks"] = actionable
     data["model_only_picks"] = model_only
