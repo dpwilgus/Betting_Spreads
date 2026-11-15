@@ -667,9 +667,23 @@ def _select_research_players(
     selected: list[dict[str, str]] = []
     selected_by_id: dict[str, dict[str, str]] = {}
 
+    def normalize(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+    unavailable_names = {
+        normalize(report.get("player"))
+        for report in injury_reports or []
+        if isinstance(report, dict)
+        and report.get("player")
+        and any(
+            term in str(report.get("status") or "").casefold()
+            for term in ("out", "doubtful", "injured reserve", "ir", "pup", "nfi")
+        )
+    }
+
     def add_player(athlete_id: str, reason: str) -> None:
         player = roster_by_id.get(str(athlete_id))
-        if player is None:
+        if player is None or normalize(player.get("name")) in unavailable_names:
             return
         existing = selected_by_id.get(str(athlete_id))
         if existing is not None:
@@ -681,9 +695,6 @@ def _select_research_players(
         candidate["research_reason"] = reason
         selected_by_id[str(athlete_id)] = candidate
         selected.append(candidate)
-
-    def normalize(value: Any) -> str:
-        return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
 
     def find_depth_chart_id(value: Any, wanted_name: str) -> str | None:
         if isinstance(value, dict):
@@ -741,32 +752,18 @@ def _select_research_players(
         if injured_id is None:
             injured_id = find_depth_chart_id(depth_chart or {}, injured_name)
         ordered_ids = position_ids[position]
-        if injured_id in ordered_ids:
-            injured_index = ordered_ids.index(injured_id)
-        else:
-            same_position = [
-                str(player["id"]) for player in valid_players
-                if player.get("position", "").upper() == position
-            ]
-            injured_index = -1
-            injured_roster_index = next(
-                (i for i, player in enumerate(valid_players)
-                 if normalize(player.get("name")) == injured_name),
-                None,
-            )
-            if injured_roster_index is not None:
-                prior_ids = {
-                    str(player["id"]) for player in valid_players[:injured_roster_index]
-                    if player.get("position", "").upper() == position
-                }
-                injured_index = len([item for item in same_position if item in prior_ids])
-                ordered_ids = same_position
-            else:
-                # Without an identity match, do not guess which roster slots follow
-                # the injured player.
-                continue
-        # Add the next two available depth-chart options, even beyond the base
-        # position limit. These are candidates to evaluate, not assumed beneficiaries.
+        if injured_id not in ordered_ids:
+            # Do not infer replacements from generic roster order. The injured
+            # athlete must be explicitly present on this team's depth chart.
+            continue
+        injured_index = ordered_ids.index(injured_id)
+        if injured_index != 0:
+            # Only an injured first-string option creates a next-man-up pool.
+            # This prevents cascading speculative chains from backup/IR players.
+            continue
+
+        # Consider the next two listed options, but add_player excludes anyone
+        # independently reported unavailable (Out/IR/PUP/NFI/Doubtful).
         for athlete_id in ordered_ids[injured_index + 1:injured_index + 3]:
             add_player(
                 athlete_id,
