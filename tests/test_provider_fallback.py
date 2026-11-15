@@ -596,11 +596,12 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_player_prop_with_independent_sportsbook_quote_remains_actionable(self):
         data = {"picks":[{
             "market_type":"Player Prop","player_or_team":"Jordan Love",
-            "bet_description":"Passing Yards Over","market_line":"Not verified",
-            "play_threshold":"255.5",
+            "bet_description":"Passing Yards Over 250.5","market_line":"Not verified",
+            "play_threshold":"250.5 yards",
         }]}
         quote = {
-            "player":"Jordan Love","market":"Passing Yards","line":"250.5",
+            "player":"Jordan Love","market":"Passing Yards","market_key":"player_pass_yds",
+            "side":"over","point":250.5,"line":"250.5",
             "price":"-110","sportsbook":"ExampleBook",
             "source_url":"https://sportsbook.example/market",
             "retrieved_at":"2026-11-14T00:00:00Z",
