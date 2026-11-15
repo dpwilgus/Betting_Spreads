@@ -789,7 +789,7 @@ def main() -> int:
                             and isinstance(cached.get("picks"), list)
                             and isinstance(cached.get("touchdown_scorers"), list)
                             and len(cached["touchdown_scorers"]) <= 3
-                            and cached.get("analysis_version") == 9
+                            and cached.get("analysis_version") == 10
                             and isinstance(cached.get("underdog_analysis"), list)
                             and bool(cached.get("ai_provider"))
                         )
