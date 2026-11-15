@@ -1,7 +1,11 @@
 import unittest
 from openpyxl import Workbook
 
-from main import _write_matchup_sheet, filter_requested_matchup
+from main import (
+    _cached_analysis_is_complete,
+    _write_matchup_sheet,
+    filter_requested_matchup,
+)
 
 
 class MatchupFilterTests(unittest.TestCase):
@@ -10,6 +14,49 @@ class MatchupFilterTests(unittest.TestCase):
             {"Away Team": "New England Patriots", "Home Team": "Detroit Lions"},
             {"Away Team": "Kansas City Chiefs", "Home Team": "Atlanta Falcons"},
         ]
+
+    def test_empty_analysis_cache_is_not_considered_complete(self):
+        cached = {
+            "picks": [],
+            "touchdown_scorers": [],
+            "sneaky_props": [],
+            "injury_impact": [],
+            "underdog_analysis": [],
+            "analysis_version": 11,
+            "ai_provider": "groq",
+        }
+        self.assertFalse(_cached_analysis_is_complete(cached))
+
+    def test_cache_with_any_usable_analysis_section_is_complete(self):
+        base = {
+            "picks": [],
+            "touchdown_scorers": [],
+            "sneaky_props": [],
+            "injury_impact": [],
+            "underdog_analysis": [],
+            "analysis_version": 11,
+            "ai_provider": "groq",
+        }
+        for section in (
+            "picks", "touchdown_scorers", "sneaky_props",
+            "injury_impact", "underdog_analysis",
+        ):
+            with self.subTest(section=section):
+                cached = {**base, section: [{"evidence": "validated output"}]}
+                self.assertTrue(_cached_analysis_is_complete(cached))
+
+    def test_cache_without_current_version_or_provider_is_incomplete(self):
+        cached = {
+            "picks": [{"bet_description": "Lions moneyline"}],
+            "touchdown_scorers": [],
+            "underdog_analysis": [],
+            "analysis_version": 10,
+            "ai_provider": "groq",
+        }
+        self.assertFalse(_cached_analysis_is_complete(cached))
+        cached["analysis_version"] = 11
+        cached["ai_provider"] = ""
+        self.assertFalse(_cached_analysis_is_complete(cached))
 
     def test_filter_selects_one_matchup_case_insensitively(self):
         result = filter_requested_matchup(self.games, ["--matchup", "patriots at lions"])
