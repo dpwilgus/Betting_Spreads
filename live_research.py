@@ -757,9 +757,9 @@ def _select_research_players(
             # athlete must be explicitly present on this team's depth chart.
             continue
         injured_index = ordered_ids.index(injured_id)
-        if injured_index != 0:
-            # Only an injured first-string option creates a next-man-up pool.
-            # This prevents cascading speculative chains from backup/IR players.
+        if injured_index > 1:
+            # Only an injured starter or first backup creates a next-man-up pool.
+            # Lower-depth injuries must not create cascading speculative chains.
             continue
 
         # Consider the next two listed options, but add_player excludes anyone
