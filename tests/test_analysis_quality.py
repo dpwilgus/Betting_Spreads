@@ -193,7 +193,18 @@ class AnalysisQualityTests(unittest.TestCase):
     def test_underdog_analysis_is_validated(self):
         analysis = {
             "summary": "Balanced matchup", "game_script": "Competitive game",
-            "picks": [], "touchdown_scorers": [], "injury_impact": [],
+            "picks": [{
+                "rank": 1, "market_type": "Game Prop",
+                "player_or_team": "Detroit Lions",
+                "bet_description": "Lions moneyline",
+                "market_line": "Not verified",
+                "play_threshold": "Lions to win",
+                "estimated_hit_probability": 60, "confidence": 6,
+                "statistical_rationale": "Supported by matchup evidence",
+                "risk_factors": "Price must be checked",
+                "data_quality": "Moderate",
+            }],
+            "touchdown_scorers": [], "injury_impact": [],
             "data_gaps": [],
             "underdog_analysis": [{
                 "underdog": "New England Patriots", "spread": "+2.5",
@@ -205,11 +216,15 @@ class AnalysisQualityTests(unittest.TestCase):
         _validate_analysis(
             analysis, team_names=("New England Patriots", "Detroit Lions")
         )
+        self.assertEqual(len(analysis["underdog_analysis"]), 1)
+        self.assertEqual(len(analysis["picks"]), 1)
+
         analysis["underdog_analysis"][0]["upset_probability"] = 120
         _validate_analysis(
             analysis, team_names=("New England Patriots", "Detroit Lions")
         )
         self.assertEqual(analysis["underdog_analysis"], [])
+        self.assertEqual(len(analysis["picks"]), 1)
         self.assertTrue(any(
             "Underdog assessment unavailable" in gap
             for gap in analysis["data_gaps"]
