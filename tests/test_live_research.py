@@ -903,6 +903,48 @@ class LiveResearchTests(unittest.TestCase):
         self.assertNotIn("WR Six", names)
         self.assertEqual(len(names), 13)
 
+    def test_injury_replacements_exclude_unavailable_players_and_stop_deep_chains(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"qb1","name":"QB One","position":"QB"},
+            {"id":"te1","name":"TE Starter","position":"TE"},
+            {"id":"te2","name":"TE Backup","position":"TE"},
+            {"id":"te3","name":"TE Third","position":"TE"},
+            {"id":"te4","name":"TE Fourth","position":"TE"},
+            {"id":"te5","name":"TE Fifth","position":"TE"},
+        ]
+        chart = {"depthCharts":[{"positions":{
+            "quarterback":{
+                "position":{"abbreviation":"QB"},
+                "athletes":[{"rank":1,"athlete":{"id":"qb1","displayName":"QB One"}}],
+            },
+            "tightEnd":{
+                "position":{"abbreviation":"TE"},
+                "athletes":[
+                    {"rank":1,"athlete":{"id":"te1","displayName":"TE Starter"}},
+                    {"rank":2,"athlete":{"id":"te2","displayName":"TE Backup"}},
+                    {"rank":3,"athlete":{"id":"te3","displayName":"TE Third"}},
+                    {"rank":4,"athlete":{"id":"te4","displayName":"TE Fourth"}},
+                    {"rank":5,"athlete":{"id":"te5","displayName":"TE Fifth"}},
+                ],
+            },
+        }}]}
+        injuries = [
+            {"player":"TE Starter","position":"TE","team":"Test Team","status":"Out"},
+            {"player":"TE Backup","position":"TE","team":"Test Team","status":"Out"},
+            {"player":"TE Third","position":"TE","team":"Test Team","status":"Injured Reserve"},
+        ]
+
+        selected = _select_research_players(roster, chart, injuries, "Test Team")
+        names = [item["name"] for item in selected]
+
+        self.assertNotIn("TE Starter", names)
+        self.assertNotIn("TE Backup", names)
+        self.assertNotIn("TE Third", names)
+        self.assertIn("TE Fourth", names)
+        self.assertNotIn("TE Fifth", names)
+
     def test_injury_impact_rejects_injured_player_as_own_beneficiary(self):
         from ai_analysis import _filter_injury_impacts
 
