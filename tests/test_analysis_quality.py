@@ -149,7 +149,18 @@ class AnalysisQualityTests(unittest.TestCase):
 
     def test_invalid_underdog_row_is_dropped_without_rejecting_matchup(self):
         analysis = {
-            "summary": "Test", "game_script": "Test", "picks": [],
+            "summary": "Test", "game_script": "Test",
+            "picks": [{
+                "rank": 1, "market_type": "Game Prop",
+                "player_or_team": "Detroit Lions",
+                "bet_description": "Lions moneyline",
+                "market_line": "Not verified",
+                "play_threshold": "Lions to win",
+                "estimated_hit_probability": 60, "confidence": 6,
+                "statistical_rationale": "Supported by matchup evidence",
+                "risk_factors": "Price must be checked",
+                "data_quality": "Moderate",
+            }],
             "touchdown_scorers": [], "injury_impact": [], "data_gaps": [],
             "underdog_analysis": [{
                 "underdog": "Not a matchup team", "spread": "+2.5",
@@ -160,7 +171,24 @@ class AnalysisQualityTests(unittest.TestCase):
         }
         _validate_analysis(analysis, team_names=("New England Patriots", "Detroit Lions"))
         self.assertEqual(analysis["underdog_analysis"], [])
+        self.assertEqual(len(analysis["picks"]), 1)
         self.assertTrue(any("Underdog assessment unavailable" in gap for gap in analysis["data_gaps"]))
+
+    def test_invalid_underdog_only_response_is_rejected(self):
+        analysis = {
+            "summary": "Test", "game_script": "Test", "picks": [],
+            "touchdown_scorers": [], "injury_impact": [], "data_gaps": [],
+            "underdog_analysis": [{
+                "underdog": "Not a matchup team", "spread": "+2.5",
+                "cover_probability": 54, "upset_probability": 38,
+                "recommendation": "Maybe", "rationale": "Reason",
+                "risk_factors": "Risk", "evidence_quality": "Moderate",
+            }],
+        }
+        with self.assertRaisesRegex(RuntimeError, "contains no usable matchup analysis"):
+            _validate_analysis(
+                analysis, team_names=("New England Patriots", "Detroit Lions")
+            )
 
     def test_underdog_analysis_is_validated(self):
         analysis = {
