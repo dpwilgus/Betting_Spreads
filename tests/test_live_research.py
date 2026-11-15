@@ -755,6 +755,38 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(compact[0]["player"], "Player 11")
 
 
+    def test_prompt_compaction_preserves_core_evidence_and_venue(self):
+        from ai_analysis import _bounded_research_text
+
+        summary = {
+            "header": {"id": "event-1"},
+            "game_info": {"venue": {"fullName": "Munich Stadium"}},
+            "pickcenter_markets": [{"provider": "Book", "spread": {"home": {"close": {"line": -2.5}}}}],
+            "recent_games": [{"summary": "x" * 5000}],
+        }
+        research = "\n\n".join([
+            "INDEPENDENT LIVE NFL RESEARCH",
+            "ESPN MATCHUP, PLAYER, INJURY, MARKET AND RECENT-GAME DATA: "
+            + json.dumps(summary),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Away: " + ("A" * 350),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Home: " + ("B" * 350),
+            "ESPN CURRENT PLAYER INJURIES — Away: " + ("I" * 250),
+            "ESPN RECENT TEAM NEWS — Home: " + ("N" * 250),
+            "ESPN CURRENT-SEASON TEAM STATISTICS — Away: " + ("T" * 250),
+        ])
+        with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 2500):
+            prompt, truncated = _bounded_research_text(research)
+
+        self.assertFalse(truncated)
+        self.assertIn("PLAYER GAME LOGS — Away", prompt)
+        self.assertIn("PLAYER GAME LOGS — Home", prompt)
+        self.assertIn("CURRENT PLAYER INJURIES", prompt)
+        self.assertIn("RECENT TEAM NEWS", prompt)
+        self.assertIn("Munich Stadium", prompt)
+        self.assertIn("pickcenter_markets", prompt)
+        self.assertNotIn("recent_games", prompt)
+        self.assertIn("Optional historical matchup recap compacted", prompt)
+
     def test_prompt_trimming_keeps_both_teams_player_logs_before_injuries(self):
         from ai_analysis import _bounded_research_text
 
