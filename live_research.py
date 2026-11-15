@@ -1043,6 +1043,12 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                 try:
                     roster_players = list(_team_roster_players(team_id))
                     roster_names = [player["name"] for player in roster_players]
+                    roster_quarterbacks_by_team[team_name] = [
+                        str(player.get("name") or "")
+                        for player in roster_players
+                        if str(player.get("position") or "").upper() == "QB"
+                        and player.get("name")
+                    ]
                     if roster_names:
                         rosters[team_name] = roster_names
                         roster_url = (
@@ -1292,6 +1298,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     rosters: dict[str, list[str]] = {}
     selected_player_candidates: dict[str, list[dict[str, str]]] = {}
     news_articles_by_team: dict[str, list[dict[str, Any]]] = {}
+    roster_quarterbacks_by_team: dict[str, list[str]] = {}
     confirmed_starting_qbs: dict[str, str] = {}
 
     if not event_id:
@@ -1499,11 +1506,11 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
 
             # A newer, dated team announcement that a QB will start supersedes
             # an older injury-feed designation; preserve both sources in research.
-            for team_name, candidates in selected_player_candidates.items():
-                for candidate in candidates:
-                    if str(candidate.get("position") or "").upper() != "QB":
-                        continue
-                    player_name = str(candidate.get("name") or "")
+            # Check every rostered quarterback, not only selected research
+            # candidates: an older Out designation can exclude the QB from that
+            # candidate list, which must not prevent newer starter news overriding it.
+            for team_name, quarterbacks in roster_quarterbacks_by_team.items():
+                for player_name in quarterbacks:
                     confirmation = _confirmed_starting_qb_news(
                         player_name, news_articles_by_team.get(team_name, [])
                     )
