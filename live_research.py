@@ -1125,6 +1125,47 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
             sections.extend(news_sections)
 
             if confirmed_starting_qbs:
+                confirmed_names = {
+                    player_name.casefold() for player_name in confirmed_starting_qbs.values()
+                }
+                for team_name, player_name in confirmed_starting_qbs.items():
+                    for candidate in selected_player_candidates.get(team_name, []):
+                        if f"potential replacement for {player_name}".casefold() in str(
+                            candidate.get("research_reason") or ""
+                        ).casefold():
+                            candidate["research_reason"] = (
+                                "Depth-chart candidate; older starter-out report superseded by dated team news"
+                            )
+                updated_player_sections = []
+                for section in player_stat_sections:
+                    prefix, separator, payload_text = section.partition(": ")
+                    if not separator:
+                        updated_player_sections.append(section)
+                        continue
+                    try:
+                        records = json.loads(payload_text)
+                    except (TypeError, ValueError):
+                        updated_player_sections.append(section)
+                        continue
+                    if isinstance(records, list):
+                        for record in records:
+                            reason = str(record.get("research_reason") or "")
+                            if any(
+                                f"potential replacement for {name}".casefold() in reason.casefold()
+                                for name in confirmed_starting_qbs.values()
+                            ):
+                                record["research_reason"] = (
+                                    "Depth-chart candidate; older starter-out report superseded by dated team news"
+                                )
+                        updated_player_sections.append(
+                            prefix + ": " + json.dumps(
+                                records, ensure_ascii=False, separators=(",", ":")
+                            )
+                        )
+                    else:
+                        updated_player_sections.append(section)
+                player_stat_sections = updated_player_sections
+
                 filtered_injury_sections = []
                 for section in injury_sections:
                     prefix, separator, payload_text = section.partition(": ")
@@ -1140,7 +1181,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         reports = [
                             item for item in reports
                             if str(item.get("player") or "").casefold()
-                            not in confirmed_starting_qbs
+                            not in confirmed_names
                         ]
                         if reports:
                             filtered_injury_sections.append(
@@ -1222,7 +1263,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     item for item in summary_injuries
                     if not any(
                         player_name in json.dumps(item, ensure_ascii=False).casefold()
-                        for player_name in confirmed_starting_qbs
+                        for player_name in confirmed_names
                     )
                 ]
             if summary_injuries:
@@ -1365,7 +1406,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     rosters: dict[str, list[str]] = {}
     selected_player_candidates: dict[str, list[dict[str, str]]] = {}
     news_articles_by_team: dict[str, list[dict[str, Any]]] = {}
-    confirmed_starting_qbs: set[str] = set()
+    confirmed_starting_qbs: dict[str, str] = {}
 
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
@@ -1588,7 +1629,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     if not report_date or news_date < report_date:
                         continue
                     injury_statuses.remove(report)
-                    confirmed_starting_qbs.add(player_name.casefold())
+                    confirmed_starting_qbs[team_name] = player_name
                     news_sections.append(
                         f"CONFIRMED STARTING QB ROLE — {team_name}: {player_name} "
                         f"named to start in dated team news ({confirmation['published']}): "
