@@ -60,6 +60,19 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertEqual(data["picks"][0]["market_line"], "Over 89.5 (-110) — DraftKings")
         self.assertEqual(data["model_only_picks"], [])
 
+    def test_supplied_spread_requires_underdog_analysis(self):
+        analysis = {
+            "summary": "Test", "game_script": "Test",
+            "picks": [], "touchdown_scorers": [], "injury_impact": [],
+            "data_gaps": [], "underdog_analysis": [],
+        }
+        with self.assertRaisesRegex(RuntimeError, "requires an explicit underdog"):
+            _validate_analysis(
+                analysis,
+                team_names=("New England Patriots", "Detroit Lions"),
+                require_underdog=True,
+            )
+
     def test_underdog_analysis_is_validated(self):
         analysis = {
             "summary": "Balanced matchup", "game_script": "Competitive game",
