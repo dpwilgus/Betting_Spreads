@@ -738,11 +738,69 @@ def _filter_injury_impacts(
     return gaps
 
 
+def _expected_market_key(description: str) -> str | None:
+    text = description.casefold()
+    if any(term in text for term in ("first touchdown", "first td")):
+        return "player_1st_td"
+    if any(term in text for term in ("anytime touchdown", "anytime td", "touchdown scorer")):
+        return "player_anytime_td"
+    patterns = (
+        (r"passing touchdowns?", "player_pass_tds"),
+        (r"passing yards?", "player_pass_yds"),
+        (r"passing attempts?", "player_pass_attempts"),
+        (r"completions?", "player_pass_completions"),
+        (r"interceptions?", "player_pass_interceptions"),
+        (r"rushing touchdowns?", "player_rush_tds"),
+        (r"rushing yards?", "player_rush_yds"),
+        (r"rushing attempts?|carries", "player_rush_attempts"),
+        (r"receiving touchdowns?", "player_reception_tds"),
+        (r"receiving yards?", "player_reception_yds"),
+        (r"receptions?", "player_receptions"),
+        (r"receiving targets?|targets?", "player_reception_targets"),
+        (r"longest reception", "player_longest_reception"),
+        (r"longest rush", "player_longest_rush"),
+        (r"longest pass|longest completion", "player_longest_pass"),
+    )
+    return next((key for pattern, key in patterns if re.search(pattern, text)), None)
+
+
+def _quote_matches_pick(pick: dict[str, Any], quote: dict[str, Any]) -> bool:
+    """Require the same player, exact market key, direction and numeric threshold."""
+    if _normalize_name(str(pick.get("player_or_team") or "")) != _normalize_name(str(quote.get("player") or "")):
+        return False
+    expected_key = _expected_market_key(str(pick.get("bet_description") or ""))
+    if not expected_key or str(quote.get("market_key") or "") != expected_key:
+        return False
+
+    description = " ".join((
+        str(pick.get("bet_description") or ""),
+        str(pick.get("play_threshold") or ""),
+    ))
+    quote_side = str(quote.get("side") or "").strip().casefold()
+    if expected_key in {"player_anytime_td", "player_1st_td"}:
+        return quote_side in {"yes", "over"} or str(quote.get("line") or "").strip().casefold() == "yes"
+
+    pick_match = re.search(r"\b(over|under)\s*(-?\d+(?:\.\d+)?)", description, re.I)
+    quote_point = quote.get("point")
+    if quote_point in (None, ""):
+        quote_match = re.search(r"\b(over|under)\s*(-?\d+(?:\.\d+)?)", str(quote.get("line") or ""), re.I)
+        if quote_match:
+            quote_side = quote_match.group(1).casefold()
+            quote_point = quote_match.group(2)
+    if not pick_match or quote_point in (None, "") or quote_side not in {"over", "under"}:
+        return False
+    try:
+        same_point = abs(float(pick_match.group(2)) - float(quote_point)) < 0.0001
+    except (TypeError, ValueError):
+        return False
+    return pick_match.group(1).casefold() == quote_side and same_point
+
+
 def _separate_unverified_player_props(
     data: dict[str, Any],
     research: dict[str, Any],
 ) -> list[str]:
-    """Move model-only thresholds out of actionable sportsbook recommendations."""
+    """Move model-only props unless the exact player market, side and line are quoted."""
     verified_quotes = research.get("verified_player_prop_markets", [])
     actionable = []
     model_only = []
@@ -751,34 +809,15 @@ def _separate_unverified_player_props(
         if pick.get("market_type") != "Player Prop":
             actionable.append(pick)
             continue
-        player_key = _normalize_name(str(pick.get("player_or_team") or ""))
-        description = str(pick.get("bet_description") or "").casefold()
-        matched = None
-        for quote in (verified_quotes if isinstance(verified_quotes, list) else []):
-            if not isinstance(quote, dict):
-                continue
-            quote_player = _normalize_name(str(quote.get("player") or ""))
-            quote_market = str(quote.get("market") or "").casefold()
-            market_match = any(
-                token in description and token in quote_market
-                for token in ("passing yards", "rushing yards", "receiving yards",
-                              "receptions", "receiving targets", "rushing attempts",
-                              "passing attempts", "completions", "interceptions",
-                              "longest reception", "anytime touchdown", "anytime td", "touchdown scorer",
-                              "first touchdown", "first half touchdown", "first half td",
-                              "passing touchdowns", "rushing touchdowns", "receiving touchdowns",
-                              "tackles for loss", "quarterback hits", "forced fumbles",
-                              "fumble recoveries", "field goals made", "field goals attempted", "extra points made", "extra points attempted", "punting yards", "longest punt", "punts", "longest pass", "longest rush")
-            )
-            if (
-                quote_player == player_key and market_match
-                and quote.get("line") not in (None, "")
-                and quote.get("price") not in (None, "")
-                and quote.get("sportsbook") and quote.get("source_url")
-                and quote.get("retrieved_at")
-            ):
-                matched = quote
-                break
+        matched = next((
+            quote for quote in (verified_quotes if isinstance(verified_quotes, list) else [])
+            if isinstance(quote, dict)
+            and _quote_matches_pick(pick, quote)
+            and quote.get("line") not in (None, "")
+            and quote.get("price") not in (None, "")
+            and quote.get("sportsbook") and quote.get("source_url")
+            and quote.get("retrieved_at")
+        ), None)
         if matched:
             pick["market_line"] = (
                 f"{matched['line']} ({matched['price']}) — {matched['sportsbook']}"
@@ -790,11 +829,10 @@ def _separate_unverified_player_props(
             pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
             model_only.append(pick)
             gaps.append(
-                f"{pick.get('player_or_team')} {pick.get('bet_description')}: no verified sportsbook line/price; moved to model-only leans."
+                f"{pick.get('player_or_team')} {pick.get('bet_description')}: exact player market, side and line were not verified; moved to model-only leans."
             )
     data["picks"] = actionable
     data["model_only_picks"] = model_only
-    # Sneaky player-prop lines are not treated as quoted sportsbook markets.
     for pick in data.get("sneaky_props", []):
         if pick.get("market_type") == "Player Prop":
             pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
