@@ -901,7 +901,9 @@ class LiveResearchTests(unittest.TestCase):
         self.assertIn("Gavin Bartholomew", names)
         self.assertIn("WR Five", names)
         self.assertNotIn("WR Six", names)
-        self.assertEqual(len(names), 13)
+        # The injured starter is excluded; the two available next options
+        # are researched without exceeding the healthy-candidate pool.
+        self.assertEqual(len(names), 12)
 
     def test_injury_replacements_exclude_unavailable_players_and_stop_deep_chains(self):
         from live_research import _select_research_players
