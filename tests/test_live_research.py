@@ -1149,3 +1149,65 @@ class LiveResearchTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_empty_analysis_rejects_injury_impact_from_outside_matchup(self):
+        from ai_analysis import _validate_analysis
+
+        impact = {
+            "injured_player": "Unrelated Player",
+            "team": "Unrelated Team",
+            "availability": "Out",
+            "affected_player": "Team unit",
+            "affected_team": "Dallas Cowboys",
+            "impact_direction": "Positive",
+            "statistical_effect": "Potential usage shift",
+            "prop_market": "Receiving yards",
+            "evidence": "No matchup evidence",
+            "confidence": 5,
+            "conditions": "If role changes",
+        }
+        data = {
+            "summary": "A matchup summary.",
+            "game_script": "A game script.",
+            "picks": [],
+            "sneaky_props": [],
+            "touchdown_scorers": [],
+            "injury_impact": [impact],
+            "underdog_analysis": [],
+        }
+        with self.assertRaisesRegex(RuntimeError, "no usable matchup analysis"):
+            _validate_analysis(
+                data,
+                rosters={"Dallas Cowboys": ["Player One"]},
+                team_names=("San Francisco 49ers", "Dallas Cowboys"),
+            )
+
+    def test_valid_matchup_injury_impact_can_stand_alone(self):
+        from ai_analysis import _validate_analysis
+
+        data = {
+            "summary": "A matchup summary.",
+            "game_script": "A game script.",
+            "picks": [],
+            "sneaky_props": [],
+            "touchdown_scorers": [],
+            "injury_impact": [{
+                "injured_player": "Starter One",
+                "team": "Dallas Cowboys",
+                "availability": "Out",
+                "affected_player": "Backup One",
+                "affected_team": "Dallas Cowboys",
+                "impact_direction": "Positive",
+                "statistical_effect": "More route opportunities",
+                "prop_market": "Receiving yards",
+                "evidence": "ESPN injury report",
+                "confidence": 6,
+                "conditions": "If elevated into the starting role",
+            }],
+            "underdog_analysis": [],
+        }
+        _validate_analysis(
+            data,
+            rosters={"Dallas Cowboys": ["Starter One", "Backup One"]},
+            team_names=("San Francisco 49ers", "Dallas Cowboys"),
+        )
