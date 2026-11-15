@@ -552,6 +552,7 @@ def _validate_analysis(
     rosters: dict[str, list[str]] | None = None,
     team_names: tuple[str, str] | None = None,
 ) -> None:
+    data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
         raise RuntimeError("AI response is missing the matchup summary or game script.")
     picks = data.get("picks")
@@ -788,7 +789,6 @@ def _expected_market_key(description: str) -> str | None:
         (r"receiving touchdowns?", "player_reception_tds"),
         (r"receiving yards?", "player_reception_yds"),
         (r"receptions?", "player_receptions"),
-        (r"receiving targets?|targets?", "player_reception_targets"),
         (r"longest reception", "player_longest_reception"),
         (r"longest rush", "player_longest_rush"),
         (r"longest pass|longest completion", "player_longest_pass"),
