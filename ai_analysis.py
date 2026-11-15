@@ -660,6 +660,18 @@ def _validate_analysis(
         raise RuntimeError("AI response betting opportunities must be a list.")
     if not isinstance(scorers, list) or len(scorers) > 5:
         raise RuntimeError("AI response may contain at most five preliminary touchdown candidates.")
+    sneaky_response = data.get("sneaky_props")
+    injury_response = data.get("injury_impact")
+    underdog_response = data.get("underdog_analysis")
+    if not isinstance(sneaky_response, list) or not isinstance(injury_response, list):
+        raise RuntimeError("AI response is missing required sneaky-prop or injury-impact lists.")
+    if not isinstance(underdog_response, list):
+        raise RuntimeError("AI response underdog assessment must be a list.")
+    if not any((picks, scorers, sneaky_response, injury_response, underdog_response)):
+        raise RuntimeError(
+            "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
+            "injury impacts, sneaky props, and underdog assessment are empty."
+        )
     for item in picks:
         probability = float(item.get("estimated_hit_probability", -1))
         confidence = int(item.get("confidence", 0))
@@ -1152,7 +1164,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         if (_normalize_name(str(item.get("player_or_team") or "")),
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
-    data["analysis_version"] = 10
+    data["analysis_version"] = 11
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
