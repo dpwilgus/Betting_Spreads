@@ -551,6 +551,7 @@ def _validate_analysis(
     data: dict[str, Any],
     rosters: dict[str, list[str]] | None = None,
     team_names: tuple[str, str] | None = None,
+    require_underdog: bool = False,
 ) -> None:
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
@@ -560,6 +561,10 @@ def _validate_analysis(
     underdog_rows = data.get("underdog_analysis")
     if not isinstance(underdog_rows, list) or len(underdog_rows) > 1:
         raise RuntimeError("AI underdog analysis must be a list with at most one matchup underdog.")
+    if require_underdog and not underdog_rows:
+        raise RuntimeError("A supplied spread requires an explicit underdog cover/upset assessment.")
+    if any(not isinstance(row, dict) for row in underdog_rows):
+        raise RuntimeError("AI underdog analysis rows must be objects.")
     for row in underdog_rows:
         cover = float(row.get("cover_probability", -1))
         upset = float(row.get("upset_probability", -1))
@@ -1007,7 +1012,10 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         instructions,
         user_input,
         validator=lambda result: _validate_analysis(
-            result, rosters=rosters, team_names=team_names
+            result, rosters=rosters, team_names=team_names,
+            require_underdog=bool(re.search(
+                r"[+-]\\s*\\d+(?:\\.\\d+)?", str(game.get("Betting Line") or "")
+            )),
         ),
     )
     injury_gaps = _apply_independent_injury_statuses(
