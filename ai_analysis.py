@@ -653,7 +653,13 @@ def _validate_analysis(
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
         raise RuntimeError("AI response is missing the matchup summary or game script.")
-    # Invalid underdog rows are discarded with a data-gap warning.
+    # Preserve whether the model attempted an underdog assessment before
+    # sanitization. Invalid rows are discarded with a data-gap warning, but
+    # should not cause an otherwise processable matchup to be discarded.
+    raw_underdog_response = data.get("underdog_analysis", [])
+    attempted_underdog_response = (
+        isinstance(raw_underdog_response, list) and bool(raw_underdog_response)
+    )
     _sanitize_underdog_analysis(data, team_names)
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
@@ -697,7 +703,8 @@ def _validate_analysis(
             break
     if not any((
         picks, scorers, sneaky_response if isinstance(sneaky_response, list) else [],
-        valid_injury_response, underdog_response, require_underdog,
+        valid_injury_response, underdog_response, attempted_underdog_response,
+        require_underdog,
     )):
         raise RuntimeError(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
