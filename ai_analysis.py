@@ -563,7 +563,7 @@ def _validate_analysis(
     for row in underdog_rows:
         cover = float(row.get("cover_probability", -1))
         upset = float(row.get("upset_probability", -1))
-        if not 0 <= cover <= 100 or not 0 <= upset <= 100:
+        if not 0 <= cover <= 100 or not 0 <= upset <= 100 or upset > cover:
             raise RuntimeError("AI returned invalid underdog cover or upset probability.")
         if not all(row.get(field) not in (None, "") for field in (
             "underdog", "spread", "recommendation", "rationale", "risk_factors",
