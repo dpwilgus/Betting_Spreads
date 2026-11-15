@@ -530,6 +530,7 @@ class LiveResearchTests(unittest.TestCase):
         ))
         self.assertIn("CONFIRMED STARTING QB ROLE", result["research_text"])
         self.assertIn("Veteran QB to start Sunday", result["research_text"])
+        self.assertNotIn("Older status", result["research_text"])
 
     def test_transient_player_log_error_is_retried_once(self):
         from live_research import _fetch_player_gamelog
