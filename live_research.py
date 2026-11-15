@@ -1373,6 +1373,12 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                 try:
                     roster_players = list(_team_roster_players(team_id))
                     roster_names = [player["name"] for player in roster_players]
+                    roster_quarterbacks_by_team[team_name] = [
+                        str(player.get("name") or "")
+                        for player in roster_players
+                        if str(player.get("position") or "").upper() == "QB"
+                        and player.get("name")
+                    ]
                     if roster_names:
                         rosters[team_name] = roster_names
                         roster_url = (
