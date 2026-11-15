@@ -1124,75 +1124,6 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
 
             sections.extend(news_sections)
 
-            if confirmed_starting_qbs:
-                confirmed_names = {
-                    player_name.casefold() for player_name in confirmed_starting_qbs.values()
-                }
-                for team_name, player_name in confirmed_starting_qbs.items():
-                    for candidate in selected_player_candidates.get(team_name, []):
-                        if f"potential replacement for {player_name}".casefold() in str(
-                            candidate.get("research_reason") or ""
-                        ).casefold():
-                            candidate["research_reason"] = (
-                                "Depth-chart candidate; older starter-out report superseded by dated team news"
-                            )
-                updated_player_sections = []
-                for section in player_stat_sections:
-                    prefix, separator, payload_text = section.partition(": ")
-                    if not separator:
-                        updated_player_sections.append(section)
-                        continue
-                    try:
-                        records = json.loads(payload_text)
-                    except (TypeError, ValueError):
-                        updated_player_sections.append(section)
-                        continue
-                    if isinstance(records, list):
-                        for record in records:
-                            reason = str(record.get("research_reason") or "")
-                            if any(
-                                f"potential replacement for {name}".casefold() in reason.casefold()
-                                for name in confirmed_starting_qbs.values()
-                            ):
-                                record["research_reason"] = (
-                                    "Depth-chart candidate; older starter-out report superseded by dated team news"
-                                )
-                        updated_player_sections.append(
-                            prefix + ": " + json.dumps(
-                                records, ensure_ascii=False, separators=(",", ":")
-                            )
-                        )
-                    else:
-                        updated_player_sections.append(section)
-                player_stat_sections = updated_player_sections
-
-                filtered_injury_sections = []
-                for section in injury_sections:
-                    prefix, separator, payload_text = section.partition(": ")
-                    if not separator:
-                        filtered_injury_sections.append(section)
-                        continue
-                    try:
-                        reports = json.loads(payload_text)
-                    except (TypeError, ValueError):
-                        filtered_injury_sections.append(section)
-                        continue
-                    if isinstance(reports, list):
-                        reports = [
-                            item for item in reports
-                            if str(item.get("player") or "").casefold()
-                            not in confirmed_names
-                        ]
-                        if reports:
-                            filtered_injury_sections.append(
-                                prefix + ": " + json.dumps(
-                                    reports, ensure_ascii=False, separators=(",", ":")
-                                )
-                            )
-                    else:
-                        filtered_injury_sections.append(section)
-                injury_sections = filtered_injury_sections
-
             for team_id, team_name in teams.items():
                 endpoint_name = "statistics"
                 endpoint_url = (
@@ -1258,14 +1189,6 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
             # Keep game-summary injuries as supplemental evidence even when
             # the Core API returns injuries for only one of the two teams.
             summary_injuries = _compact_injuries(data.get("injuries", []))
-            if confirmed_starting_qbs:
-                summary_injuries = [
-                    item for item in summary_injuries
-                    if not any(
-                        player_name in json.dumps(item, ensure_ascii=False).casefold()
-                        for player_name in confirmed_names
-                    )
-                ]
             if summary_injuries:
                 injury_sections.append(
                     "ESPN GAME SUMMARY INJURY DATA: "
@@ -1637,6 +1560,75 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         f"injury-feed entry dated {report_date}."
                     )
 
+            if confirmed_starting_qbs:
+                confirmed_names = {
+                    player_name.casefold() for player_name in confirmed_starting_qbs.values()
+                }
+                for team_name, player_name in confirmed_starting_qbs.items():
+                    for candidate in selected_player_candidates.get(team_name, []):
+                        if f"potential replacement for {player_name}".casefold() in str(
+                            candidate.get("research_reason") or ""
+                        ).casefold():
+                            candidate["research_reason"] = (
+                                "Depth-chart candidate; older starter-out report superseded by dated team news"
+                            )
+                updated_player_sections = []
+                for section in player_stat_sections:
+                    prefix, separator, payload_text = section.partition(": ")
+                    if not separator:
+                        updated_player_sections.append(section)
+                        continue
+                    try:
+                        records = json.loads(payload_text)
+                    except (TypeError, ValueError):
+                        updated_player_sections.append(section)
+                        continue
+                    if isinstance(records, list):
+                        for record in records:
+                            reason = str(record.get("research_reason") or "")
+                            if any(
+                                f"potential replacement for {name}".casefold() in reason.casefold()
+                                for name in confirmed_starting_qbs.values()
+                            ):
+                                record["research_reason"] = (
+                                    "Depth-chart candidate; older starter-out report superseded by dated team news"
+                                )
+                        updated_player_sections.append(
+                            prefix + ": " + json.dumps(
+                                records, ensure_ascii=False, separators=(",", ":")
+                            )
+                        )
+                    else:
+                        updated_player_sections.append(section)
+                player_stat_sections = updated_player_sections
+
+                filtered_injury_sections = []
+                for section in injury_sections:
+                    prefix, separator, payload_text = section.partition(": ")
+                    if not separator:
+                        filtered_injury_sections.append(section)
+                        continue
+                    try:
+                        reports = json.loads(payload_text)
+                    except (TypeError, ValueError):
+                        filtered_injury_sections.append(section)
+                        continue
+                    if isinstance(reports, list):
+                        reports = [
+                            item for item in reports
+                            if str(item.get("player") or "").casefold()
+                            not in confirmed_names
+                        ]
+                        if reports:
+                            filtered_injury_sections.append(
+                                prefix + ": " + json.dumps(
+                                    reports, ensure_ascii=False, separators=(",", ":")
+                                )
+                            )
+                    else:
+                        filtered_injury_sections.append(section)
+                injury_sections = filtered_injury_sections
+
             for team_id, team_name in teams.items():
                 endpoint_name = "statistics"
                 endpoint_url = (
@@ -1664,6 +1656,17 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
             # Keep game-summary injuries as supplemental evidence even when
             # the Core API returns injuries for only one of the two teams.
             summary_injuries = _compact_injuries(data.get("injuries", []))
+            if confirmed_starting_qbs:
+                confirmed_names = {
+                    player_name.casefold() for player_name in confirmed_starting_qbs.values()
+                }
+                summary_injuries = [
+                    item for item in summary_injuries
+                    if not any(
+                        player_name in json.dumps(item, ensure_ascii=False).casefold()
+                        for player_name in confirmed_names
+                    )
+                ]
             if summary_injuries:
                 injury_sections.append(
                     "ESPN GAME SUMMARY INJURY DATA: "
