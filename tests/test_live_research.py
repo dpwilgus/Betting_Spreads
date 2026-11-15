@@ -103,7 +103,7 @@ class LiveResearchTests(unittest.TestCase):
                             "name": "passing",
                             "stats": [
                                 {"name": "completionPct", "displayValue": "65%"},
-                                {"name": "passingYardsPerGame", "displayValue": "240"},
+                                {"name": "passingYardsPerGame", "displayValue": "240", "rankDisplayValue": "32nd"},
                                 {"name": "unneededField", "displayValue": "999"},
                             ],
                         }
@@ -116,6 +116,7 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(
             len(result["categories"]["passing"]), 2
         )
+        self.assertEqual(result["categories"]["passing"][1]["rank"], "32nd")
         self.assertNotIn(
             "unneededField",
             [item["name"] for item in result["categories"]["passing"]],
