@@ -408,7 +408,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIs(payload["include_reasoning"], False)
         self.assertNotIn("reasoning_format", payload)
         self.assertEqual(payload["reasoning_effort"], "low")
-        self.assertEqual(payload["max_completion_tokens"], 1600)
+        self.assertEqual(payload["max_completion_tokens"], 2400)
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
 
