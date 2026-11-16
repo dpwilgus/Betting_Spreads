@@ -5,6 +5,7 @@ from ai_analysis import (
     _apply_independent_injury_statuses,
     _deduplicate_correlated_game_picks,
     _separate_unverified_player_props,
+    _underdog_format_instruction,
     _validate_analysis,
 )
 
@@ -95,19 +96,40 @@ class AnalysisQualityTests(unittest.TestCase):
                 team_names=("San Francisco 49ers", "Dallas Cowboys"),
             )
 
-    def test_missing_underdog_assessment_does_not_discard_matchup(self):
+    def test_missing_underdog_assessment_does_not_discard_otherwise_valid_picks(self):
+        pick = {
+            "rank": 1, "market_type": "Game Prop",
+            "player_or_team": "Detroit Lions",
+            "bet_description": "Lions moneyline", "market_line": "Not verified",
+            "play_threshold": "Lions to win", "estimated_hit_probability": 55,
+            "confidence": 5, "statistical_rationale": "Supported by matchup evidence",
+            "risk_factors": "Price must be checked", "data_quality": "Moderate",
+        }
         analysis = {
             "summary": "Test", "game_script": "Test",
-            "picks": [], "touchdown_scorers": [], "injury_impact": [],
+            "picks": [pick], "touchdown_scorers": [], "injury_impact": [],
             "data_gaps": [], "underdog_analysis": [],
         }
         _validate_analysis(
             analysis, team_names=("New England Patriots", "Detroit Lions"),
-            require_underdog=True,
+            require_underdog=True, expected_underdog="New England Patriots",
+            expected_spread=2.5,
         )
-        self.assertEqual(analysis["picks"], [])
+        self.assertEqual(analysis["picks"], [pick])
         self.assertEqual(analysis["underdog_analysis"], [])
         self.assertTrue(any("Underdog assessment unavailable" in gap for gap in analysis["data_gaps"]))
+
+    def test_underdog_format_instruction_uses_matchup_team_and_positive_spread(self):
+        instruction = _underdog_format_instruction("Los Angeles Chargers", 4.5)
+        self.assertIn('"underdog":"Los Angeles Chargers"', instruction)
+        self.assertIn('"spread":"+4.5"', instruction)
+        self.assertIn('"cover_probability":NUMBER', instruction)
+        self.assertIn('"upset_probability":NUMBER', instruction)
+        self.assertIn("do not copy example values", instruction)
+
+    def test_underdog_format_instruction_handles_missing_spread(self):
+        instruction = _underdog_format_instruction(None, None)
+        self.assertIn("otherwise use an empty array", instruction)
 
     def test_multiple_underdog_rows_keep_one_normalized_row(self):
         analysis = {
