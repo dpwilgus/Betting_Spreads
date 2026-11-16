@@ -519,7 +519,8 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
         f"status={pass1.get('status', 'unknown')}; "
         f"available event markets={', '.join(available) if available else 'none reported'}; "
         f"requested markets={', '.join(requested) if requested else 'none'}; "
-        f"player quotes={len(player_quotes)}; game quotes={len(game_quotes)}."
+        f"player quotes={len(player_quotes)}; game quotes={len(game_quotes)}; "
+        f"discovery error={pass1.get('market_discovery_error') or 'none'}."
     )
     research["research_text"] += "\n\n" + market_diagnostic
     if quotes:
