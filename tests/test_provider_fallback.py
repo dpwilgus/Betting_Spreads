@@ -170,6 +170,27 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(provider, "groq")
         self.assertEqual(call.call_count, 4)
 
+    def test_groq_tpm_preflight_skips_oversized_request_and_uses_fallback(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+
+        with patch(
+            "ai_providers.ensure_configured",
+            return_value=[(groq, "groq-key"), (gemini, "gemini-key")],
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers._estimate_prompt_tokens", return_value=5000
+        ), patch(
+            "ai_providers._call_provider", return_value={"summary": "fallback"}
+        ) as call:
+            result, selected = generate_json("system", "user")
+
+        self.assertEqual(selected, "gemini")
+        self.assertEqual(result["summary"], "fallback")
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(call.call_args.args[0].name, "gemini")
+
     def test_openai_compatible_response_extracts_json(self):
         provider = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         result = _response_text(provider, {
