@@ -1660,7 +1660,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             # Leave 500 TPM tokens as a safety margin for estimation variance.
             # Keep total prompt + completion demand below the 8k TPM ceiling
             # with a larger safety margin for other requests in the rolling window.
-            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600"))
+            output_tokens = max(
+                256, min(int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")), 1600)
+            )
             input_token_budget = max(1000, 6500 - output_tokens - 500)
             combined_budget = int(input_token_budget * 3.5)
         else:
