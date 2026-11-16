@@ -809,6 +809,8 @@ def _validate_analysis(
     expected_underdog: str | None = None,
     expected_spread: float | None = None,
 ) -> None:
+    # Keep require_underdog accepted for existing callers, but treat this
+    # supplemental section as optional so its omission cannot erase valid picks.
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
         raise RuntimeError("AI response is missing the matchup summary or game script.")
