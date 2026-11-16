@@ -559,7 +559,7 @@ def research_supports_first_td(research_text: str) -> bool:
 
 
 def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
-    """Summarize best available prices without flooding the AI prompt with duplicate books."""
+    """Summarize best prices by exact line while combining both sides of each market."""
     if not quotes:
         return "No sportsbook quotes were returned for the requested markets."
 
@@ -574,39 +574,51 @@ def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
             return 1.0 + 100.0 / abs(price)
         return 0.0
 
-    # Keep one best price per exact selection. The full unabridged quote list
-    # remains attached to research for deterministic verification after AI.
-    best: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    # Retain the best price for each exact side/point/bookmaker selection.
+    best_by_side: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for quote in quotes:
         key = (
             str(quote.get("market_key") or ""),
             str(quote.get("player") or ""),
+            str(quote.get("point") if quote.get("point") is not None else ""),
             str(quote.get("side") or ""),
+        )
+        prior = best_by_side.get(key)
+        if prior is None or decimal_odds(quote.get("price")) > decimal_odds(prior.get("price")):
+            best_by_side[key] = quote
+
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for quote in best_by_side.values():
+        key = (
+            str(quote.get("market_key") or ""),
+            str(quote.get("player") or ""),
             str(quote.get("point") if quote.get("point") is not None else ""),
         )
-        prior = best.get(key)
-        if prior is None or decimal_odds(quote.get("price")) > decimal_odds(prior.get("price")):
-            best[key] = quote
+        grouped.setdefault(key, []).append(quote)
 
-    game_quotes = [q for q in best.values() if q.get("market_type") == "game"]
-    player_quotes = [q for q in best.values() if q.get("market_type") != "game"]
+    game_groups = []
+    player_groups = []
+    for (market_key, player, point), sides in grouped.items():
+        market_type = sides[0].get("market_type")
+        label = sides[0].get("market", market_key)
+        side_text = "; ".join(
+            f"{q.get('line')} ({q.get('price')}, {q.get('sportsbook')})"
+            for q in sorted(sides, key=lambda q: str(q.get("side") or ""))
+        )
+        line = (
+            f"{label} | {player} | {side_text} "
+            f"| updated {max(str(q.get('market_updated_at') or '') for q in sides)}"
+        )
+        (game_groups if market_type == "game" else player_groups).append(line)
+
     lines = []
-    if game_quotes:
-        lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS (best price per exact selection):")
-        for quote in sorted(game_quotes, key=lambda q: (q.get("market_key", ""), q.get("player", ""), str(q.get("point", "")), q.get("side", ""))):
-            lines.append(
-                f"{quote.get('market')} | {quote.get('player')} | {quote.get('line')} "
-                f"| {quote.get('price')} | {quote.get('sportsbook')} "
-                f"| updated {quote.get('market_updated_at')} "
-                f"| retrieved {quote.get('retrieved_at')}"
-            )
-    if player_quotes:
-        lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (best price per exact selection):")
-        for quote in sorted(player_quotes, key=lambda q: (q.get("player", ""), q.get("market_key", ""), str(q.get("point", "")), q.get("side", ""))):
-            lines.append(
-                f"{quote.get('player')} | {quote.get('market')} | {quote.get('line')} "
-                f"| {quote.get('price')} | {quote.get('sportsbook')} "
-                f"| updated {quote.get('market_updated_at')} "
-                f"| retrieved {quote.get('retrieved_at')}"
-            )
+    if game_groups:
+        lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS (best price per side):")
+        lines.extend(sorted(game_groups))
+    if player_groups:
+        lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (best price per side):")
+        lines.extend(sorted(player_groups))
+    lines.append(
+        "Each displayed price is from the named sportsbook; full quote records are retained for exact validation."
+    )
     return "\n".join(lines)
