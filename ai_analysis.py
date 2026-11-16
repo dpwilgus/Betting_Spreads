@@ -1573,10 +1573,10 @@ def _underdog_format_instruction(
         + '"risk_factors":"SHORT RISK","evidence_quality":"Moderate"}]'
     )
     return (
-        "\nUNDERDOG JSON SHAPE (replace placeholders; structure only): "
+        "\nUNDERDOG JSON: "
         + template
         + " Use evidence-based numeric probabilities (0-100); upset must not exceed cover. "
-        "Do not copy example values or force a wager. "
+        "Do not copy values. "
         "\n"
     )
 
