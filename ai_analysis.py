@@ -1654,7 +1654,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         user_prefix,
         validator=lambda result: _validate_analysis(
             result, rosters=rosters, team_names=team_names,
-            require_underdog=bool(re.search(r"[+-]\d+(?:\.\d+)?", str(game.get("Betting Line") or ""))),
+            require_underdog=bool(spread_match),
+            expected_underdog=expected_underdog,
+            expected_spread=expected_spread,
         ),
         prompt_factory=prompts_for_provider,
     )
