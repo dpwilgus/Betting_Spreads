@@ -314,7 +314,7 @@ def _call_provider(
                 payload["reasoning_effort"] = reasoning_effort
         else:
             payload["max_completion_tokens"] = int(
-                os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")
+                os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "2400")
                 if provider.name == "groq" else "1400"
             )
             payload["response_format"] = {"type": "json_object"}
@@ -387,7 +387,7 @@ def generate_json(
             prompt_factory(provider.name) if prompt_factory else (system_prompt, user_prompt)
         )
         if provider.name == "groq":
-            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600"))
+            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "2400"))
             estimated_total = _estimate_prompt_tokens(provider_system, provider_user) + output_tokens
             if estimated_total > 7500:
                 failures.append(
