@@ -217,6 +217,32 @@ class OutputQualityRuleTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "omitted the required underdog"):
             _validate_analysis(data, team_names=("Team A", "Team B"), require_underdog=True)
 
+    def test_underdog_must_match_team_receiving_points(self):
+        base = {
+            "summary": "Summary", "game_script": "Script",
+            "picks": [], "touchdown_scorers": [], "sneaky_props": [],
+            "injury_impact": [],
+            "underdog_analysis": [{
+                "underdog": "Team A", "spread": "+3.5",
+                "cover_probability": 52, "upset_probability": 34,
+                "recommendation": "Monitor", "rationale": "Market is efficient",
+                "risk_factors": "Limited edge", "evidence_quality": "Moderate",
+            }],
+        }
+        with self.assertRaisesRegex(RuntimeError, "omitted the required underdog"):
+            _validate_analysis(
+                dict(base), team_names=("Team A", "Team B"),
+                require_underdog=True, expected_underdog="Team B",
+            )
+        correct = dict(base)
+        correct["underdog_analysis"] = [{
+            **base["underdog_analysis"][0], "underdog": "Team B",
+        }]
+        _validate_analysis(
+            correct, team_names=("Team A", "Team B"),
+            require_underdog=True, expected_underdog="Team B",
+        )
+
     def test_player_research_summary_calculates_season_and_recent_averages(self):
         usage = {
             "quarterbackone": {
