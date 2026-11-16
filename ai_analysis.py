@@ -795,9 +795,13 @@ def _validate_analysis(
         data, team_names, expected_underdog=expected_underdog,
         expected_spread=expected_spread,
     )
-    # A missing underdog assessment is a reportable data gap, not a reason to
-    # discard otherwise usable matchup analysis. The prompt still requests it,
-    # and _sanitize_underdog_analysis records the omission for the workbook.
+    # In strict spread-matchup validation, a missing or invalid underdog
+    # assessment triggers provider fallback. Non-strict callers can still retain
+    # otherwise usable matchup analysis and report the omission as a data gap.
+    if require_underdog and not data.get("underdog_analysis"):
+        raise RuntimeError(
+            "AI response omitted the required underdog cover/upset assessment for a spread matchup."
+        )
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
     if not isinstance(picks, list):
@@ -1557,48 +1561,48 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         )
 
     user_prefix = (
-        f"Analyze this upcoming NFL matchup: {matchup}.\n"
-        f"Kickoff: {game.get('Game Date (ET)', 'Not supplied')}.\n"
-        f"ESPN game line: {game.get('Betting Line', 'Unavailable')}.\n"
-        f"Game status: {game.get('Game Status', 'Not supplied')}.\n\n"
-        "Use supplied research as the factual basis; distinguish current from historical data. "
-        "Never claim unprovided browsing/verification or invent injuries, stats, lines, prices, sources or dates. "
-        "Return JSON only with keys summary, game_script, underdog_analysis, picks, sneaky_props, "
-        "touchdown_scorers (up to 5), injury_impact and data_gaps. Pick fields: rank, "
-        "market_type (Player Prop/Game Prop), player_or_team, bet_description, market_line, "
-        "play_threshold, estimated_hit_probability (0-100), confidence (1-10), "
-        "statistical_rationale, risk_factors and data_quality (Strong/Moderate/Limited). "
-        "underdog_analysis: exactly one row for the team receiving points, with cover_probability and outright upset_probability separately, recommendation (Monitor or Pass if no priced edge), rationale, risk_factors and evidence_quality. Never omit this assessment for a spread matchup. "
+        f"Analyze this upcoming NFL matchup: {matchup}.\\n"
+        f"Kickoff: {game.get('Game Date (ET)', 'Not supplied')}. "
+        f"ESPN line: {game.get('Betting Line', 'Unavailable')}. "
+        f"Status: {game.get('Game Status', 'Not supplied')}.\\n\\n"
+        "Use supplied research as the factual basis. Do not invent or claim unprovided "
+        "stats, injuries, lines, prices, sources, dates, browsing or verification. "
+        "Return JSON only: summary, game_script, underdog_analysis, picks, sneaky_props, "
+        "touchdown_scorers (up to 5), injury_impact, data_gaps. "
+        "Pick fields: rank, market_type (Player Prop/Game Prop), player_or_team, "
+        "bet_description, market_line, play_threshold, estimated_hit_probability (0-100), "
+        "confidence (1-10), statistical_rationale, risk_factors, data_quality "
+        "(Strong/Moderate/Limited). Include every schema field; use empty arrays when appropriate. "
+        "For every spread, return exactly one assessment for the team receiving points, "
+        "with separate cover_probability and outright upset_probability, recommendation, "
+        "rationale, risk_factors and evidence_quality. Monitor/Pass is valid; never force a bet. "
         f"Only use these matchup teams: {team_names[0]} and {team_names[1]}. "
-        "Target evidence-backed props. "
-        "Pass 1: core passing, rushing, receiving and anytime-TD markets; TD bets require a named-player quote and price. "
-        "Assess supported full-game/1Q/1H game lines. Never scale full-game averages into period player props; without period splits omit them or mark Limited (confidence <=5) and disclose the gap. "
-        "Pass 2: supported longest-play/combo/first-TD and 1Q/1H markets; first-half TDs need a quote. No sack/tackle/kicking bets or invented alternate lines. "
-        "Separate best recommendations in picks from Sneaky Props. Any 1Q/1H game-line idea belongs in picks as a Game Prop, never Sneaky Props. Never recommend opposing sides across full-game and period spreads. Game totals and team totals require an exact supplied market quote; never invent or infer a total. "
-        "Do not pair a team's moneyline and spread; spread probability cannot exceed its moneyline probability. Never call a veteran QB inexperienced solely due to a recent trade. "
-        "Assess underdog cover and upset probabilities separately for every spread. Always return the assessment even when the correct recommendation is Monitor or Pass; do not force a bet. "
-        "TDs: compare season scoring, carries/targets per game and recent scoring. "
-        "Passing TDs do not qualify a QB for anytime TD; require a rushing TD or 3+ rush attempts/game. "
-        "Never select a QB solely for starting. Injury impacts: never make the injured player their own beneficiary. Cover only material offensive absences, key defensive stars and verified role/QB news; assess researched downstream replacements, but do not assume benefits. Prefer a named researched beneficiary. Use affected_player='Team unit' only for a key defensive star (All-Pro/Pro Bowl caliber or elite production), never for ordinary starters or offensive-line absences. "
-        "Compare pass/rush/points defense separately; no 'elite' label without current metrics. Verify neutral/international venue and QB experience/former-team ties. Add sourced QB-reunion or heritage/international news impacts only when a named player is materially affected; omit narrative-only unit impacts. "
-        "Questionable players are conditional only (confidence <=6) with explicit risk disclosure. No injury designation found means final game-day active status is still pending; never label a player Active from absence of a report. "
+        "Prioritize evidence-backed player props. Compare each threshold with season and "
+        "last-three-game averages; reject unrealistic thresholds. Target five verified props "
+        "only when exact player, market, side, line and price are supplied; otherwise label "
+        "model-only and do not present as an actionable sportsbook pick. "
+        "Assess core passing, rushing, receiving and anytime-TD markets, plus supported "
+        "full-game/1Q/1H game lines and researched sneaky/first-TD opportunities. "
+        "Never invent alternate lines or totals; game/team totals require an exact quote. "
+        "Put 1Q/1H game lines in picks, not Sneaky Props; never oppose a full-game spread "
+        "with a period spread. Do not pair a team's moneyline and spread. "
+        "For player props, use researched season and recent production; omit unsupported "
+        "period props. TDs require scoring/opportunity evidence; passing TDs do not qualify "
+        "a QB for anytime TD (require a rushing TD profile). "
+        "Injury/news impacts: only material offensive absences, key defensive stars and "
+        "verified role/QB news. Research downstream replacements; never assume inherited "
+        "production or make the injured player their own beneficiary. 'Team unit' is allowed "
+        "only for an elite key defensive star, not ordinary starters or offensive-line absences. "
+        "Questionable players are conditional only, confidence <=6, with explicit risk. "
         "For Questionable TD candidates, risk_factors must start 'Questionable:' "
-        "(e.g. 'Questionable: active status unconfirmed'). "
-        "Exclude doubtful, out, or injured-reserve players. Never infer active status from roster presence. "
-        "If the roster does not support a player or evidence is inadequate, omit that candidate. Keep output extremely compact for free-model limits: "
-        "summary <= 90 words; game_script <= 65 words; each pick statistical_rationale <= 24 words "
-        "and risk_factors <= 14 words; each TD rationale <= 16 words and risk_factors <= 12 words; "
-        "return no more than five material injury/news impacts, each text field <= 16 words; prioritize Adam Schefter's dated ESPN reports for selected players and matchup teams; "
-        "data_gaps <= 4 short items. Use short phrases, not paragraphs. Do not repeat facts "
-        "across fields or add commentary outside JSON. "
-        "Each touchdown_scorer must "
-        "contain: rank, player, team, estimated_td_probability (number 0-100), "
-        "availability (current status), availability_evidence (latest dated practice/injury evidence), "
-        "confidence (integer 1-10), concise rationale, concise risk_factors. Each injury_impact "
-        "must contain: impact_type (Injury, News, Role Change, or Return), injured_player (subject player/news subject), team, availability, affected_player, "
-        "affected_team, impact_direction (Positive, Negative, or Mixed), "
-        "statistical_effect, prop_market, evidence, confidence (integer 1-10), "
-        "conditions. Include every listed field; use empty arrays when appropriate.\n"
+        "(e.g. 'Questionable: active status unconfirmed'). Exclude doubtful, out and IR; "
+        "absence of a report does not establish active status. "
+        "Prioritize dated Adam Schefter ESPN reports for selected players and matchup teams. "
+        "Keep output compact: summary <= 90 words; game_script <= 65 words; each pick "
+        "statistical_rationale <= 24 words and risk_factors <= 14 words; each TD rationale "
+        "<= 16 words and risk_factors <= 12 words; return no more than five material "
+        "injury/news impacts, each text field <= 16 words; data_gaps <= 4 short items. "
+        "Use short phrases, avoid repetition and add no commentary outside JSON.\\n"
     )
 
     prompt_metadata: dict[str, tuple[bool, bool, int]] = {}
