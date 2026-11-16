@@ -1248,7 +1248,7 @@ def _filter_game_level_picks(
         normalized = description.casefold()
         if re.search(r"\b(?:over|under)\b.*(?:total|points)", normalized):
             pick_team = _team_key(str(pick.get("player_or_team") or ""))
-            if pick_team in {_team_key(team_names[0]), _team_key(team_names[1])}:
+            if "team total" in normalized or pick_team in {_team_key(team_names[0]), _team_key(team_names[1])}:
                 gaps.append(
                     f"Removed ambiguous team total {pick.get('bet_description')}: the selected team requires an exact team-total quote, not a full-game total."
                 )
@@ -1277,7 +1277,7 @@ def _filter_game_level_picks(
                 gaps.append(f"Removed unverified game spread {pick.get('bet_description')}: scoreboard spread could not be matched.")
                 continue
             expected = scoreboard_spread if team_key == scoreboard_team else -scoreboard_spread
-            if line_value_match and (
+            if not line_value_match or (
                 abs(abs(float(line_value_match.group(1))) - abs(expected)) > 0.001
                 or float(line_value_match.group(1)) * expected < 0
             ):
