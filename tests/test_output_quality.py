@@ -253,9 +253,16 @@ class OutputQualityRuleTests(unittest.TestCase):
         correct["underdog_analysis"] = [{
             **base["underdog_analysis"][0], "underdog": "Team B",
         }]
+        with self.assertRaisesRegex(RuntimeError, "omitted the required underdog"):
+            _validate_analysis(
+                dict(correct), team_names=("Team A", "Team B"),
+                require_underdog=True, expected_underdog="Team B",
+                expected_spread=4.5,
+            )
         _validate_analysis(
             correct, team_names=("Team A", "Team B"),
             require_underdog=True, expected_underdog="Team B",
+            expected_spread=3.5,
         )
 
     def test_player_research_summary_calculates_season_and_recent_averages(self):
