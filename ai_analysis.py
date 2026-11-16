@@ -1157,33 +1157,31 @@ def _separate_unverified_player_props(
     gaps = []
     model_only = []
 
-    def quote_has_same_market_side(pick: dict[str, Any], quote: dict[str, Any]) -> bool:
+    def quote_has_same_market_different_point(pick: dict[str, Any], quote: dict[str, Any]) -> bool:
         if _normalize_name(str(pick.get("player_or_team") or "")) != _normalize_name(str(quote.get("player") or "")):
             return False
         expected_key = _expected_market_key(str(pick.get("bet_description") or ""))
         if not expected_key or str(quote.get("market_key") or "") != expected_key:
             return False
         if expected_key in {"player_anytime_td", "player_1st_td"}:
-            return str(quote.get("side") or "").strip().casefold() in {"yes", "over"}
+            return False
         description = " ".join((
             str(pick.get("bet_description") or ""),
             str(pick.get("play_threshold") or ""),
         ))
         pick_match = re.search(r"\b(over|under)\s*(-?\d+(?:\.\d+)?)", description, re.I)
-        quote_side = str(quote.get("side") or "").strip().casefold()
         quote_point = quote.get("point")
         if quote_point in (None, ""):
             quote_match = re.search(r"\b(over|under)\s*(-?\d+(?:\.\d+)?)", str(quote.get("line") or ""), re.I)
             if quote_match:
-                quote_side = quote_match.group(1).casefold()
                 quote_point = quote_match.group(2)
-        if not pick_match or quote_point in (None, "") or quote_side != pick_match.group(1).casefold():
+        if not pick_match or quote_point in (None, ""):
             return False
         try:
-            float(quote_point)
-            return True
+            return abs(float(pick_match.group(2)) - float(quote_point)) >= 0.0001
         except (TypeError, ValueError):
             return False
+
 
     def match_quote(pick: dict[str, Any]) -> dict[str, Any] | None:
         return next((
@@ -1197,13 +1195,10 @@ def _separate_unverified_player_props(
         ), None)
 
     def mismatched_line_quote(pick: dict[str, Any]) -> dict[str, Any] | None:
-        expected_key = _expected_market_key(str(pick.get("bet_description") or ""))
-        if expected_key in {"player_anytime_td", "player_1st_td"}:
-            return None
         return next((
             quote for quote in verified_quotes
             if isinstance(quote, dict)
-            and quote_has_same_market_side(pick, quote)
+            and quote_has_same_market_different_point(pick, quote)
             and quote.get("line") not in (None, "")
             and quote.get("price") not in (None, "")
             and quote.get("sportsbook") and quote.get("source_url")
