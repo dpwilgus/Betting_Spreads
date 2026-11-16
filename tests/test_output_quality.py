@@ -304,7 +304,7 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(data["picks"][0]["player_or_team"], "Los Angeles Chargers")
         self.assertTrue(any("opposite team" in gap for gap in gaps))
 
-    def test_underdog_assessment_is_required_for_spread_matchups(self):
+    def test_missing_underdog_assessment_does_not_discard_valid_spread_analysis(self):
         data = {
             "summary": "Summary", "game_script": "Script",
             "picks": [{
@@ -317,13 +317,21 @@ class OutputQualityRuleTests(unittest.TestCase):
             "touchdown_scorers": [], "sneaky_props": [], "injury_impact": [],
             "underdog_analysis": [],
         }
-        with self.assertRaisesRegex(RuntimeError, "omitted the required underdog"):
-            _validate_analysis(data, team_names=("Team A", "Team B"), require_underdog=True)
+        _validate_analysis(data, team_names=("Team A", "Team B"), require_underdog=True)
+        self.assertEqual(data["underdog_analysis"], [])
+        self.assertTrue(any("Underdog assessment unavailable" in gap for gap in data["data_gaps"]))
 
     def test_underdog_must_match_team_receiving_points(self):
         base = {
             "summary": "Summary", "game_script": "Script",
-            "picks": [], "touchdown_scorers": [], "sneaky_props": [],
+            "picks": [{
+                "market_type": "Game Prop", "player_or_team": "Team A",
+                "bet_description": "Team A +3.5 spread", "market_line": "Team B -3.5",
+                "play_threshold": "Team A +3.5", "estimated_hit_probability": 52,
+                "confidence": 5, "statistical_rationale": "Evidence",
+                "risk_factors": "Risk", "data_quality": "Moderate",
+            }],
+            "touchdown_scorers": [], "sneaky_props": [],
             "injury_impact": [],
             "underdog_analysis": [{
                 "underdog": "Team A", "spread": "+3.5",
@@ -332,26 +340,34 @@ class OutputQualityRuleTests(unittest.TestCase):
                 "risk_factors": "Limited edge", "evidence_quality": "Moderate",
             }],
         }
-        with self.assertRaisesRegex(RuntimeError, "omitted the required underdog"):
-            _validate_analysis(
-                dict(base), team_names=("Team A", "Team B"),
-                require_underdog=True, expected_underdog="Team B",
-            )
+        wrong_team = dict(base)
+        _validate_analysis(
+            wrong_team, team_names=("Team A", "Team B"),
+            require_underdog=True, expected_underdog="Team B",
+        )
+        self.assertEqual(wrong_team["underdog_analysis"], [])
+        self.assertTrue(any("wrong underdog" in gap for gap in wrong_team["data_gaps"]))
+
+        wrong_spread = dict(base)
+        wrong_spread["underdog_analysis"] = [{
+            **base["underdog_analysis"][0], "underdog": "Team B",
+        }]
+        _validate_analysis(
+            wrong_spread, team_names=("Team A", "Team B"),
+            require_underdog=True, expected_underdog="Team B", expected_spread=4.5,
+        )
+        self.assertEqual(wrong_spread["underdog_analysis"], [])
+        self.assertTrue(any("spread mismatch" in gap for gap in wrong_spread["data_gaps"]))
+
         correct = dict(base)
         correct["underdog_analysis"] = [{
             **base["underdog_analysis"][0], "underdog": "Team B",
         }]
-        with self.assertRaisesRegex(RuntimeError, "omitted the required underdog"):
-            _validate_analysis(
-                dict(correct), team_names=("Team A", "Team B"),
-                require_underdog=True, expected_underdog="Team B",
-                expected_spread=4.5,
-            )
         _validate_analysis(
             correct, team_names=("Team A", "Team B"),
-            require_underdog=True, expected_underdog="Team B",
-            expected_spread=3.5,
+            require_underdog=True, expected_underdog="Team B", expected_spread=3.5,
         )
+        self.assertEqual(len(correct["underdog_analysis"]), 1)
 
     def test_player_research_summary_calculates_season_and_recent_averages(self):
         usage = {
