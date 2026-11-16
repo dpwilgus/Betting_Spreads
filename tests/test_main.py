@@ -22,6 +22,7 @@ class MatchupFilterTests(unittest.TestCase):
             "sneaky_props": [],
             "injury_impact": [],
             "underdog_analysis": [],
+            "player_research_summary": [],
             "analysis_version": 12,
             "ai_provider": "groq",
         }
@@ -34,7 +35,8 @@ class MatchupFilterTests(unittest.TestCase):
             "sneaky_props": [],
             "injury_impact": [],
             "underdog_analysis": [],
-            "analysis_version": 11,
+            "player_research_summary": [],
+            "analysis_version": 12,
             "ai_provider": "groq",
         }
         for section in (
