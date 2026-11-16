@@ -313,12 +313,12 @@ def _call_provider(
                     )
                 payload["reasoning_effort"] = reasoning_effort
         else:
-            payload["max_completion_tokens"] = int(
-                str(max(256, min(
-                    int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")), 1600
-                )))
-                if provider.name == "groq" else "1400"
-            )
+            if provider.name == "groq":
+                payload["max_completion_tokens"] = max(
+                    256, min(int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")), 1600)
+                )
+            else:
+                payload["max_completion_tokens"] = 1400
             payload["response_format"] = {"type": "json_object"}
         if provider.name == "groq":
             if model.startswith("openai/gpt-oss"):
