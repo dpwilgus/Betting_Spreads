@@ -1537,7 +1537,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     def prompts_for_provider(provider_name: str) -> tuple[str, str]:
         if provider_name == "groq":
             # Leave 500 TPM tokens as a safety margin for estimation variance.
-            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600"))
+            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "2400"))
             input_token_budget = max(1000, 8000 - output_tokens - 500)
             combined_budget = int(input_token_budget * 3.5)
         else:
