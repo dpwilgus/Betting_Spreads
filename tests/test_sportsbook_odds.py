@@ -1,5 +1,6 @@
 import unittest
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 import sportsbook_odds
 
@@ -114,6 +115,101 @@ class OddsApiMarketTests(unittest.TestCase):
         self.assertEqual(quotes[0]["player"], "Gavin Bartholomew")
         self.assertEqual(quotes[0]["line"], "Yes")
         self.assertEqual(quotes[0]["price"], "+275")
+
+    def test_parse_full_game_moneyline_spread_and_total_quotes(self):
+        event = {
+            "id": "odds-game-lines",
+            "bookmakers": [{
+                "key": "draftkings", "title": "DraftKings",
+                "markets": [
+                    {"key": "h2h", "outcomes": [
+                        {"name": "Baltimore Ravens", "price": -190},
+                    ]},
+                    {"key": "spreads", "outcomes": [
+                        {"name": "Los Angeles Chargers", "point": 4.5, "price": -110},
+                    ]},
+                    {"key": "totals", "outcomes": [
+                        {"name": "Under", "point": 47.5, "price": -105},
+                    ]},
+                ],
+            }],
+        }
+        quotes = sportsbook_odds._parse_quotes(event, "2026-11-16T16:00:00+00:00")
+        by_market = {quote["market_key"]: quote for quote in quotes}
+        self.assertEqual(by_market["h2h"]["player"], "Baltimore Ravens")
+        self.assertEqual(by_market["spreads"]["line"], "Los Angeles Chargers +4.5")
+        self.assertEqual(by_market["spreads"]["market_type"], "game")
+        self.assertEqual(by_market["totals"]["line"], "Under 47.5")
+        self.assertEqual(by_market["totals"]["player"], "Game Total")
+
+    def test_event_market_discovery_limits_odds_request_to_listed_markets(self):
+        game = {
+            "Away Team": "Los Angeles Chargers",
+            "Home Team": "Baltimore Ravens",
+            "event_start_utc": "2026-11-16T01:15:00Z",
+        }
+        events = [{
+            "id": "event-verified-markets",
+            "away_team": "Los Angeles Chargers",
+            "home_team": "Baltimore Ravens",
+            "commence_time": "2026-11-16T01:15:00Z",
+        }]
+        discovery = {
+            "bookmakers": [{
+                "key": "draftkings",
+                "markets": [
+                    {"key": "h2h"}, {"key": "spreads"},
+                    {"key": "player_pass_yds"}, {"key": "player_anytime_td"},
+                ],
+            }],
+        }
+        odds = {
+            "id": "event-verified-markets",
+            "bookmakers": [{
+                "key": "draftkings", "title": "DraftKings",
+                "markets": [
+                    {"key": "h2h", "outcomes": [
+                        {"name": "Baltimore Ravens", "price": -190},
+                    ]},
+                    {"key": "spreads", "outcomes": [
+                        {"name": "Los Angeles Chargers", "point": 4.5, "price": -110},
+                    ]},
+                    {"key": "player_pass_yds", "outcomes": [
+                        {"name": "Over", "description": "Justin Herbert", "point": 205.5, "price": -115},
+                    ]},
+                ],
+            }],
+        }
+        responses = [
+            (events, {}),
+            (discovery, {}),
+            (odds, {"x-requests-used": "4", "x-requests-remaining": "199", "x-requests-last": "3"}),
+        ]
+        with patch.object(sportsbook_odds, "get_api_key", return_value="test-key"), \
+             patch.object(sportsbook_odds, "_load_fresh_cache", return_value=None), \
+             patch.object(sportsbook_odds, "_known_remaining_credits", return_value=None), \
+             patch.object(sportsbook_odds, "_save_quota_state"), \
+             patch.object(sportsbook_odds, "_save_cache"), \
+             patch.object(sportsbook_odds, "_request_json", side_effect=responses) as request:
+            result = sportsbook_odds.fetch_event_quotes(
+                game,
+                ("h2h", "spreads", "totals", "player_pass_yds", "player_anytime_td"),
+            )
+        self.assertEqual(request.call_count, 3)
+        requested = request.call_args_list[2].args[1]["markets"]
+        self.assertEqual(requested, "h2h,spreads,player_pass_yds,player_anytime_td")
+        self.assertEqual(len(result["quotes"]), 3)
+        self.assertEqual(result["requested_markets"], [
+            "h2h", "spreads", "player_pass_yds", "player_anytime_td",
+        ])
+        self.assertEqual(
+            len([quote for quote in result["quotes"] if quote["market_type"] == "game"]),
+            2,
+        )
+        self.assertEqual(
+            len([quote for quote in result["quotes"] if quote["market_type"] == "player"]),
+            1,
+        )
 
     def test_event_matching_uses_both_teams(self):
         game = {
