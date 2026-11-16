@@ -174,7 +174,7 @@ class ProviderFallbackTests(unittest.TestCase):
         groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
 
-        with patch(
+        with patch.dict("os.environ", {"GROQ_MAX_COMPLETION_TOKENS": "1600"}), patch(
             "ai_providers.ensure_configured",
             return_value=[(groq, "groq-key"), (gemini, "gemini-key")],
         ), patch(
