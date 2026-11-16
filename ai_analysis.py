@@ -1164,7 +1164,7 @@ def _separate_unverified_player_props(
         quote_side = str(quote.get("side") or "").strip().casefold()
         quote_point = quote.get("point")
         if quote_point in (None, ""):
-            quote_match = re.search(r"\\b(over|under)\\s*(-?\\d+(?:\\.\\d+)?)", str(quote.get("line") or ""), re.I)
+            quote_match = re.search(r"\b(over|under)\s*(-?\d+(?:\.\d+)?)", str(quote.get("line") or ""), re.I)
             if quote_match:
                 quote_side = quote_match.group(1).casefold()
                 quote_point = quote_match.group(2)
