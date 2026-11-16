@@ -392,7 +392,7 @@ def generate_json(
             if estimated_total > 6500:
                 failures.append(
                     "groq: request skipped by local TPM preflight "
-                    f"(estimated prompt + output {estimated_total} tokens; 8,000 TPM limit)."
+                    f"(estimated prompt + output {estimated_total} tokens; 6,500-token safety budget under the 8,000 TPM limit)."
                 )
                 continue
         request_user_prompt = provider_user
