@@ -351,17 +351,19 @@ def _compact_team_stats(data: dict[str, Any]) -> dict[str, Any]:
     # and games played but omits a direct points-per-game field.
     general_stats = result["categories"].get("general", [])
     scoring_stats = result["categories"].get("scoring", [])
-    games_played = next(
-        (float(item["value"]) for item in general_stats
-         if item.get("name") == "gamesPlayed" and item.get("value") not in (None, "")),
-        0.0,
-    )
+    def numeric_value(items: list[dict[str, Any]], stat_name: str) -> float:
+        for item in items:
+            if item.get("name") != stat_name or item.get("value") in (None, ""):
+                continue
+            try:
+                return float(str(item["value"]).replace(",", ""))
+            except (TypeError, ValueError):
+                return 0.0
+        return 0.0
+
+    games_played = numeric_value(general_stats, "gamesPlayed")
     has_points_per_game = any(item.get("name") == "pointsPerGame" for item in scoring_stats)
-    total_points = next(
-        (float(item["value"]) for item in scoring_stats
-         if item.get("name") == "totalPoints" and item.get("value") not in (None, "")),
-        0.0,
-    )
+    total_points = numeric_value(scoring_stats, "totalPoints")
     if games_played > 0 and total_points > 0 and not has_points_per_game:
         result["categories"].setdefault("scoring", []).append({
             "name": "pointsPerGame",
