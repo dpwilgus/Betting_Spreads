@@ -128,6 +128,19 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertIn('"upset_probability":NUMBER', instruction)
         self.assertIn("do not copy example values", instruction)
 
+    def test_research_budget_preserves_live_sportsbook_quotes(self):
+        research = "\n\n".join([
+            "INDEPENDENT LIVE NFL RESEARCH: matchup context",
+            "ODDS API MARKET DISCOVERY: available event markets=h2h,spreads,player_pass_yds",
+            "THE ODDS API VERIFIED PLAYER-PROP QUOTES: Justin Herbert | passing yards | Over 205.5 | -115 | DraftKings",
+            "OPTIONAL HISTORICAL RECAP: " + ("old recap " * 500),
+        ])
+        bounded, truncated = _bounded_research_text(research, max_chars=500)
+        self.assertIn("THE ODDS API VERIFIED PLAYER-PROP QUOTES", bounded)
+        self.assertIn("Justin Herbert", bounded)
+        self.assertNotIn("OPTIONAL HISTORICAL RECAP", bounded)
+        self.assertFalse(truncated)
+
     def test_analysis_schema_does_not_require_underdog_section(self):
         self.assertNotIn("underdog_analysis", ANALYSIS_SCHEMA["required"])
         self.assertEqual(
