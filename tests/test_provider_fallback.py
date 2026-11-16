@@ -477,8 +477,8 @@ class ProviderFallbackTests(unittest.TestCase):
 
     def test_analysis_prompt_uses_compact_contract_and_keeps_research(self):
         game = {
-            "Away Team": "Away", "Home Team": "Home",
-            "Game Date (ET)": "Sunday", "Betting Line": "Unavailable",
+            "Away Team": "Los Angeles Chargers", "Home Team": "Baltimore Ravens",
+            "Game Date (ET)": "Monday", "Betting Line": "BAL -4.5",
         }
         research = {
             "research_text": "CURRENT INJURY EVIDENCE: Example player is questionable.",
@@ -501,6 +501,9 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("statistical_rationale", user_prompt)
         self.assertIn("touchdown_scorers", user_prompt)
         self.assertIn("underdog_analysis", user_prompt)
+        self.assertIn('"underdog":"Los Angeles Chargers"', user_prompt)
+        self.assertIn('"spread":"+4.5"', user_prompt)
+        self.assertIn('"cover_probability":NUMBER', user_prompt)
         self.assertIn("Never default to the favorite", system_prompt)
         self.assertIn("unit elite", system_prompt)
         self.assertIn("heritage", system_prompt)
