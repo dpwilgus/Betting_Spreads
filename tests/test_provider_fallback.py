@@ -360,6 +360,35 @@ class ProviderFallbackTests(unittest.TestCase):
             ["gemini", "groq", "groq"],
         )
 
+    def test_validation_retry_includes_actionable_feedback(self):
+        provider = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+
+        def validator(result):
+            if result.get("valid") is not True:
+                raise RuntimeError("AI response omitted the required underdog assessment.")
+
+        with patch(
+            "ai_providers.ensure_configured", return_value=[(provider, "key-one")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers.time.sleep"
+        ), patch(
+            "ai_providers._call_provider",
+            side_effect=[{"valid": False}, {"valid": True, "summary": "repaired"}],
+        ) as call:
+            result, selected = generate_json(
+                "system", "original user prompt", validator=validator
+            )
+
+        self.assertEqual(selected, "gemini")
+        self.assertEqual(result["summary"], "repaired")
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(call.call_args_list[0].args[3], "original user prompt")
+        retry_prompt = call.call_args_list[1].args[3]
+        self.assertIn("VALIDATION CORRECTION REQUIRED", retry_prompt)
+        self.assertIn("omitted the required underdog assessment", retry_prompt)
+
     def test_falls_back_when_provider_response_fails_validation(self):
         first = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
         second = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
