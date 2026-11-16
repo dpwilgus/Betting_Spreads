@@ -714,7 +714,7 @@ def _sanitize_underdog_analysis(
     team_names: tuple[str, str] | None,
     expected_underdog: str | None = None,
     expected_spread: float | None = None,
-) -> None:
+) -> list[str]:
     """Normalize or discard malformed underdog output without losing matchup analysis."""
     rows = data.get("underdog_analysis", [])
     gaps = data.get("data_gaps")
