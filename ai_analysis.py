@@ -352,6 +352,20 @@ def _build_player_research_summary(
                 round((rush_td or 0) + (rec_td or 0), 2)
                 if rush_td is not None or rec_td is not None else None
             )
+            recent_td_values = []
+            for item in recent[:3]:
+                stats = item.get("stats", {}) if isinstance(item, dict) else {}
+                if isinstance(stats, dict) and (
+                    "rushingTouchdowns" in stats or "receivingTouchdowns" in stats
+                ):
+                    recent_td_values.append(
+                        _stat_number(stats, "rushingTouchdowns")
+                        + _stat_number(stats, "receivingTouchdowns")
+                    )
+            row["tds_scored_recent"] = (
+                round(sum(recent_td_values) / len(recent_td_values), 2)
+                if recent_td_values else None
+            )
             rows.append(row)
     return rows
 
