@@ -1560,8 +1560,8 @@ def _underdog_format_instruction(
     """Give the model a concrete, matchup-specific underdog JSON shape."""
     if not expected_underdog or expected_spread is None:
         return (
-            "\\nUNDERDOG FORMAT: If a numeric ESPN spread is available in the supplied "
-            "line, return one underdog assessment; otherwise use an empty array.\\n"
+            "\nUNDERDOG FORMAT: If a numeric ESPN spread is available in the supplied "
+            "line, return one underdog assessment; otherwise use an empty array.\n"
         )
     spread = f"+{expected_spread:g}"
     template = (
@@ -1571,11 +1571,11 @@ def _underdog_format_instruction(
         + '"risk_factors":"SHORT RISK","evidence_quality":"Moderate"}]'
     )
     return (
-        "\\nMATCHUP-SPECIFIC UNDERDOG FORMAT (replace placeholders; this is a structure example): "
+        "\nMATCHUP-SPECIFIC UNDERDOG FORMAT (replace placeholders; this is a structure example): "
         + template
         + " The probabilities must be numeric 0-100, with upset_probability no greater "
         "than cover_probability. Estimate them from supplied evidence; do not copy example "
-        "values or force a wager.\\n"
+        "values or force a wager.\n"
     )
 
 
