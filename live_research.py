@@ -65,7 +65,8 @@ STAT_FIELDS = {
         "gamesPlayed", "fumblesAndLost",
     },
     "scoring": {
-        "totalPoints", "totalTouchdowns",
+        "totalPoints", "totalTouchdowns", "pointsPerGame",
+        "pointsFor", "pointsScored", "avgPointsFor",
     },
     "kicking": {
         "fieldGoalsMade", "fieldGoalPct",
@@ -916,6 +917,51 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
     )
     return _compact_team_stats(_get_json(endpoint_url, timeout=15))
 
+@lru_cache(maxsize=1)
+def _adam_schefter_news() -> list[dict[str, Any]]:
+    """Fetch Adam Schefter's ESPN contributor feed and normalize article records."""
+    url = (
+        "https://site.web.api.espn.com/apis/v2/flex?"
+        "region=us&lang=en&contentorigin=espn&contributor=adam-schefter&"
+        "limit=100&pubkey=contributor-page"
+    )
+    payload = _get_json(url, timeout=20)
+    found: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, dict):
+            headline = value.get("headline") or value.get("title")
+            published = value.get("published") or value.get("lastModified") or value.get("date")
+            links = value.get("links") or {}
+            web_link = links.get("web") if isinstance(links, dict) else {}
+            href = (
+                web_link.get("href") if isinstance(web_link, dict)
+                else value.get("url") or value.get("href") or ""
+            )
+            if headline and published and href:
+                key = str(href)
+                if key not in seen:
+                    seen.add(key)
+                    found.append({
+                        "headline": str(headline)[:220],
+                        "description": str(value.get("description") or value.get("summary") or "")[:420],
+                        "byline": "Adam Schefter",
+                        "published": str(published),
+                        "url": key,
+                    })
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(payload)
+    found.sort(key=lambda item: str(item.get("published") or ""), reverse=True)
+    return found[:100]
+
+
 def _confirmed_starting_qb_news(
     player_name: str,
     articles: list[dict[str, Any]],
@@ -967,6 +1013,7 @@ def _team_news(team_id: str) -> dict[str, Any]:
         compact.append({
             "headline": str(headline)[:220],
             "description": str(article.get("description") or article.get("summary") or "")[:420],
+            "byline": str(article.get("byline") or article.get("author") or "")[:120],
             "published": article.get("published") or article.get("lastModified"),
             "url": href,
         })
@@ -1022,6 +1069,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         try:
             data = _get_json(api_url)
             compact = _compact_summary(data, retrieved_at)
+            verified_game_markets = _compact_pickcenter(data, retrieved_at)
             sections.extend([
                 "ESPN MATCHUP, PLAYER, INJURY, MARKET AND RECENT-GAME DATA:",
                 compact,
@@ -1243,6 +1291,7 @@ def reset_research_cache() -> None:
     _team_depth_chart.cache_clear()
     _player_gamelog.cache_clear()
     _core_team_injuries.cache_clear()
+    _adam_schefter_news.cache_clear()
 
 def _compact_injury_prompt_reports(
     reports: list[dict[str, Any]],
@@ -1300,6 +1349,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     news_articles_by_team: dict[str, list[dict[str, Any]]] = {}
     roster_quarterbacks_by_team: dict[str, list[str]] = {}
     confirmed_starting_qbs: dict[str, str] = {}
+    verified_game_markets: list[dict[str, Any]] = []
 
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
@@ -1510,6 +1560,56 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         f"ESPN recent team news unavailable for {team_name}: {type(exc).__name__}"
                     )
 
+            # Adam Schefter's contributor feed is checked separately from team feeds.
+            # His reporting is prioritized for selected players and the two matchup teams.
+            schefter_feed_url = (
+                "https://site.web.api.espn.com/apis/v2/flex?"
+                "region=us&lang=en&contentorigin=espn&contributor=adam-schefter&"
+                "limit=100&pubkey=contributor-page"
+            )
+            sources.append({"title": "Adam Schefter ESPN contributor feed", "url": schefter_feed_url})
+            try:
+                selected_names = {
+                    str(candidate.get("name") or "").strip()
+                    for candidates in selected_player_candidates.values()
+                    for candidate in candidates
+                    if isinstance(candidate, dict) and candidate.get("name")
+                }
+                team_terms = {
+                    str(team_name).casefold()
+                    for team_name in teams.values()
+                } | {
+                    str(team_name).split()[-1].casefold()
+                    for team_name in teams.values() if str(team_name).split()
+                }
+                schefter_articles = _adam_schefter_news()
+                relevant_schefter = []
+                for article in schefter_articles:
+                    article_text = (
+                        str(article.get("headline") or "") + " "
+                        + str(article.get("description") or "")
+                    ).casefold()
+                    if any(name.casefold() in article_text for name in selected_names) or any(
+                        term and re.search(r"\\b" + re.escape(term) + r"\\b", article_text)
+                        for term in team_terms
+                    ):
+                        relevant_schefter.append(article)
+                for article in relevant_schefter[:12]:
+                    news_sections.append(
+                        "ADAM SCHEFTER PRIORITY NEWS — "
+                        + json.dumps(article, ensure_ascii=False, separators=(",", ":"))
+                    )
+                    sources.append({
+                        "title": "Adam Schefter — " + str(article.get("headline") or "NFL report"),
+                        "url": str(article.get("url") or ""),
+                    })
+                if not relevant_schefter:
+                    sections.append(
+                        "Adam Schefter contributor feed checked; no recent article matched the selected matchup players or teams."
+                    )
+            except Exception as exc:
+                sections.append(f"Adam Schefter contributor feed unavailable: {type(exc).__name__}")
+
             # A newer, dated team announcement that a QB will start supersedes
             # an older injury-feed designation; preserve both sources in research.
             # Check every rostered quarterback, not only selected research
@@ -1696,4 +1796,5 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         "rosters": rosters,
         "injury_statuses": injury_statuses,
         "selected_player_candidates": selected_player_candidates,
+        "verified_game_markets": verified_game_markets,
     }
