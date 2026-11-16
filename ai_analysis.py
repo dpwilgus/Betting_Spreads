@@ -1832,7 +1832,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
     data["player_research_summary"] = player_research_summary
-    data["analysis_version"] = 12
+    data["analysis_version"] = 13
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
