@@ -1270,7 +1270,19 @@ def _filter_game_level_picks(
         normalized = description.casefold()
         if re.search(r"\b(?:over|under)\b.*(?:total|points)", normalized):
             pick_team = _team_key(str(pick.get("player_or_team") or ""))
-            if "team total" in normalized or pick_team in {_team_key(team_names[0]), _team_key(team_names[1])}:
+            identity_text = " ".join(str(pick.get(field) or "") for field in (
+                "bet_description", "play_threshold"
+            ))
+            normalized_identity = _normalize_name(identity_text)
+            team_mentioned = any(
+                _normalize_name(term) in normalized_identity
+                for team in team_names
+                for term in (team, str(team).split()[-1])
+            )
+            if "team total" in normalized or team_mentioned or pick_team in {
+                _team_key(team_names[0]), _team_key(team_names[1])
+            }:
+
                 gaps.append(
                     f"Removed ambiguous team total {pick.get('bet_description')}: the selected team requires an exact team-total quote, not a full-game total."
                 )
