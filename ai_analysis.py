@@ -136,7 +136,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "summary": {"type": "string"},
         "game_script": {"type": "string"},
         "underdog_analysis": {
-            "type": "array", "minItems": 1, "maxItems": 1,
+            "type": "array", "minItems": 0, "maxItems": 1,
             "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {
@@ -812,29 +812,13 @@ def _validate_analysis(
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
         raise RuntimeError("AI response is missing the matchup summary or game script.")
-    # Preserve whether the model attempted an underdog assessment before
-    # sanitization replaces invalid rows with an empty list.
-    raw_underdog_rows = data.get("underdog_analysis")
-    attempted_underdog_assessment = bool(raw_underdog_rows)
-    # Only a validated underdog assessment can count as usable analysis.
-    # Invalid rows are discarded with a data-gap warning and cannot make an
-    # otherwise empty response appear successful.
-    underdog_rejections = _sanitize_underdog_analysis(
+    # Underdog analysis is valuable, but it is a supplemental section. A
+    # malformed or omitted underdog row must never discard otherwise usable
+    # matchup analysis; the sanitizer records a visible data-gap warning.
+    _sanitize_underdog_analysis(
         data, team_names, expected_underdog=expected_underdog,
         expected_spread=expected_spread,
     )
-    # An empty placeholder with no picks is retained for normalization tests;
-    # actual betting output or an invalid attempted row must trigger fallback.
-    has_analysis_or_attempt = bool(data.get("picks")) or attempted_underdog_assessment
-    if require_underdog and has_analysis_or_attempt and not data.get("underdog_analysis"):
-        detail = (
-            " Rejection detail: " + "; ".join(underdog_rejections[:3]) + "."
-            if underdog_rejections else ""
-        )
-        raise RuntimeError(
-            "AI response omitted the required underdog cover/upset assessment for a spread matchup."
-            + detail
-        )
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
     if not isinstance(picks, list):
@@ -877,7 +861,7 @@ def _validate_analysis(
             break
     if not any((
         picks, scorers, sneaky_response if isinstance(sneaky_response, list) else [],
-        valid_injury_response, underdog_response, require_underdog,
+        valid_injury_response, underdog_response,
     )):
         raise RuntimeError(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
@@ -1569,6 +1553,32 @@ def _deduplicate_correlated_game_picks(
     return retained, removed_any
 
 
+def _underdog_format_instruction(
+    expected_underdog: str | None,
+    expected_spread: float | None,
+) -> str:
+    """Give the model a concrete, matchup-specific underdog JSON shape."""
+    if not expected_underdog or expected_spread is None:
+        return (
+            "\\nUNDERDOG FORMAT: If a numeric ESPN spread is available in the supplied "
+            "line, return one underdog assessment; otherwise use an empty array.\\n"
+        )
+    spread = f"+{expected_spread:g}"
+    template = (
+        '[{"underdog":"' + expected_underdog + '","spread":"' + spread
+        + '","cover_probability":NUMBER,"upset_probability":NUMBER,'
+        + '"recommendation":"Monitor","rationale":"SHORT EVIDENCE-BASED REASON",'
+        + '"risk_factors":"SHORT RISK","evidence_quality":"Moderate"}]'
+    )
+    return (
+        "\\nMATCHUP-SPECIFIC UNDERDOG FORMAT (replace placeholders; this is a structure example): "
+        + template
+        + " The probabilities must be numeric 0-100, with upset_probability no greater "
+        "than cover_probability. Estimate them from supplied evidence; do not copy example "
+        "values or force a wager.\\n"
+    )
+
+
 def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -> dict[str, Any]:
     """Collect current data without AI, then use the first healthy configured AI provider."""
     research = research or collect_game_research(game)
@@ -1609,6 +1619,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "For every spread, return exactly one assessment for the team receiving points, "
         "with separate cover_probability and outright upset_probability, recommendation, "
         "rationale, risk_factors and evidence_quality. Monitor/Pass is valid; never force a bet. "
+        "The underdog_analysis value must be a one-item array with all eight fields; "
+        "use the exact underdog team and positive points-received spread shown below. "
+        "Do not omit this section or return an empty array when a numeric spread is supplied. "
         f"Only use these matchup teams: {team_names[0]} and {team_names[1]}. "
         "Prioritize evidence-backed player props. Compare each threshold with season and "
         "last-three-game averages; reject unrealistic thresholds. Target five verified props "
@@ -1643,8 +1656,10 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     def prompts_for_provider(provider_name: str) -> tuple[str, str]:
         if provider_name == "groq":
             # Leave 500 TPM tokens as a safety margin for estimation variance.
-            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "2400"))
-            input_token_budget = max(1000, 8000 - output_tokens - 500)
+            # Keep total prompt + completion demand below the 8k TPM ceiling
+            # with a larger safety margin for other requests in the rolling window.
+            output_tokens = int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600"))
+            input_token_budget = max(1000, 6500 - output_tokens - 500)
             combined_budget = int(input_token_budget * 3.5)
         else:
             combined_budget = len(instructions) + len(user_prefix) + MAX_RESEARCH_PROMPT_CHARS
@@ -1657,7 +1672,14 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             len(bounded) < len(str(original_research or "")) and not was_truncated,
             len(bounded),
         )
-        return instructions, user_prefix + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded
+        underdog_format = _underdog_format_instruction(
+            expected_underdog, expected_spread
+        )
+        return (
+            instructions,
+            user_prefix + underdog_format
+            + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded,
+        )
 
     rosters = research.get("rosters")
     spread_match = re.search(
