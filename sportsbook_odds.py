@@ -23,6 +23,7 @@ SERVICE_NAME = "Betting Spreads"
 ACCOUNT_NAME = "the_odds_api_key"
 BASE_URL = "https://api.the-odds-api.com/v4"
 SPORT_KEY = "americanfootball_nfl"
+GAME_MARKETS = ("h2h", "spreads", "totals")
 
 # Pass 1: core player markets. Anytime TD is deliberately included.
 PASS1_MARKETS = (
@@ -62,6 +63,9 @@ PASS2_MARKETS = (
 )
 
 MARKET_LABELS = {
+    "h2h": "full-game moneyline",
+    "spreads": "full-game spread",
+    "totals": "full-game total",
     "player_pass_yds": "passing yards",
     "player_pass_tds": "passing touchdowns",
     "player_pass_attempts": "passing attempts",
@@ -321,6 +325,7 @@ def _find_event(game: dict[str, Any], events: list[dict[str, Any]]) -> dict[str,
 
 
 def _parse_quotes(event_data: dict[str, Any], retrieved_at: str) -> list[dict[str, Any]]:
+    """Normalize player props and full-game sportsbook markets."""
     quotes: list[dict[str, Any]] = []
     event_id = str(event_data.get("id") or "")
     for bookmaker in event_data.get("bookmakers", []) or []:
@@ -331,35 +336,61 @@ def _parse_quotes(event_data: dict[str, Any], retrieved_at: str) -> list[dict[st
             label = MARKET_LABELS.get(market_key, market_key.replace("_", " "))
             updated = str(market.get("last_update") or retrieved_at)
             for outcome in market.get("outcomes", []) or []:
-                player = str(outcome.get("description") or "").strip()
                 side = str(outcome.get("name") or "").strip()
-                # Some yes/no scorer feeds put the player in name and Yes/No in description.
-                if market_key in {"player_anytime_td", "player_tds", "player_1st_td", "player_last_td"}:
-                    if player.casefold() in {"yes", "no", "over", "under"} and side.casefold() not in {"yes", "no", "over", "under"}:
-                        player, side = side, player
-                    elif not player and side.casefold() not in {"yes", "no", "over", "under"}:
-                        player, side = side, "Yes"
-                if not player:
-                    continue
+                description = str(outcome.get("description") or "").strip()
                 point = outcome.get("point")
                 price = outcome.get("price")
                 if price in (None, ""):
                     continue
-                line = (
-                    f"{side} {point}" if point not in (None, "") else
-                    side if side else "Yes"
-                )
+
+                if market_key in GAME_MARKETS:
+                    if market_key == "totals":
+                        player = "Game Total"
+                        if side.casefold() not in {"over", "under"} or point in (None, ""):
+                            continue
+                        line = f"{side} {point}"
+                    else:
+                        player = side
+                        if not player:
+                            continue
+                        if market_key == "spreads":
+                            if point in (None, ""):
+                                continue
+                            try:
+                                line = f"{player} {float(point):+g}"
+                            except (TypeError, ValueError):
+                                continue
+                        else:
+                            line = player
+                    quote_type = "game"
+                else:
+                    player = description
+                    # Some yes/no scorer feeds put the player in name and Yes/No in description.
+                    if market_key in {"player_anytime_td", "player_tds", "player_1st_td", "player_last_td"}:
+                        if player.casefold() in {"yes", "no", "over", "under"} and side.casefold() not in {"yes", "no", "over", "under"}:
+                            player, side = side, player
+                        elif not player and side.casefold() not in {"yes", "no", "over", "under"}:
+                            player, side = side, "Yes"
+                    if not player:
+                        continue
+                    line = (
+                        f"{side} {point}" if point not in (None, "") else
+                        side if side else "Yes"
+                    )
+                    quote_type = "player"
+
                 quotes.append({
                     "player": player,
                     "market": label,
                     "market_key": market_key,
+                    "market_type": quote_type,
                     "side": side,
                     "line": line,
                     "point": point,
                     "price": f"{int(price):+d}" if isinstance(price, (int, float)) else str(price),
                     "sportsbook": book_name,
                     "sportsbook_key": book_key,
-                    "source_url": f"https://the-odds-api.com/",
+                    "source_url": "https://the-odds-api.com/",
                     "event_id": event_id,
                     "retrieved_at": retrieved_at,
                     "market_updated_at": updated,
@@ -367,28 +398,33 @@ def _parse_quotes(event_data: dict[str, Any], retrieved_at: str) -> list[dict[st
     return quotes
 
 
+def _available_market_keys(payload: Any) -> set[str]:
+    """Extract currently listed market keys from the free event-markets endpoint."""
+    if not isinstance(payload, dict):
+        return set()
+    bookmakers = payload.get("bookmakers") or []
+    if not isinstance(bookmakers, list):
+        return set()
+    return {
+        str(market.get("key") or "")
+        for bookmaker in bookmakers if isinstance(bookmaker, dict)
+        for market in (bookmaker.get("markets") or [])
+        if isinstance(market, dict) and market.get("key")
+    }
+
+
 def fetch_event_quotes(
     game: dict[str, Any],
     markets: tuple[str, ...] = PASS1_MARKETS,
     refresh: bool = False,
 ) -> dict[str, Any]:
-    """Fetch/cache quotes for one matchup. Events lookup is free; odds cost is market-based."""
+    """Discover listed markets first, then fetch only available quotes for one matchup."""
     if not get_api_key():
         return {"quotes": [], "status": "no_api_key", "usage": {}}
     cache_key = _event_cache_key(str(game.get("event_id") or ""), markets)
     cached = None if refresh else _load_fresh_cache(cache_key)
     if cached:
         return {**cached, "status": "cached"}
-
-    remaining = _known_remaining_credits()
-    # Keep a 25-credit monthly safety buffer. The requested-market count is a
-    # conservative upper bound; actual billing uses markets returned by the API.
-    if remaining is not None and remaining < len(markets) + 25:
-        return {
-            "quotes": [], "status": "quota_reserve_reached",
-            "message": f"Skipped odds refresh to preserve the 25-credit reserve ({remaining} credits reported remaining).",
-            "usage": {"requests_remaining": remaining},
-        }
 
     events, event_headers = _request_json(
         f"/sports/{SPORT_KEY}/events",
@@ -403,9 +439,48 @@ def fetch_event_quotes(
         }
 
     event_id = str(event.get("id") or "")
+    discovery_error = ""
+    discovery_headers: dict[str, str] = {}
+    try:
+        available_payload, discovery_headers = _request_json(
+            f"/sports/{SPORT_KEY}/events/{event_id}/markets",
+            {"regions": "us", "dateFormat": "iso"},
+        )
+        _save_quota_state(discovery_headers)
+        available = _available_market_keys(available_payload)
+    except Exception as exc:
+        # Preserve the original request path if market discovery is temporarily
+        # unavailable, but make the fallback explicit in the returned status.
+        available = set(markets)
+        discovery_error = f"{type(exc).__name__}: {exc}"
+
+    requested = tuple(market for market in markets if market in available)
+    if not requested:
+        remaining = _known_remaining_credits()
+        return {
+            "quotes": [], "status": "no_requested_markets_listed",
+            "event_id": event_id, "available_markets": sorted(available),
+            "requested_markets": [],
+            "message": "The event-markets endpoint listed no requested player/game markets.",
+            "usage": {"requests_remaining": remaining},
+            "market_discovery_error": discovery_error,
+        }
+
+    remaining = _known_remaining_credits()
+    # Keep a 25-credit monthly safety buffer; event-market discovery itself costs 1 credit.
+    if remaining is not None and remaining < len(requested) + 25:
+        return {
+            "quotes": [], "status": "quota_reserve_reached",
+            "message": f"Skipped odds refresh to preserve the 25-credit reserve ({remaining} credits reported remaining).",
+            "event_id": event_id, "available_markets": sorted(available),
+            "requested_markets": list(requested),
+            "usage": {"requests_remaining": remaining},
+            "market_discovery_error": discovery_error,
+        }
+
     params = {
         "regions": "us",
-        "markets": ",".join(markets),
+        "markets": ",".join(requested),
         "oddsFormat": "american",
         "dateFormat": "iso",
     }
@@ -415,12 +490,21 @@ def fetch_event_quotes(
     )
     retrieved_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     _save_quota_state(headers)
+    quotes = _parse_quotes(payload if isinstance(payload, dict) else {}, retrieved_at)
+    quote_counts: dict[str, int] = {}
+    for quote in quotes:
+        key = str(quote.get("market_key") or "")
+        quote_counts[key] = quote_counts.get(key, 0) + 1
     record = {
         "cached_at": retrieved_at,
-        "quotes": _parse_quotes(payload if isinstance(payload, dict) else {}, retrieved_at),
+        "quotes": quotes,
         "status": "fetched",
         "event_id": event_id,
         "retrieved_at": retrieved_at,
+        "available_markets": sorted(available),
+        "requested_markets": list(requested),
+        "quote_counts_by_market": quote_counts,
+        "market_discovery_error": discovery_error,
         "usage": {
             "requests_used": headers.get("x-requests-used"),
             "requests_remaining": headers.get("x-requests-remaining"),
@@ -475,14 +559,28 @@ def research_supports_first_td(research_text: str) -> bool:
 
 
 def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
+    """Render exact sportsbook quotes with market type, book and update timestamps."""
     if not quotes:
-        return "No live player-prop quotes were returned by The Odds API for the requested markets."
-    lines = ["THE ODDS API VERIFIED PLAYER-PROP QUOTES (US region; American odds):"]
-    for quote in quotes:
-        lines.append(
-            f"{quote.get('player')} | {quote.get('market')} | {quote.get('line')} "
-            f"| {quote.get('price')} | {quote.get('sportsbook')} "
-            f"| market updated {quote.get('market_updated_at')} "
-            f"| retrieved {quote.get('retrieved_at')}"
-        )
+        return "No sportsbook quotes were returned for the requested markets."
+    game_quotes = [q for q in quotes if q.get("market_type") == "game"]
+    player_quotes = [q for q in quotes if q.get("market_type") != "game"]
+    lines = []
+    if game_quotes:
+        lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS:")
+        for quote in game_quotes:
+            lines.append(
+                f"{quote.get('market')} | {quote.get('player')} | {quote.get('line')} "
+                f"| {quote.get('price')} | {quote.get('sportsbook')} "
+                f"| updated {quote.get('market_updated_at')} "
+                f"| retrieved {quote.get('retrieved_at')}"
+            )
+    if player_quotes:
+        lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (US region; American odds):")
+        for quote in player_quotes:
+            lines.append(
+                f"{quote.get('player')} | {quote.get('market')} | {quote.get('line')} "
+                f"| {quote.get('price')} | {quote.get('sportsbook')} "
+                f"| updated {quote.get('market_updated_at')} "
+                f"| retrieved {quote.get('retrieved_at')}"
+            )
     return "\n".join(lines)
