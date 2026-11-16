@@ -895,6 +895,8 @@ def main() -> int:
                                 attach_sportsbook_quotes(game, research)
                             except Exception as odds_exc:
                                 research["verified_player_prop_markets"] = []
+                                research["verified_sportsbook_game_markets"] = []
+                                research["odds_api_status"] = f"unavailable: {odds_exc}"
                                 research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
                             analysis = analyze_game(game, research)
                             _save_cached_analysis(game, analysis)
@@ -904,6 +906,8 @@ def main() -> int:
                             attach_sportsbook_quotes(game, research)
                         except Exception as odds_exc:
                             research["verified_player_prop_markets"] = []
+                            research["verified_sportsbook_game_markets"] = []
+                            research["odds_api_status"] = f"unavailable: {odds_exc}"
                             research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
                         analysis = analyze_game(game, research)
                         _save_cached_analysis(game, analysis)
