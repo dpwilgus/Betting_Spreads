@@ -1286,8 +1286,21 @@ def _filter_game_level_picks(
             retained.append(pick)
             continue
         if re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b", normalized):
+            pick["market_line"] = "NOT VERIFIED — PERIOD MARKET QUOTE UNAVAILABLE"
+            pick["data_quality"] = "Limited"
+            try:
+                pick["confidence"] = min(int(pick.get("confidence", 5)), 5)
+            except (TypeError, ValueError):
+                pick["confidence"] = 5
+            risk = str(pick.get("risk_factors") or "").strip()
+            if "period market" not in risk.casefold():
+                pick["risk_factors"] = (
+                    "No verified 1Q/1H sportsbook quote"
+                    if not risk else risk + "; no verified 1Q/1H sportsbook quote"
+                )
+            retained.append(pick)
             gaps.append(
-                f"Removed period game line {pick.get('bet_description')}: no independently verified 1Q/1H market quote was supplied."
+                f"Retained {pick.get('bet_description')} in game-level bets only as a Limited model idea; no 1Q/1H sportsbook quote was supplied."
             )
             continue
         if "spread" in normalized or re.search(r"[+-]\s*\d+(?:\.\d+)?", normalized):
@@ -1321,22 +1334,33 @@ def _remove_contradictory_period_game_picks(
 ) -> list[str]:
     """Do not pair a full-game spread with an opposite-side 1Q/1H spread."""
     picks = data.get("picks", [])
+
+    def spread_side(item: dict[str, Any]) -> bool:
+        text = " ".join(str(item.get(field) or "") for field in (
+            "bet_description", "play_threshold"
+        )).casefold()
+        if "moneyline" in text or re.search(r"\bml\b", text):
+            return False
+        return "spread" in text or bool(re.search(r"[+-]\s*\d+(?:\.\d+)?", text))
+
+    def is_period(item: dict[str, Any]) -> bool:
+        text = " ".join(str(item.get(field) or "") for field in (
+            "bet_description", "play_threshold"
+        )).casefold()
+        return bool(re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b", text))
+
     full_game_spread_teams = {
         _team_key(str(item.get("player_or_team") or ""))
         for item in picks
-        if item.get("market_type") == "Game Prop"
-        and "spread" in str(item.get("bet_description") or "").casefold()
-        and not re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b",
-                          str(item.get("bet_description") or "").casefold())
+        if item.get("market_type") == "Game Prop" and spread_side(item) and not is_period(item)
     }
     gaps = []
     retained = []
     for item in picks:
-        description = str(item.get("bet_description") or "").casefold()
         is_period_spread = (
             item.get("market_type") == "Game Prop"
-            and "spread" in description
-            and bool(re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b", description))
+            and is_period(item)
+            and spread_side(item)
         )
         team_key = _team_key(str(item.get("player_or_team") or ""))
         if is_period_spread and full_game_spread_teams and team_key not in full_game_spread_teams:
