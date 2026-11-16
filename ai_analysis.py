@@ -795,8 +795,9 @@ def _validate_analysis(
         data, team_names, expected_underdog=expected_underdog,
         expected_spread=expected_spread,
     )
-    if require_underdog and not data.get("underdog_analysis"):
-        raise RuntimeError("AI response omitted the required underdog cover/upset assessment for a spread matchup.")
+    # A missing underdog assessment is a reportable data gap, not a reason to
+    # discard otherwise usable matchup analysis. The prompt still requests it,
+    # and _sanitize_underdog_analysis records the omission for the workbook.
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
     if not isinstance(picks, list):
@@ -1222,8 +1223,15 @@ def _separate_unverified_player_props(
         else:
             mismatched = mismatched_line_quote(pick)
             if mismatched:
+                quoted_point = mismatched.get("point")
+                quoted_side = str(mismatched.get("side") or "").strip()
+                quoted_line = (
+                    f"{quoted_point} ({quoted_side})"
+                    if quoted_point not in (None, "") and quoted_side
+                    else mismatched.get("line")
+                )
                 gaps.append(
-                    f"Removed {pick.get('player_or_team')} {pick.get('bet_description')}: the sportsbook offers {mismatched.get('line')} at {mismatched.get('sportsbook')}, not the model's threshold; the line was not silently changed."
+                    f"Removed {pick.get('player_or_team')} {pick.get('bet_description')}: the sportsbook offers {quoted_line} at {mismatched.get('sportsbook')}, not the model's threshold; the line was not silently changed."
                 )
                 continue
             pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
@@ -1544,7 +1552,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     )
     if player_research_summary:
         original_research += (
-            "\\n\\nSELECTED PLAYER PER-GAME AVERAGES (season / last three games): "
+            "\n\nSELECTED PLAYER PER-GAME AVERAGES (season / last three games): "
             + json.dumps(player_research_summary, ensure_ascii=False, separators=(",", ":"))
         )
 
