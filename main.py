@@ -369,7 +369,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         "Pass Yds/G (Season / L3)", "Pass Att/G (Season / L3)", "Pass TD/G (Season / L3)",
         "Rush Yds/G (Season / L3)", "Rush Att/G (Season / L3)", "Rush TD/G (Season / L3)",
         "Rec Yds/G (Season / L3)", "Receptions/G (Season / L3)", "Targets/G (Season / L3)",
-        "Rec TD/G (Season / L3)", "TDs Scored/G (Season)",
+        "Rec TD/G (Season / L3)", "TDs Scored/G (Season / L3)",
     ]
     for col, value in enumerate(research_headers, 1):
         _style_header(sheet.cell(research_start + 1, col, value))
@@ -406,8 +406,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             for season_key, recent_key in metric_columns
         )
         values.append(
-            "—" if player.get("tds_scored_per_game") is None
-            else f"{player['tds_scored_per_game']:.2f}"
+            average_label(player.get("tds_scored_per_game"), player.get("tds_scored_recent"))
         )
         for col, value in enumerate(values, 1):
             cell = sheet.cell(row=row_num, column=col, value=value)
