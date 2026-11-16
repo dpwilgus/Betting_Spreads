@@ -477,7 +477,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("heritage", system_prompt)
         self.assertIn("summary <= 90 words", user_prompt)
         self.assertIn("statistical_rationale <= 24 words", user_prompt)
-        self.assertIn("return every material injury/news impact supported by evidence (up to 12)", user_prompt)
+        self.assertIn("return no more than five material injury/news impacts", user_prompt)
         self.assertIn("risk_factors must start 'Questionable:'", user_prompt)
         self.assertIn("'Questionable:'", user_prompt)
         self.assertNotIn('"additionalProperties"', user_prompt)
