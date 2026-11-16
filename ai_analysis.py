@@ -254,6 +254,32 @@ def _normalize_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value).casefold())
 
 
+# Canonical NFL team identity lets provider output use ESPN abbreviations.
+_NFL_TEAM_ABBREVIATIONS = {
+    "ari": "arizonacardinals", "atl": "atlantafalcons",
+    "bal": "baltimoreravens", "buf": "buffalobills",
+    "car": "carolinapanthers", "chi": "chicagobears",
+    "cin": "cincinnatibengals", "cle": "clevelandbrowns",
+    "dal": "dallascowboys", "den": "denverbroncos",
+    "det": "detroitlions", "gb": "greenbaypackers",
+    "hou": "houstontexans", "ind": "indianapoliscolts",
+    "jax": "jacksonvillejaguars", "kc": "kansascitychiefs",
+    "lv": "lasvegasraiders", "lac": "losangeleschargers",
+    "lar": "losangelesrams", "mia": "miamidolphins",
+    "min": "minnesotavikings", "ne": "newenglandpatriots",
+    "no": "neworleanssaints", "nyg": "newyorkgiants",
+    "nyj": "newyorkjets", "phi": "philadelphiaeagles",
+    "pit": "pittsburghsteelers", "sf": "sanfrancisco49ers",
+    "sea": "seattleseahawks", "tb": "tampabaybuccaneers",
+    "ten": "tennesseetitans", "was": "washingtoncommanders",
+}
+
+
+def _team_key(value: str) -> str:
+    normalized = _normalize_name(value)
+    return _NFL_TEAM_ABBREVIATIONS.get(normalized, normalized)
+
+
 def _is_unavailable_status(value: str) -> bool:
     """Recognize explicit inactive designations without broad substring matches."""
     status = re.sub(r"[^a-z ]", " ", str(value).casefold())
@@ -595,7 +621,7 @@ def _sanitize_underdog_analysis(data: dict[str, Any], team_names: tuple[str, str
     if not isinstance(rows, list):
         rows = []
     accepted = []
-    valid_teams = {_normalize_name(team) for team in team_names} if team_names else None
+    valid_teams = {_team_key(team) for team in team_names} if team_names else None
     recommendations = {
         "bet underdog spread": "Bet underdog spread", "underdog spread": "Bet underdog spread",
         "bet the spread": "Bet underdog spread", "upset moneyline": "Upset moneyline",
@@ -615,7 +641,7 @@ def _sanitize_underdog_analysis(data: dict[str, Any], team_names: tuple[str, str
         spread_match = re.search(r"[+-]?\d+(?:\.\d+)?", candidate["spread"])
         if not spread_match or float(spread_match.group(0)) <= 0:
             continue
-        if valid_teams is not None and _normalize_name(candidate["underdog"]) not in valid_teams:
+        if valid_teams is not None and _team_key(candidate["underdog"]) not in valid_teams:
             continue
         try:
             cover = float(candidate.get("cover_probability"))
@@ -675,16 +701,16 @@ def _validate_analysis(
     # an explicitly permitted unit-level impact).
     valid_injury_response = False
     if isinstance(injury_response, list):
-        valid_team_keys = {_normalize_name(team) for team in team_names} if team_names else None
+        valid_team_keys = {_team_key(team) for team in team_names} if team_names else None
         roster_lookup = {
-            _normalize_name(team): {_normalize_name(player) for player in players}
+            _team_key(team): {_normalize_name(player) for player in players}
             for team, players in (rosters or {}).items()
         }
         for impact in injury_response:
             if not isinstance(impact, dict):
                 continue
-            subject_team = _normalize_name(impact.get("team", ""))
-            beneficiary_team = _normalize_name(impact.get("affected_team", ""))
+            subject_team = _team_key(impact.get("team", ""))
+            beneficiary_team = _team_key(impact.get("affected_team", ""))
             beneficiary = _normalize_name(impact.get("affected_player", ""))
             unit_impact = beneficiary in {"teamunit", "offensiveunit", "defensiveunit", "specialteamsunit"}
             if not subject_team or not beneficiary_team or not beneficiary:
@@ -751,9 +777,9 @@ def _validate_analysis(
             raise RuntimeError("AI returned an invalid touchdown probability or confidence.")
         availability = str(item.get("availability", "")).casefold()
         if team_names is not None:
-            normalized_team = _normalize_name(item.get("team", ""))
+            normalized_team = _team_key(item.get("team", ""))
             matching_team = next(
-                (name for name in team_names if _normalize_name(name) == normalized_team),
+                (name for name in team_names if _team_key(name) == normalized_team),
                 None,
             )
             if matching_team is None:
@@ -764,7 +790,7 @@ def _validate_analysis(
             if rosters is not None:
                 roster = next(
                     (players for name, players in rosters.items()
-                     if _normalize_name(name) == _normalize_name(matching_team)),
+                     if _team_key(name) == _team_key(matching_team)),
                     [],
                 )
                 roster_names = {_normalize_name(player) for player in roster}
@@ -831,10 +857,10 @@ def _filter_injury_impacts(
         if isinstance(item, dict) and item.get("team") and item.get("player")
     }
     roster_sets = {
-        _normalize_name(team): {_normalize_name(player) for player in players}
+        _team_key(team): {_normalize_name(player) for player in players}
         for team, players in (rosters or {}).items()
     }
-    team_lookup = {_normalize_name(team): team for team in team_names}
+    team_lookup = {_team_key(team): team for team in team_names}
     retained = []
     gaps = []
     for impact in data.get("injury_impact", []):
@@ -844,8 +870,8 @@ def _filter_injury_impacts(
         affected_team = str(impact.get("affected_team") or "")
         injured_player_key = _normalize_name(injured_player)
         affected_player_key = _normalize_name(affected_player)
-        injured_team_key = _normalize_name(injured_team)
-        affected_team_key = _normalize_name(affected_team)
+        injured_team_key = _team_key(injured_team)
+        affected_team_key = _team_key(affected_team)
         if injured_player_key and injured_player_key == affected_player_key:
             gaps.append(
                 f"Removed injury impact for {affected_player}: an injured player cannot be listed as their own beneficiary."
