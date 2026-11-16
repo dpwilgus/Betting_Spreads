@@ -1682,7 +1682,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         )
 
     user_prefix = (
-        f"Analyze {matchup}. Kickoff: {game.get('Game Date (ET)', 'Not supplied')}. "
+        f"Analyze this upcoming NFL matchup: {matchup}. Kickoff: {game.get('Game Date (ET)', 'Not supplied')}. "
         f"ESPN line: {game.get('Betting Line', 'Unavailable')}. "
         f"Status: {game.get('Game Status', 'Not supplied')}.\\n"
         "Use supplied research only; never invent stats, injuries, markets, prices, sources or dates. "
