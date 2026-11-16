@@ -691,5 +691,31 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual([item["player"] for item in data["touchdown_scorers"]],["Justin Jefferson"])
 
 
+    def test_touchdown_scorer_accepts_espn_team_abbreviation(self):
+        data = valid_analysis()
+        data["touchdown_scorers"][0]["team"] = "SF"
+        _validate_analysis(
+            data,
+            rosters={"San Francisco 49ers": ["Player A"], "Dallas Cowboys": ["Player B"]},
+            team_names=("San Francisco 49ers", "Dallas Cowboys"),
+        )
+
+    def test_injury_impact_accepts_team_abbreviations(self):
+        data = {"injury_impact": [{
+            "impact_type": "Injury", "injured_player": "Defender A", "team": "SF",
+            "availability": "Out", "affected_player": "Player B", "affected_team": "DAL",
+            "impact_direction": "Positive", "statistical_effect": "More targets",
+            "prop_market": "Receiving yards", "evidence": "Verified injury report",
+            "confidence": 6, "conditions": "If role expands",
+        }]}
+        gaps = _filter_injury_impacts(
+            data,
+            [{"team": "San Francisco 49ers", "player": "Defender A", "status": "Out"}],
+            {"San Francisco 49ers": ["Defender A"], "Dallas Cowboys": ["Player B"]},
+            ("San Francisco 49ers", "Dallas Cowboys"),
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+        self.assertEqual(gaps, [])
+
 if __name__ == "__main__":
     unittest.main()
