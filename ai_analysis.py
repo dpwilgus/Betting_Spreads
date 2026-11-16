@@ -1246,6 +1246,12 @@ def _filter_game_level_picks(
         ))
         normalized = description.casefold()
         if re.search(r"\b(?:over|under)\b.*(?:total|points)", normalized):
+            pick_team = _team_key(str(pick.get("player_or_team") or ""))
+            if pick_team in {_team_key(team_names[0]), _team_key(team_names[1])}:
+                gaps.append(
+                    f"Removed ambiguous team total {pick.get('bet_description')}: the selected team requires an exact team-total quote, not a full-game total."
+                )
+                continue
             point_match = re.search(r"\b(?:over|under)\s*(-?\d+(?:\.\d+)?)", normalized)
             point = float(point_match.group(1)) if point_match else None
             if point is None or not any(abs(point - quote) < 0.001 for quote in totals):
