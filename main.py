@@ -533,8 +533,12 @@ def _best_overall_bets(games: list[dict], analyses: list[dict], limit: int = 10)
             line = str(pick.get("market_line", "Not verified"))
             if market_type == "Player Prop" and " — " in line:
                 verification = "Sportsbook quote verified"
+            elif market_type == "Game Prop" and "NOT VERIFIED" in line:
+                verification = "Model-only period line — not sportsbook verified"
+            elif market_type == "Game Prop" and "ESPN" in line:
+                verification = "ESPN market snapshot — confirm sportsbook price"
             elif market_type == "Game Prop":
-                verification = "Confirm current sportsbook line"
+                verification = "Not independently verified"
             else:
                 verification = "Not independently verified"
             candidates.append({
