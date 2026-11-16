@@ -942,45 +942,71 @@ def _team_statistics(team_id: str) -> dict[str, Any]:
 
 @lru_cache(maxsize=1)
 def _adam_schefter_news() -> list[dict[str, Any]]:
-    """Fetch Adam Schefter's ESPN contributor feed and normalize article records."""
-    url = (
+    """Fetch Adam Schefter's ESPN contributor feed, with a byline-filtered NFL fallback."""
+    contributor_url = (
         "https://site.web.api.espn.com/apis/v2/flex?"
         "region=us&lang=en&contentorigin=espn&contributor=adam-schefter&"
         "limit=100&pubkey=contributor-page"
     )
-    payload = _get_json(url, timeout=20)
-    found: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    global_news_url = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=100"
 
-    def walk(value: Any) -> None:
-        if isinstance(value, dict):
-            headline = value.get("headline") or value.get("title")
-            published = value.get("published") or value.get("lastModified") or value.get("date")
-            links = value.get("links") or {}
-            web_link = links.get("web") if isinstance(links, dict) else {}
-            href = web_link.get("href") if isinstance(web_link, dict) else ""
-            href = href or value.get("url") or value.get("href") or ""
-            if headline and published and href:
-                key = str(href)
-                if key not in seen:
-                    seen.add(key)
-                    found.append({
-                        "headline": str(headline)[:220],
-                        "description": str(value.get("description") or value.get("summary") or "")[:420],
-                        "byline": "Adam Schefter",
-                        "published": str(published),
-                        "url": key,
-                    })
-            for child in value.values():
-                if isinstance(child, (dict, list)):
+    def extract(payload: Any, contributor_only: bool) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        seen: set[str] = set()
+
+        def author_text(value: Any) -> str:
+            if isinstance(value, dict):
+                return str(value.get("name") or value.get("displayName") or "")
+            if isinstance(value, list):
+                return " ".join(author_text(item) for item in value)
+            return str(value or "")
+
+        def walk(value: Any) -> None:
+            if isinstance(value, dict):
+                headline = value.get("headline") or value.get("title")
+                published = value.get("published") or value.get("lastModified") or value.get("date")
+                links = value.get("links") or {}
+                web_link = links.get("web") if isinstance(links, dict) else {}
+                href = web_link.get("href") if isinstance(web_link, dict) else ""
+                href = href or value.get("url") or value.get("href") or ""
+                raw_author = value.get("byline") or value.get("author") or value.get("authors")
+                byline = author_text(raw_author)
+                is_schefter = "adam schefter" in byline.casefold()
+                if headline and published and href and (
+                    not contributor_only or is_schefter
+                ):
+                    key = str(href)
+                    if key not in seen:
+                        seen.add(key)
+                        found.append({
+                            "headline": str(headline)[:220],
+                            "description": str(value.get("description") or value.get("summary") or "")[:420],
+                            "byline": "Adam Schefter" if not contributor_only else byline or "Adam Schefter",
+                            "published": str(published),
+                            "url": key,
+                        })
+                for child in value.values():
+                    if isinstance(child, (dict, list)):
+                        walk(child)
+            elif isinstance(value, list):
+                for child in value:
                     walk(child)
-        elif isinstance(value, list):
-            for child in value:
-                walk(child)
 
-    walk(payload)
-    found.sort(key=lambda item: str(item.get("published") or ""), reverse=True)
-    return found[:100]
+        walk(payload)
+        found.sort(key=lambda item: str(item.get("published") or ""), reverse=True)
+        return found[:100]
+
+    try:
+        articles = extract(_get_json(contributor_url, timeout=20), contributor_only=False)
+        if articles:
+            return articles
+    except Exception:
+        pass
+    try:
+        return extract(_get_json(global_news_url, timeout=20), contributor_only=True)
+    except Exception:
+        return []
+
 
 
 def _confirmed_starting_qb_news(
