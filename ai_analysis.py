@@ -54,6 +54,9 @@ def _bounded_research_text(
         section = _compact_matchup_evidence(original)
         upper = section[:120].upper()
         if (upper.startswith("HEADER") or upper.startswith("INJURIES:")
+                or upper.startswith("ODDS API MARKET DISCOVERY")
+                or upper.startswith("THE ODDS API VERIFIED FULL-GAME")
+                or upper.startswith("THE ODDS API VERIFIED PLAYER-PROP")
                 or upper.startswith("CURRENT INJURY EVIDENCE")
                 or upper.startswith("INDEPENDENT LIVE NFL RESEARCH")
                 or upper.startswith("MATCHUP:") or upper.startswith("KICKOFF")
@@ -1585,11 +1588,10 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     """Collect current data without AI, then use the first healthy configured AI provider."""
     research = research or collect_game_research(game)
     base = Path(__file__).resolve().parent / "agents"
-    instructions = (
-        (base / "NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")
-        + "\n\nQUALITY REVIEW CHECKLIST\n"
-        + (base / "PROBABILITY_REVIEW.md").read_text(encoding="utf-8")
-    )
+    # The analyst brief is the single compact system contract. The former
+    # appended probability checklist duplicated most of it and starved live
+    # market/player evidence under Groq's free-tier token budget.
+    instructions = (base / "NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")
     matchup = f"{game['Away Team']} at {game['Home Team']}"
     team_names = (str(game["Away Team"]), str(game["Home Team"]))
     original_research = research.get("research_text", "No independent research was available.")
@@ -1606,51 +1608,36 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         )
 
     user_prefix = (
-        f"Analyze this upcoming NFL matchup: {matchup}.\\n"
-        f"Kickoff: {game.get('Game Date (ET)', 'Not supplied')}. "
+        f"Analyze {matchup}. Kickoff: {game.get('Game Date (ET)', 'Not supplied')}. "
         f"ESPN line: {game.get('Betting Line', 'Unavailable')}. "
-        f"Status: {game.get('Game Status', 'Not supplied')}.\\n\\n"
-        "Use supplied research as the factual basis. Do not invent or claim unprovided "
-        "stats, injuries, lines, prices, sources, dates, browsing or verification. "
-        "Return JSON only: summary, game_script, underdog_analysis, picks, sneaky_props, "
-        "touchdown_scorers (up to 5), injury_impact, data_gaps. "
-        "Pick fields: rank, market_type (Player Prop/Game Prop), player_or_team, "
-        "bet_description, market_line, play_threshold, estimated_hit_probability (0-100), "
-        "confidence (1-10), statistical_rationale, risk_factors, data_quality "
-        "(Strong/Moderate/Limited). Include every schema field; use empty arrays when appropriate. "
-        "For every spread, return exactly one assessment for the team receiving points, "
-        "with separate cover_probability and outright upset_probability, recommendation, "
-        "rationale, risk_factors and evidence_quality. Monitor/Pass is valid; never force a bet. "
-        "The underdog_analysis value must be a one-item array with all eight fields; "
-        "use the exact underdog team and positive points-received spread shown below. "
-        "Do not omit this section or return an empty array when a numeric spread is supplied. "
-        f"Only use these matchup teams: {team_names[0]} and {team_names[1]}. "
-        "Prioritize evidence-backed player props. Compare each threshold with season and "
-        "last-three-game averages; reject unrealistic thresholds. Target five verified props "
-        "only when exact player, market, side, line and price are supplied; otherwise label "
-        "model-only and do not present as an actionable sportsbook pick. "
-        "Assess core passing, rushing, receiving and anytime-TD markets, plus supported "
-        "full-game/1Q/1H game lines and researched sneaky/first-TD opportunities. "
-        "Never invent alternate lines or totals; game/team totals require an exact quote. "
-        "Put 1Q/1H game lines in picks, not Sneaky Props; never oppose a full-game spread "
-        "with a period spread. Do not pair a team's moneyline and spread. "
-        "For player props, use researched season and recent production; omit unsupported "
-        "period props. TDs require scoring/opportunity evidence; passing TDs do not qualify "
-        "a QB for anytime TD (require a rushing TD profile). "
-        "Injury/news impacts: only material offensive absences, key defensive stars and "
-        "verified role/QB news. Research downstream replacements; never assume inherited "
-        "production or make the injured player their own beneficiary. 'Team unit' is allowed "
-        "only for an elite key defensive star, not ordinary starters or offensive-line absences. "
-        "Questionable players are conditional only, confidence <=6, with explicit risk. "
-        "For Questionable TD candidates, risk_factors must start 'Questionable:' "
-        "(e.g. 'Questionable: active status unconfirmed'). Exclude doubtful, out and IR; "
-        "absence of a report does not establish active status. "
-        "Prioritize dated Adam Schefter ESPN reports for selected players and matchup teams. "
-        "Keep output compact: summary <= 90 words; game_script <= 65 words; each pick "
-        "statistical_rationale <= 24 words and risk_factors <= 14 words; each TD rationale "
-        "<= 16 words and risk_factors <= 12 words; return no more than five material "
-        "injury/news impacts, each text field <= 16 words; data_gaps <= 4 short items. "
-        "Use short phrases, avoid repetition and add no commentary outside JSON.\\n"
+        f"Status: {game.get('Game Status', 'Not supplied')}.\\n"
+        "Use supplied research only; never invent stats, injuries, markets, prices, sources or dates. "
+        "Return JSON only with summary, game_script, underdog_analysis, picks, sneaky_props, "
+        "touchdown_scorers (up to 5), injury_impact and data_gaps. Include all schema fields. "
+        f"Only these teams: {team_names[0]} and {team_names[1]}. "
+        "Evaluate the supplied verified sportsbook quote list as the candidate universe. "
+        "For every selected player/game bet, copy the exact quoted player/team, market, side, "
+        "line, price and sportsbook; never substitute a nearby threshold or call an ESPN line "
+        "a sportsbook quote. Review all researched offensive candidates and injury beneficiaries. "
+        "Compare player thresholds with season and last-three-game averages; reject unsupported "
+        "thresholds. Target five verified props when supported; model-only leans are separate "
+        "and never actionable. Evaluate full-game moneyline, spread and total quotes. "
+        "Do not recommend unquoted 1Q/1H lines, invented team totals, or conflicting spreads; "
+        "do not pair one team's moneyline and spread. "
+        "For a numeric spread, attempt one assessment for the team receiving points, using its "
+        "exact team and positive spread; separate cover and outright-upset probabilities. "
+        "Monitor/Pass is valid; if the assessment cannot be supported, leave it empty and disclose "
+        "the gap. Never default to the favorite. "
+        "TDs require the player's own scoring role; passing TDs do not qualify a QB. "
+        "Injury/news impacts: only material offensive absences, key defensive stars and verified "
+        "role/QB news; investigate named replacements without assuming inherited production. "
+        "Use 'Team unit' only for an elite defensive absence. Questionable players are conditional, "
+        "confidence <=6, with explicit risk; Questionable TD risk_factors must start 'Questionable:'. "
+        "Exclude doubtful, out and IR; missing status is not proof of active. Prioritize dated Adam "
+        "Schefter ESPN reports. Return no more than five material injury/news impacts. "
+        "summary <= 90 words; game_script <= 65; statistical_rationale <= 24 words; "
+        "risk_factors <= 14 words; return no more than five material injury/news impacts; "
+        "data_gaps <= 4 short items. No commentary outside JSON.\\n"
     )
 
     prompt_metadata: dict[str, tuple[bool, bool, int]] = {}
