@@ -1360,6 +1360,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         try:
             data = _get_json(api_url)
             compact = _compact_summary(data, retrieved_at)
+            verified_game_markets = _compact_pickcenter(data, retrieved_at)
             sections.extend([
                 "ESPN MATCHUP, PLAYER, INJURY, MARKET AND RECENT-GAME DATA:",
                 compact,
