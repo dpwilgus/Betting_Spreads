@@ -246,7 +246,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "data_gaps": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
     },
     "required": [
-        "summary", "game_script", "underdog_analysis", "picks", "sneaky_props", "touchdown_scorers",
+        "summary", "game_script", "picks", "sneaky_props", "touchdown_scorers",
         "injury_impact", "data_gaps",
     ],
 }
