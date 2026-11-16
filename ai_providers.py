@@ -395,9 +395,10 @@ def generate_json(
                     f"(estimated prompt + output {estimated_total} tokens; 8,000 TPM limit)."
                 )
                 continue
+        request_user_prompt = provider_user
         for attempt in range(3):
             try:
-                result = _call_provider(provider, key, provider_system, provider_user)
+                result = _call_provider(provider, key, provider_system, request_user_prompt)
                 if not isinstance(result, dict):
                     raise RuntimeError("The AI response was not a JSON object.")
                 if validator is not None:
@@ -445,8 +446,17 @@ def generate_json(
                 failures.append(f"{provider.name}: {exc}")
                 break
             except (ValueError, KeyError, RuntimeError) as exc:
-                # Invalid JSON/schema output may be transient; retry once, then fallback.
+                # Give the same provider actionable validation feedback instead of
+                # spending a retry on an identical prompt. This is especially useful
+                # for structured fields such as the required underdog assessment.
                 if attempt == 0:
+                    request_user_prompt = (
+                        provider_user
+                        + "\\n\\nVALIDATION CORRECTION REQUIRED: Your previous JSON response "
+                        + "was rejected: " + str(exc)[:700] + ". Return the complete corrected "
+                        + "JSON object. Preserve valid analysis, fix the stated issue, and do "
+                        + "not omit required fields. Do not add commentary or Markdown."
+                    )
                     time.sleep(1)
                     continue
                 failures.append(f"{provider.name}: {exc}")
