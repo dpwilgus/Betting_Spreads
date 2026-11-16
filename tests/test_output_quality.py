@@ -425,6 +425,26 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(articles[0]["url"], "https://www.espn.com/nfl/story/example")
         self.assertIn("contributor=adam-schefter", request.call_args.args[0])
 
+    def test_adam_schefter_falls_back_to_espn_nfl_feed_byline(self):
+        fallback_payload = {"articles": [{
+            "headline": "Adam Schefter reports a player transaction",
+            "description": "The team made a roster move.",
+            "published": "2026-11-15T19:00:00Z",
+            "byline": "Adam Schefter",
+            "links": {"web": {"href": "https://www.espn.com/nfl/story/fallback"}},
+        }]}
+        _adam_schefter_news.cache_clear()
+        with patch(
+            "live_research._get_json",
+            side_effect=[{"items": []}, fallback_payload],
+        ) as request:
+            articles = _adam_schefter_news()
+        _adam_schefter_news.cache_clear()
+        self.assertEqual(len(articles), 1)
+        self.assertEqual(articles[0]["byline"], "Adam Schefter")
+        self.assertEqual(request.call_count, 2)
+        self.assertIn("/sports/football/nfl/news", request.call_args_list[1].args[0])
+
     def test_workbook_places_player_research_and_injuries_after_sneaky_props(self):
         workbook = Workbook()
         workbook.remove(workbook.active)
