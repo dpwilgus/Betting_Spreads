@@ -935,10 +935,8 @@ def _adam_schefter_news() -> list[dict[str, Any]]:
             published = value.get("published") or value.get("lastModified") or value.get("date")
             links = value.get("links") or {}
             web_link = links.get("web") if isinstance(links, dict) else {}
-            href = (
-                web_link.get("href") if isinstance(web_link, dict)
-                else value.get("url") or value.get("href") or ""
-            )
+            href = web_link.get("href") if isinstance(web_link, dict) else ""
+            href = href or value.get("url") or value.get("href") or ""
             if headline and published and href:
                 key = str(href)
                 if key not in seen:
@@ -1590,7 +1588,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         + str(article.get("description") or "")
                     ).casefold()
                     if any(name.casefold() in article_text for name in selected_names) or any(
-                        term and re.search(r"\\b" + re.escape(term) + r"\\b", article_text)
+                        term and re.search(r"\b" + re.escape(term) + r"\b", article_text)
                         for term in team_terms
                     ):
                         relevant_schefter.append(article)
