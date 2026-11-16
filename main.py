@@ -523,10 +523,10 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
         f"discovery error={pass1.get('market_discovery_error') or 'none'}."
     )
     research["research_text"] += "\n\n" + market_diagnostic
-    if quotes:
-        research["research_text"] += "\n\n" + summarize_quotes(quotes)
+    research["research_text"] += "\n\n" + summarize_quotes(quotes)
+    if pass1.get("status") != "no_api_key":
         research.setdefault("sources", []).append({
-            "title": "The Odds API live NFL sportsbook markets",
+            "title": "The Odds API market discovery and live NFL sportsbook odds",
             "url": "https://the-odds-api.com/sports/nfl-odds.html",
         })
     research["odds_api_status"] = (
