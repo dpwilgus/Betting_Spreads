@@ -65,7 +65,8 @@ def _bounded_research_text(
                 or upper.startswith("ADAM SCHEFTER PRIORITY NEWS")):
             priority = 0
         elif (upper.startswith("PLAYER LOGS")
-                or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")):
+                or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")
+                or upper.startswith("SELECTED PLAYER PER-GAME AVERAGES")):
             priority = 1
         elif (upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS")
                 or upper.startswith("TEAM STATS:")):
@@ -1400,6 +1401,17 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     matchup = f"{game['Away Team']} at {game['Home Team']}"
     team_names = (str(game["Away Team"]), str(game["Home Team"]))
     original_research = research.get("research_text", "No independent research was available.")
+    # Compute and feed the same per-game averages that will be displayed in the
+    # workbook, so they are part of prop selection rather than post-hoc decoration.
+    player_usage = _research_player_usage(original_research)
+    player_research_summary = _build_player_research_summary(
+        player_usage, research.get("selected_player_candidates", {})
+    )
+    if player_research_summary:
+        original_research += (
+            "\\n\\nSELECTED PLAYER PER-GAME AVERAGES (season / last three games): "
+            + json.dumps(player_research_summary, ensure_ascii=False, separators=(",", ":"))
+        )
 
     user_prefix = (
         f"Analyze this upcoming NFL matchup: {matchup}.\n"
@@ -1488,7 +1500,6 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         sneaky_data, research.get("injury_statuses", [])
     )
     data["sneaky_props"] = sneaky_data.get("picks", [])
-    player_usage = _research_player_usage(research.get("research_text", ""))
     prop_gaps = _filter_player_props_by_usage(data, player_usage)
     sneaky_usage_data = {"picks": data.get("sneaky_props", [])}
     sneaky_usage_gaps = _filter_player_props_by_usage(sneaky_usage_data, player_usage)
@@ -1533,16 +1544,14 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         if (_normalize_name(str(item.get("player_or_team") or "")),
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
-    data["player_research_summary"] = _build_player_research_summary(
-        player_usage, research.get("selected_player_candidates", {})
-    )
+    data["player_research_summary"] = player_research_summary
     data["analysis_version"] = 12
     data["odds_api_status" = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
     data["researched_player_evidence"] = player_usage
     data["sources"] = list(research.get("sources", []))
-    data["independent_research"] = str(research.get("research_text", ""))
+    data["independent_research"] = original_research
     data["ai_provider"] = provider_name
     data["research_mode"] = "independent_espn_plus_ai"
     data["research_truncated_for_prompt"] = research_truncated
