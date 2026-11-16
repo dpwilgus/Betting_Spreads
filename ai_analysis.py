@@ -1332,7 +1332,7 @@ def _remove_contradictory_period_game_picks(
     data: dict[str, Any],
     team_names: tuple[str, str],
 ) -> list[str]:
-    """Do not pair a full-game spread with an opposite-side 1Q/1H spread."""
+    """Keep one consistent spread side across full-game and period game picks."""
     picks = data.get("picks", [])
 
     def spread_side(item: dict[str, Any]) -> bool:
@@ -1349,23 +1349,35 @@ def _remove_contradictory_period_game_picks(
         )).casefold()
         return bool(re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b", text))
 
-    full_game_spread_teams = {
-        _team_key(str(item.get("player_or_team") or ""))
-        for item in picks
-        if item.get("market_type") == "Game Prop" and spread_side(item) and not is_period(item)
-    }
+    spread_picks = [
+        item for item in picks
+        if item.get("market_type") == "Game Prop" and spread_side(item)
+        and _team_key(str(item.get("player_or_team") or "")) in {
+            _team_key(team_names[0]), _team_key(team_names[1])
+        }
+    ]
+    if not spread_picks:
+        return []
+    full_game_picks = [item for item in spread_picks if not is_period(item)]
+    anchors = full_game_picks or spread_picks
+    anchor = max(
+        anchors,
+        key=lambda item: (
+            int(item.get("confidence", 0) or 0),
+            float(item.get("estimated_hit_probability", 0) or 0),
+        ),
+    )
+    anchor_team = _team_key(str(anchor.get("player_or_team") or ""))
     gaps = []
     retained = []
     for item in picks:
-        is_period_spread = (
-            item.get("market_type") == "Game Prop"
-            and is_period(item)
-            and spread_side(item)
-        )
+        is_spread = item.get("market_type") == "Game Prop" and spread_side(item)
         team_key = _team_key(str(item.get("player_or_team") or ""))
-        if is_period_spread and full_game_spread_teams and team_key not in full_game_spread_teams:
+        if is_spread and team_key in {
+            _team_key(team_names[0]), _team_key(team_names[1])
+        } and team_key != anchor_team:
             gaps.append(
-                f"Removed contradictory period spread {item.get('bet_description')}: it backs the opposite team from the retained full-game spread."
+                f"Removed contradictory spread {item.get('bet_description')}: it backs the opposite team from the highest-confidence retained spread side."
             )
             continue
         retained.append(item)
