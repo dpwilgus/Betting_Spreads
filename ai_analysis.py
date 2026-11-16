@@ -795,10 +795,13 @@ def _validate_analysis(
         data, team_names, expected_underdog=expected_underdog,
         expected_spread=expected_spread,
     )
-    # In strict spread-matchup validation, a missing or invalid underdog
-    # assessment triggers provider fallback. Non-strict callers can still retain
-    # otherwise usable matchup analysis and report the omission as a data gap.
-    if require_underdog and not data.get("underdog_analysis"):
+    # In strict spread-matchup validation, an actual betting analysis cannot
+    # pass with a missing/invalid underdog assessment. Preserve an empty
+    # placeholder response (no picks or attempted underdog row) for callers
+    # that use validation only to normalize its data-gap warning.
+    raw_underdog_rows = data.get("underdog_analysis")
+    has_analysis_or_attempt = bool(data.get("picks")) or bool(raw_underdog_rows)
+    if require_underdog and has_analysis_or_attempt and not data.get("underdog_analysis"):
         raise RuntimeError(
             "AI response omitted the required underdog cover/upset assessment for a spread matchup."
         )
