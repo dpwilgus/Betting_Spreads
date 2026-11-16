@@ -400,7 +400,7 @@ class OutputQualityRuleTests(unittest.TestCase):
     def test_player_average_research_is_preserved_when_prompt_is_compacted(self):
         research = (
             "Low-priority historical notes " + ("x" * 500)
-            + "\\n\\nSELECTED PLAYER PER-GAME AVERAGES: "
+            + "\n\nSELECTED PLAYER PER-GAME AVERAGES: "
             + '{"player":"Quarterback One","passing_yards_per_game":199.0}'
         )
         bounded, truncated = _bounded_research_text(research, max_chars=180)
