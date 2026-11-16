@@ -378,6 +378,7 @@ def _apply_independent_injury_statuses(
     """Remove unavailable player picks and TD candidates using independent ESPN reports."""
     unavailable: dict[str, str] = {}
     questionable: set[str] = set()
+    explicitly_available: dict[str, str] = {}
     for report in injury_statuses or []:
         if not isinstance(report, dict):
             continue
@@ -389,6 +390,8 @@ def _apply_independent_injury_statuses(
             unavailable[player_key] = status
         elif "questionable" in status.casefold():
             questionable.add(player_key)
+        elif status.casefold() in {"active", "available"}:
+            explicitly_available[player_key] = status
 
     gaps: list[str] = []
     reported_players = set(unavailable) | set(questionable)
@@ -418,6 +421,11 @@ def _apply_independent_injury_statuses(
                         "Questionable: availability unconfirmed"
                         if not risk else "Questionable: availability unconfirmed; " + risk
                     )
+            elif player_key in explicitly_available:
+                item["availability"] = "Available (ESPN injury feed)"
+                item["availability_evidence"] = (
+                    f"ESPN's injury feed explicitly lists {explicitly_available[player_key]}."
+                )
             else:
                 # ESPN's Core injury endpoint contains non-active designations, not
                 # a complete game-day inactive list. No matching record means
