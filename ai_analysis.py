@@ -692,7 +692,11 @@ def _filter_td_scorers_by_usage(
     return gaps
 
 
-def _sanitize_underdog_analysis(data: dict[str, Any], team_names: tuple[str, str] | None) -> None:
+def _sanitize_underdog_analysis(
+    data: dict[str, Any],
+    team_names: tuple[str, str] | None,
+    expected_underdog: str | None = None,
+) -> None:
     """Normalize or discard malformed underdog output without losing matchup analysis."""
     rows = data.get("underdog_analysis", [])
     gaps = data.get("data_gaps")
@@ -723,6 +727,8 @@ def _sanitize_underdog_analysis(data: dict[str, Any], team_names: tuple[str, str
         if not spread_match or float(spread_match.group(0)) <= 0:
             continue
         if valid_teams is not None and _team_key(candidate["underdog"]) not in valid_teams:
+            continue
+        if expected_underdog and _team_key(candidate["underdog"]) != _team_key(expected_underdog):
             continue
         try:
             cover = float(candidate.get("cover_probability"))
@@ -756,6 +762,7 @@ def _validate_analysis(
     rosters: dict[str, list[str]] | None = None,
     team_names: tuple[str, str] | None = None,
     require_underdog: bool = False,
+    expected_underdog: str | None = None,
 ) -> None:
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
@@ -763,7 +770,7 @@ def _validate_analysis(
     # Only a validated underdog assessment can count as usable analysis.
     # Invalid rows are discarded with a data-gap warning and cannot make an
     # otherwise empty response appear successful.
-    _sanitize_underdog_analysis(data, team_names)
+    _sanitize_underdog_analysis(data, team_names, expected_underdog=expected_underdog)
     if require_underdog and not data.get("underdog_analysis"):
         raise RuntimeError("AI response omitted the required underdog cover/upset assessment for a spread matchup.")
     picks = data.get("picks")
@@ -1437,7 +1444,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "TDs: compare season scoring, carries/targets per game and recent scoring. "
         "Passing TDs do not qualify a QB for anytime TD; require a rushing TD or 3+ rush attempts/game. "
         "Never select a QB solely for starting. Injury impacts: never make the injured player their own beneficiary. Cover only material offensive absences, key defensive stars and verified role/QB news; assess researched downstream replacements, but do not assume benefits. Prefer a named researched beneficiary. Use affected_player='Team unit' only for a key defensive star (All-Pro/Pro Bowl caliber or elite production), never for ordinary starters or offensive-line absences. "
-        "Compare pass/rush/points defense separately; no 'elite' label without current metrics. Verify neutral/international venue and QB experience/former-team ties. Add sourced QB-reunion or heritage/international News impacts; use affected_player='Team unit' if no individual, narrative only, no assumed boost. "
+        "Compare pass/rush/points defense separately; no 'elite' label without current metrics. Verify neutral/international venue and QB experience/former-team ties. Add sourced QB-reunion or heritage/international news impacts only when a named player is materially affected; omit narrative-only unit impacts. "
         "Questionable players are conditional only (confidence <=6) with explicit risk disclosure. No injury designation found means final game-day active status is still pending; never label a player Active from absence of a report. "
         "For Questionable TD candidates, risk_factors must start 'Questionable:' "
         "(e.g. 'Questionable: active status unconfirmed'). "
@@ -1480,6 +1487,22 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         return instructions, user_prefix + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded
 
     rosters = research.get("rosters")
+    spread_match = re.search(
+        r"([A-Za-z]{2,3})\\s*([+-]\\d+(?:\\.\\d+)?)",
+        str(game.get("Betting Line") or ""),
+    )
+    expected_underdog = None
+    if spread_match:
+        spread_team = _team_key(spread_match.group(1))
+        spread_value = float(spread_match.group(2))
+        favorite_team = spread_team if spread_value < 0 else (
+            _team_key(team_names[0]) if spread_team == _team_key(team_names[1])
+            else _team_key(team_names[1])
+        )
+        expected_underdog = next(
+            (team for team in team_names if _team_key(team) != favorite_team),
+            None,
+        )
     data, provider_name = generate_json(
         instructions,
         user_prefix,
