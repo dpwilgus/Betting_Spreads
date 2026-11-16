@@ -559,7 +559,7 @@ def research_supports_first_td(research_text: str) -> bool:
 
 
 def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
-    """Summarize best prices by exact line while combining both sides of each market."""
+    """Summarize exact lines compactly; keep the full quote set for later validation."""
     if not quotes:
         return "No sportsbook quotes were returned for the requested markets."
 
@@ -574,7 +574,6 @@ def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
             return 1.0 + 100.0 / abs(price)
         return 0.0
 
-    # Retain the best price for each exact side/point/bookmaker selection.
     best_by_side: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for quote in quotes:
         key = (
@@ -596,29 +595,46 @@ def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
         )
         grouped.setdefault(key, []).append(quote)
 
-    game_groups = []
-    player_groups = []
+    market_priority = {
+        "h2h": 0, "spreads": 1, "totals": 2,
+        "player_pass_yds": 3, "player_rush_yds": 4,
+        "player_reception_yds": 5, "player_receptions": 6,
+        "player_pass_tds": 7, "player_anytime_td": 8,
+        "player_pass_attempts": 9, "player_pass_completions": 10,
+        "player_rush_attempts": 11,
+    }
+    game_lines = []
+    player_lines = []
     for (market_key, player, point), sides in grouped.items():
-        market_type = sides[0].get("market_type")
-        label = sides[0].get("market", market_key)
-        side_text = "; ".join(
-            f"{q.get('line')} ({q.get('price')}, {q.get('sportsbook')})"
+        label = str(sides[0].get("market") or market_key)
+        side_text = " / ".join(
+            f"{q.get('line')} {q.get('price')}@{q.get('sportsbook')}"
             for q in sorted(sides, key=lambda q: str(q.get("side") or ""))
         )
-        line = (
-            f"{label} | {player} | {side_text} "
-            f"| updated {max(str(q.get('market_updated_at') or '') for q in sides)}"
-        )
-        (game_groups if market_type == "game" else player_groups).append(line)
+        line = f"{player} | {label} | {side_text}"
+        if sides[0].get("market_type") == "game":
+            game_lines.append((market_priority.get(market_key, 99), line))
+        else:
+            player_lines.append((market_priority.get(market_key, 99), player, line))
 
-    lines = []
-    if game_groups:
-        lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS (best price per side):")
-        lines.extend(sorted(game_groups))
-    if player_groups:
-        lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (best price per side):")
-        lines.extend(sorted(player_groups))
-    lines.append(
-        "Each displayed price is from the named sportsbook; full quote records are retained for exact validation."
-    )
+    lines = [
+        "ODDS QUOTES RETRIEVED: "
+        + str(max(str(q.get("retrieved_at") or "") for q in quotes))
+        + " | Best available price per exact side across returned US books."
+    ]
+    if game_lines:
+        lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS:")
+        lines.extend(line for _, line in sorted(game_lines))
+    if player_lines:
+        # Bound prompt size so quotes do not crowd out the player logs and injury
+        # evidence. Full quote records remain available for exact post-AI checks.
+        player_lines.sort(key=lambda item: (item[0], item[1], item[2]))
+        shown = player_lines[:45]
+        lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (best price per exact side):")
+        lines.extend(line for _, _, line in shown)
+        if len(player_lines) > len(shown):
+            lines.append(
+                f"{len(player_lines) - len(shown)} additional exact player market/line groups "
+                "were retained for validation but omitted from the compact AI context."
+            )
     return "\n".join(lines)
