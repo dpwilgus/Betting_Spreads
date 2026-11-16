@@ -1576,7 +1576,7 @@ def _underdog_format_instruction(
         "\nUNDERDOG JSON: "
         + template
         + " Use evidence-based numeric probabilities (0-100); upset must not exceed cover. "
-        "Do not copy example values. "
+        "do not copy example values. "
         "\n"
     )
 
