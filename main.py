@@ -489,7 +489,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         cell.hyperlink = source.get("url")
         cell.style = "Hyperlink"
 
-    widths = [22, 24, 8, 8, 18, 18, 17, 18, 18, 17, 18, 18, 18, 17, 17]
+    widths = [8, 15, 22, 30, 22, 28, 18, 16, 58, 42, 18, 18, 18, 18, 18]
     for col, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(col)].width = width
     sheet.freeze_panes = "A14"
