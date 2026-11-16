@@ -377,6 +377,30 @@ class LiveResearchTests(unittest.TestCase):
         )
 
 
+    def test_player_usage_research_excludes_backup_quarterbacks(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id": "qb1", "name": "Starting Quarterback", "position": "QB"},
+            {"id": "qb2", "name": "Backup Quarterback", "position": "QB"},
+            {"id": "rb1", "name": "Starting Running Back", "position": "RB"},
+        ]
+        chart = {"depthCharts": [{
+            "positions": {
+                "QB": {"position": {"abbreviation": "QB"}, "athletes": [
+                    {"rank": 1, "athlete": {"id": "qb1"}},
+                    {"rank": 2, "athlete": {"id": "qb2"}},
+                ]},
+                "RB": {"position": {"abbreviation": "RB"}, "athletes": [
+                    {"rank": 1, "athlete": {"id": "rb1"}},
+                ]},
+            }
+        }]}
+        selected = _select_research_players(roster, chart)
+        names = [player["name"] for player in selected]
+        self.assertIn("Starting Quarterback", names)
+        self.assertNotIn("Backup Quarterback", names)
+
     def test_collect_research_adds_player_game_logs_and_source_links(self):
         summary = {
             "header": {
