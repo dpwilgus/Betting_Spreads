@@ -62,11 +62,11 @@ def _bounded_research_text(
                 or upper.startswith("ESPN CURRENT PLAYER INJURIES")
                 or upper.startswith("ESPN GAME SUMMARY INJURY DATA")
                 or upper.startswith("ESPN RECENT TEAM NEWS")
-                or upper.startswith("ADAM SCHEFTER PRIORITY NEWS")):
+                or upper.startswith("ADAM SCHEFTER PRIORITY NEWS")
+                or upper.startswith("SELECTED PLAYER PER-GAME AVERAGES")):
             priority = 0
         elif (upper.startswith("PLAYER LOGS")
-                or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")
-                or upper.startswith("SELECTED PLAYER PER-GAME AVERAGES")):
+                or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")):
             priority = 1
         elif (upper.startswith("ESPN CURRENT-SEASON TEAM STATISTICS")
                 or upper.startswith("TEAM STATS:")):
