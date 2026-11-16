@@ -1064,8 +1064,8 @@ def _filter_injury_impacts(
 
     retained.sort(
         key=lambda item: (
-            int(item.get("confidence", 0) or 0),
             _is_key_defensive_absence(item, player_usage or {}),
+            int(item.get("confidence", 0) or 0),
             _normalize_name(str(item.get("affected_player") or "")) not in {
                 "teamunit", "offensiveunit", "defensiveunit", "specialteamsunit"
             },
