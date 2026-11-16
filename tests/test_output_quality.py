@@ -166,6 +166,23 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(data["picks"], [])
         self.assertTrue(any("no matching ESPN pickcenter total quote" in gap for gap in gaps))
 
+    def test_team_named_total_is_rejected_even_when_player_or_team_says_game(self):
+        data = {"picks": [{
+            "market_type": "Game Prop",
+            "player_or_team": "Game",
+            "bet_description": "Ravens under 43.5 total points",
+            "play_threshold": "Under 43.5",
+            "market_line": "Not verified",
+        }]}
+        gaps = _filter_game_level_picks(
+            data,
+            {"Betting Line": "BAL -4.5"},
+            {"verified_game_markets": [{"displayed_total": "43.5"}]},
+            ("Los Angeles Chargers", "Baltimore Ravens"),
+        )
+        self.assertEqual(data["picks"], [])
+        self.assertTrue(any("ambiguous team total" in gap for gap in gaps))
+
     def test_team_total_is_not_mistaken_for_full_game_total(self):
         data = {"picks": [{
             "market_type": "Game Prop",
