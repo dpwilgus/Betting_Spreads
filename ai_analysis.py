@@ -134,7 +134,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
         "summary": {"type": "string"},
         "game_script": {"type": "string"},
         "underdog_analysis": {
-            "type": "array", "maxItems": 1,
+            "type": "array", "minItems": 1, "maxItems": 1,
             "items": {
                 "type": "object", "additionalProperties": False,
                 "properties": {
@@ -293,6 +293,68 @@ def _is_unavailable_status(value: str) -> bool:
     )
 
 
+def _build_player_research_summary(
+    player_usage: dict[str, dict[str, Any]],
+    selected_candidates: dict[str, list[dict[str, Any]]] | None,
+) -> list[dict[str, Any]]:
+    """Build season and recent per-game averages for every selected offensive player."""
+    stat_fields = (
+        ("passingYards", "passing_yards_per_game"),
+        ("passingAttempts", "passing_attempts_per_game"),
+        ("passingTouchdowns", "passing_tds_per_game"),
+        ("rushingYards", "rushing_yards_per_game"),
+        ("rushingAttempts", "rushing_attempts_per_game"),
+        ("rushingTouchdowns", "rushing_tds_per_game"),
+        ("receivingYards", "receiving_yards_per_game"),
+        ("receptions", "receptions_per_game"),
+        ("receivingTargets", "targets_per_game"),
+        ("receivingTouchdowns", "receiving_tds_per_game"),
+    )
+    rows = []
+    for team, candidates in (selected_candidates or {}).items():
+        for candidate in candidates if isinstance(candidates, list) else []:
+            if not isinstance(candidate, dict):
+                continue
+            position = str(candidate.get("position") or "").upper()
+            if position not in {"QB", "RB", "WR", "TE"}:
+                continue
+            name = str(candidate.get("name") or "").strip()
+            usage = player_usage.get(_normalize_name(name), {})
+            season = usage.get("season") if isinstance(usage.get("season"), dict) else {}
+            recent = usage.get("recent") if isinstance(usage.get("recent"), list) else []
+            games = int(usage.get("games_available") or 0)
+            row = {
+                "team": team, "player": name, "position": position,
+                "games": games, "research_reason": str(candidate.get("research_reason") or ""),
+            }
+            for stat_key, output_key in stat_fields:
+                total = season.get(stat_key)
+                recent_key = output_key.replace("_per_game", "_recent")
+                if total in (None, "") or games <= 0:
+                    row[output_key] = None
+                    row[recent_key] = None
+                    continue
+                row[output_key] = round(_stat_number(season, stat_key) / games, 2)
+                recent_values = [
+                    _stat_number(item.get("stats", {}), stat_key)
+                    for item in recent[:3]
+                    if isinstance(item, dict) and isinstance(item.get("stats"), dict)
+                    and stat_key in item["stats"]
+                ]
+                row[recent_key] = (
+                    round(sum(recent_values) / len(recent_values), 2)
+                    if recent_values else None
+                )
+            rush_td = row.get("rushing_tds_per_game")
+            rec_td = row.get("receiving_tds_per_game")
+            row["tds_scored_per_game"] = (
+                round((rush_td or 0) + (rec_td or 0), 2)
+                if rush_td is not None or rec_td is not None else None
+            )
+            rows.append(row)
+    return rows
+
+
 def _apply_independent_injury_statuses(
     data: dict[str, Any],
     injury_statuses: list[dict[str, Any]] | None,
@@ -336,18 +398,15 @@ def _apply_independent_injury_statuses(
                         "Questionable: availability unconfirmed"
                         if not risk else "Questionable: availability unconfirmed; " + risk
                     )
-            elif player_key not in reported_players:
-                risk = str(item.get("risk_factors", "")).strip()
-                if "availability" not in risk.casefold():
-                    item["risk_factors"] = (
-                        "Availability not independently verified"
-                        if not risk else "Availability not independently verified; " + risk
-                    )
-                if collection == "touchdown_scorers":
-                    item["availability"] = "Not independently verified"
-                    item["availability_evidence"] = (
-                        "No matching ESPN injury designation was found; active status is not confirmed."
-                    )
+            else:
+                # ESPN's Core injury endpoint contains non-active designations, not
+                # a complete game-day inactive list. No matching record means
+                # "no designation found", never a claim that the player is active.
+                item["availability"] = "No injury designation found"
+                item["availability_evidence"] = (
+                    "No non-active designation appeared in ESPN's injury feed; "
+                    "final game-day active status is not confirmed."
+                )
             retained.append(item)
         data[collection] = retained
     return gaps
@@ -520,10 +579,12 @@ def _filter_player_props_by_usage(
             continue
         is_over = bool(re.search(r"\bover\b", description))
         is_under = bool(re.search(r"\bunder\b", description))
+        # Model thresholds must stay close to demonstrated production. The
+        # previous 1.75x/0.50x guard let inflated yardage targets through.
         unsupported = (
-            is_over and threshold > max(season_average, recent_average, 0.1) * 1.75
+            is_over and threshold > max(season_average, recent_average, 0.1) * 1.10
         ) or (
-            is_under and threshold < min(season_average, recent_average) * 0.50
+            is_under and threshold < min(season_average, recent_average) * 0.70
         )
         if unsupported:
             gaps.append(
@@ -683,6 +744,8 @@ def _validate_analysis(
     # Invalid rows are discarded with a data-gap warning and cannot make an
     # otherwise empty response appear successful.
     _sanitize_underdog_analysis(data, team_names)
+    if require_underdog and not data.get("underdog_analysis"):
+        raise RuntimeError("AI response omitted the required underdog cover/upset assessment for a spread matchup.")
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
     if not isinstance(picks, list):
@@ -841,6 +904,33 @@ def _validate_analysis(
 
 
 
+def _is_key_defensive_absence(
+    impact: dict[str, Any],
+    player_usage: dict[str, dict[str, Any]],
+) -> bool:
+    """Return True only for a clearly high-impact defensive player, not any starter."""
+    player = str(impact.get("injured_player") or "")
+    usage = player_usage.get(_normalize_name(player), {})
+    position = str(usage.get("position") or "").upper()
+    if position not in {"LB", "ILB", "OLB", "DE", "EDGE", "DT", "NT", "CB", "S", "FS", "SS"}:
+        return False
+    narrative = " ".join(
+        str(impact.get(field) or "")
+        for field in ("statistical_effect", "evidence", "injured_player")
+    ).casefold()
+    if re.search(r"\b(?:all[- ]pro|pro bowl|team captain|defensive player of the year)\b", narrative):
+        return True
+    season = usage.get("season") if isinstance(usage.get("season"), dict) else {}
+    return any((
+        _stat_number(season, "sacks") >= 5.0,
+        _stat_number(season, "totalTackles") >= 65,
+        _stat_number(season, "interceptions") >= 3,
+        _stat_number(season, "passesDefended") >= 8,
+        _stat_number(season, "tacklesForLoss") >= 8,
+        _stat_number(season, "quarterbackHits") >= 10,
+    ))
+
+
 def _filter_injury_impacts(
     data: dict[str, Any],
     injury_statuses: list[dict[str, Any]],
@@ -922,7 +1012,29 @@ def _filter_injury_impacts(
                 f"{affected_report.get('status')}."
             )
             continue
+        if unit_impact and not _is_key_defensive_absence(impact, player_usage or {}):
+            gaps.append(
+                f"Removed team-unit impact for {injured_player}: only key defensive stars "
+                "may remain as unit-level injury entries."
+            )
+            continue
         retained.append(impact)
+
+    retained.sort(
+        key=lambda item: (
+            int(item.get("confidence", 0) or 0),
+            _is_key_defensive_absence(item, player_usage or {}),
+            _normalize_name(str(item.get("affected_player") or "")) not in {
+                "teamunit", "offensiveunit", "defensiveunit", "specialteamsunit"
+            },
+        ),
+        reverse=True,
+    )
+    if len(retained) > 5:
+        gaps.append(
+            f"Condensed injury/news impacts from {len(retained)} to the five most material entries."
+        )
+        retained = retained[:5]
     data["injury_impact"] = retained
     return gaps
 
@@ -988,17 +1100,15 @@ def _separate_unverified_player_props(
     data: dict[str, Any],
     research: dict[str, Any],
 ) -> list[str]:
-    """Move model-only props unless the exact player market, side and line are quoted."""
+    """Keep only exact sportsbook-matched player props in actionable/sneaky sections."""
     verified_quotes = research.get("verified_player_prop_markets", [])
-    actionable = []
-    model_only = []
+    verified_quotes = verified_quotes if isinstance(verified_quotes, list) else []
     gaps = []
-    for pick in data.get("picks", []):
-        if pick.get("market_type") != "Player Prop":
-            actionable.append(pick)
-            continue
-        matched = next((
-            quote for quote in (verified_quotes if isinstance(verified_quotes, list) else [])
+    model_only = []
+
+    def match_quote(pick: dict[str, Any]) -> dict[str, Any] | None:
+        return next((
+            quote for quote in verified_quotes
             if isinstance(quote, dict)
             and _quote_matches_pick(pick, quote)
             and quote.get("line") not in (None, "")
@@ -1006,6 +1116,13 @@ def _separate_unverified_player_props(
             and quote.get("sportsbook") and quote.get("source_url")
             and quote.get("retrieved_at")
         ), None)
+
+    actionable = []
+    for pick in data.get("picks", []):
+        if pick.get("market_type") != "Player Prop":
+            actionable.append(pick)
+            continue
+        matched = match_quote(pick)
         if matched:
             pick["market_line"] = (
                 f"{matched['line']} ({matched['price']}) — {matched['sportsbook']}"
@@ -1017,14 +1134,169 @@ def _separate_unverified_player_props(
             pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
             model_only.append(pick)
             gaps.append(
-                f"{pick.get('player_or_team')} {pick.get('bet_description')}: exact player market, side and line were not verified; no verified sportsbook line matched the requested threshold; moved to model-only leans."
+                f"{pick.get('player_or_team')} {pick.get('bet_description')}: exact player market, side and line were not verified; moved to model-only leans."
             )
     data["picks"] = actionable
     data["model_only_picks"] = model_only
+
+    retained_sneaky = []
     for pick in data.get("sneaky_props", []):
-        if pick.get("market_type") == "Player Prop":
-            pick["market_line"] = "NOT VERIFIED — MODEL THRESHOLD ONLY"
+        if pick.get("market_type") != "Player Prop":
+            continue
+        matched = match_quote(pick)
+        if not matched:
+            gaps.append(
+                f"Removed unverified sneaky player prop for {pick.get('player_or_team')}: "
+                "no exact sportsbook market, side, line and price were found."
+            )
+            continue
+        pick["market_line"] = (
+            f"{matched['line']} ({matched['price']}) — {matched['sportsbook']}"
+        )
+        pick["market_source"] = matched["source_url"]
+        pick["market_retrieved_at"] = matched["retrieved_at"]
+        retained_sneaky.append(pick)
+    data["sneaky_props"] = retained_sneaky
     return gaps
+
+
+def _move_sneaky_game_picks(data: dict[str, Any]) -> bool:
+    """Move 1Q/1H and other game-line ideas out of Sneaky Props into game-level bets."""
+    sneaky = data.get("sneaky_props", [])
+    if not isinstance(sneaky, list):
+        return False
+    moved = [item for item in sneaky if isinstance(item, dict) and item.get("market_type") == "Game Prop"]
+    if not moved:
+        return False
+    data.setdefault("picks", []).extend(moved)
+    data["sneaky_props"] = [
+        item for item in sneaky
+        if not isinstance(item, dict) or item.get("market_type") != "Game Prop"
+    ]
+    return True
+
+
+def _game_market_total_points(research: dict[str, Any]) -> set[float]:
+    """Read full-game total points only from timestamped ESPN pickcenter quotes."""
+    totals: set[float] = set()
+    for market in research.get("verified_game_markets", []) or []:
+        if not isinstance(market, dict):
+            continue
+        total = market.get("total")
+        if isinstance(total, dict):
+            for side_data in total.values():
+                if not isinstance(side_data, dict):
+                    continue
+                for phase in ("open", "close"):
+                    quote = side_data.get(phase)
+                    if isinstance(quote, dict) and quote.get("line") not in (None, ""):
+                        try:
+                            totals.add(float(quote["line"]))
+                        except (TypeError, ValueError):
+                            pass
+        displayed = market.get("displayed_total")
+        if displayed not in (None, ""):
+            try:
+                totals.add(float(displayed))
+            except (TypeError, ValueError):
+                pass
+    return totals
+
+
+def _filter_game_level_picks(
+    data: dict[str, Any],
+    game: dict[str, Any],
+    research: dict[str, Any],
+    team_names: tuple[str, str],
+) -> list[str]:
+    """Reject game bets that do not match a supplied, independently sourced market."""
+    gaps = []
+    totals = _game_market_total_points(research)
+    scoreboard_line = str(game.get("Betting Line") or "")
+    spread_match = re.search(r"([A-Za-z]{2,3})\s*([+-]\d+(?:\.\d+)?)", scoreboard_line)
+    scoreboard_team = _team_key(spread_match.group(1)) if spread_match else ""
+    scoreboard_spread = float(spread_match.group(2)) if spread_match else None
+    retained = []
+    for pick in data.get("picks", []):
+        if pick.get("market_type") != "Game Prop":
+            retained.append(pick)
+            continue
+        description = " ".join(str(pick.get(field) or "") for field in (
+            "bet_description", "play_threshold", "market_line"
+        ))
+        normalized = description.casefold()
+        if re.search(r"\b(?:over|under)\b.*(?:total|points)", normalized):
+            point_match = re.search(r"\b(?:over|under)\s*(-?\d+(?:\.\d+)?)", normalized)
+            point = float(point_match.group(1)) if point_match else None
+            if point is None or not any(abs(point - quote) < 0.001 for quote in totals):
+                gaps.append(
+                    f"Removed game total {pick.get('bet_description')}: no matching ESPN pickcenter total quote was supplied."
+                )
+                continue
+            pick["market_line"] = f"ESPN pickcenter total {point:g} (timestamped quote)"
+            retained.append(pick)
+            continue
+        if re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b", normalized):
+            gaps.append(
+                f"Removed period game line {pick.get('bet_description')}: no independently verified 1Q/1H market quote was supplied."
+            )
+            continue
+        if "spread" in normalized or re.search(r"[+-]\s*\d+(?:\.\d+)?", normalized):
+            team_key = _team_key(str(pick.get("player_or_team") or ""))
+            line_value_match = re.search(r"([+-]\d+(?:\.\d+)?)", description)
+            if scoreboard_spread is None or not scoreboard_team or team_key not in {
+                _team_key(team_names[0]), _team_key(team_names[1])
+            }:
+                gaps.append(f"Removed unverified game spread {pick.get('bet_description')}: scoreboard spread could not be matched.")
+                continue
+            expected = scoreboard_spread if team_key == scoreboard_team else -scoreboard_spread
+            if line_value_match and abs(abs(float(line_value_match.group(1))) - abs(expected)) > 0.001:
+                gaps.append(f"Removed game spread {pick.get('bet_description')}: threshold conflicts with ESPN scoreboard spread.")
+                continue
+            pick["market_line"] = scoreboard_line + " (ESPN scoreboard)"
+            retained.append(pick)
+            continue
+        gaps.append(
+            f"Removed game-level pick {pick.get('bet_description')}: no independently verified matching market was supplied."
+        )
+    data["picks"] = retained
+    return gaps
+
+
+def _remove_contradictory_period_game_picks(
+    data: dict[str, Any],
+    team_names: tuple[str, str],
+) -> list[str]:
+    """Do not pair a full-game spread with an opposite-side 1Q/1H spread."""
+    picks = data.get("picks", [])
+    full_game_spread_teams = {
+        _team_key(str(item.get("player_or_team") or ""))
+        for item in picks
+        if item.get("market_type") == "Game Prop"
+        and "spread" in str(item.get("bet_description") or "").casefold()
+        and not re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b",
+                          str(item.get("bet_description") or "").casefold())
+    }
+    gaps = []
+    retained = []
+    for item in picks:
+        description = str(item.get("bet_description") or "").casefold()
+        is_period_spread = (
+            item.get("market_type") == "Game Prop"
+            and "spread" in description
+            and bool(re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b", description))
+        )
+        team_key = _team_key(str(item.get("player_or_team") or ""))
+        if is_period_spread and full_game_spread_teams and team_key not in full_game_spread_teams:
+            gaps.append(
+                f"Removed contradictory period spread {item.get('bet_description')}: it backs the opposite team from the retained full-game spread."
+            )
+            continue
+        retained.append(item)
+    data["picks"] = retained
+    return gaps
+
+
 
 def _deduplicate_correlated_game_picks(
     picks: list[dict[str, Any]],
@@ -1112,15 +1384,15 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "market_type (Player Prop/Game Prop), player_or_team, bet_description, market_line, "
         "play_threshold, estimated_hit_probability (0-100), confidence (1-10), "
         "statistical_rationale, risk_factors and data_quality (Strong/Moderate/Limited). "
-        "underdog_analysis: up to one row with underdog, spread, cover_probability, upset_probability, recommendation, rationale, risk_factors, evidence_quality. Only include evidence-supported picks. "
+        "underdog_analysis: exactly one row for the team receiving points, with cover_probability and outright upset_probability separately, recommendation (Monitor or Pass if no priced edge), rationale, risk_factors and evidence_quality. Never omit this assessment for a spread matchup. "
         f"Only use these matchup teams: {team_names[0]} and {team_names[1]}. "
         "Target evidence-backed props. "
         "Pass 1: core passing, rushing, receiving and anytime-TD markets; TD bets require a named-player quote and price. "
         "Assess supported full-game/1Q/1H game lines. Never scale full-game averages into period player props; without period splits omit them or mark Limited (confidence <=5) and disclose the gap. "
         "Pass 2: supported longest-play/combo/first-TD and 1Q/1H markets; first-half TDs need a quote. No sack/tackle/kicking bets or invented alternate lines. "
-        "Separate best recommendations in picks from speculative high-upside Sneaky Props; do not duplicate exact markets. "
+        "Separate best recommendations in picks from Sneaky Props. Any 1Q/1H game-line idea belongs in picks as a Game Prop, never Sneaky Props. Never recommend opposing sides across full-game and period spreads. Game totals and team totals require an exact supplied market quote; never invent or infer a total. "
         "Do not pair a team's moneyline and spread; spread probability cannot exceed its moneyline probability. Never call a veteran QB inexperienced solely due to a recent trade. "
-        "Assess underdog cover and upset probabilities separately for each spread; only a priced edge earns Bet underdog spread/Upset moneyline, otherwise Monitor/Pass. Include actionable dog bets in picks; never force one. "
+        "Assess underdog cover and upset probabilities separately for every spread. Always return the assessment even when the correct recommendation is Monitor or Pass; do not force a bet. "
         "TDs: compare season scoring, carries/targets per game and recent scoring. "
         "Passing TDs do not qualify a QB for anytime TD; require a rushing TD or 3+ rush attempts/game. "
         "Never select a QB solely for starting. Injury impacts: never make the injured player their own beneficiary. Cover offensive starters, key defensive absences and verified role/QB news; assess downstream skill-player and same-position replacements, but don't assume benefits. Use affected_player='Team unit' if no individual is supported; defensive absences should assess opposing researched offense. "
@@ -1171,7 +1443,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         instructions,
         user_prefix,
         validator=lambda result: _validate_analysis(
-            result, rosters=rosters, team_names=team_names
+            result, rosters=rosters, team_names=team_names,
+            require_underdog=bool(re.search(r"[+-]\d+(?:\.\d+)?", str(game.get("Betting Line") or ""))),
         ),
         prompt_factory=prompts_for_provider,
     )
@@ -1201,7 +1474,15 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         team_names, player_usage=player_usage, news_evidence_text=news_evidence_text
     )
     market_gaps = _separate_unverified_player_props(data, research)
-    quality_gaps = injury_gaps + sneaky_status_gaps + prop_gaps + sneaky_usage_gaps + td_gaps + impact_gaps + market_gaps
+    moved_sneaky_games = _move_sneaky_game_picks(data)
+    game_market_gaps = _filter_game_level_picks(data, game, research, team_names)
+    contradiction_gaps = _remove_contradictory_period_game_picks(data, team_names)
+    quality_gaps = (
+        injury_gaps + sneaky_status_gaps + prop_gaps + sneaky_usage_gaps
+        + td_gaps + impact_gaps + market_gaps + game_market_gaps + contradiction_gaps
+    )
+    if moved_sneaky_games:
+        quality_gaps.append("Moved 1Q/1H game-line ideas from Sneaky Props into the game-level bets section.")
     if quality_gaps:
         existing_gaps = data.setdefault("data_gaps", [])
         existing_gaps.extend(quality_gaps[:max(0, 6 - len(existing_gaps))])
@@ -1223,8 +1504,11 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         if (_normalize_name(str(item.get("player_or_team") or "")),
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
-    data["analysis_version"] = 11
-    data["odds_api_status"] = research.get("odds_api_status", "not_configured")
+    data["player_research_summary"] = _build_player_research_summary(
+        player_usage, research.get("selected_player_candidates", {})
+    )
+    data["analysis_version"] = 12
+    data["odds_api_status" = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
     data["researched_player_evidence"] = player_usage
