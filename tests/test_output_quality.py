@@ -198,6 +198,44 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(len(data["picks"]), 1)
         self.assertIn("ESPN scoreboard", data["picks"][0]["market_line"])
 
+    def test_unquoted_period_game_line_is_limited_and_kept_in_game_picks(self):
+        data = {"picks": [{
+            "market_type": "Game Prop",
+            "player_or_team": "Baltimore Ravens",
+            "bet_description": "BAL 1H -2.5",
+            "play_threshold": "BAL -2.5",
+            "market_line": "Not verified",
+            "confidence": 8, "data_quality": "Strong",
+            "risk_factors": "First-half matchup edge",
+        }]}
+        gaps = _filter_game_level_picks(
+            data, {"Betting Line": "BAL -4.5"}, {"verified_game_markets": []},
+            ("Los Angeles Chargers", "Baltimore Ravens"),
+        )
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["picks"][0]["confidence"], 5)
+        self.assertEqual(data["picks"][0]["data_quality"], "Limited")
+        self.assertIn("NOT VERIFIED", data["picks"][0]["market_line"])
+        self.assertTrue(any("Limited model idea" in gap for gap in gaps))
+
+    def test_opposite_period_spread_is_detected_without_spread_word(self):
+        data = {"picks": [
+            {
+                "market_type": "Game Prop", "player_or_team": "Los Angeles Chargers",
+                "bet_description": "LAC +4.5", "play_threshold": "LAC +4.5",
+            },
+            {
+                "market_type": "Game Prop", "player_or_team": "Baltimore Ravens",
+                "bet_description": "BAL 1H -2.5", "play_threshold": "BAL -2.5",
+            },
+        ]}
+        gaps = _remove_contradictory_period_game_picks(
+            data, ("Los Angeles Chargers", "Baltimore Ravens")
+        )
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["picks"][0]["player_or_team"], "Los Angeles Chargers")
+        self.assertTrue(any("opposite team" in gap for gap in gaps))
+
     def test_opposite_first_half_spread_is_removed_against_full_game_pick(self):
         data = {"picks": [
             {
