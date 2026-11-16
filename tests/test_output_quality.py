@@ -106,6 +106,21 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertIn("active status is not confirmed", scorer["availability_evidence"])
         self.assertNotIn("not independently verified", scorer["availability"].casefold())
 
+    def test_explicit_espn_available_status_is_not_rewritten_as_missing(self):
+        data = {
+            "picks": [{
+                "market_type": "Player Prop", "player_or_team": "Player A",
+                "confidence": 6, "risk_factors": "Usage volatility",
+            }],
+            "touchdown_scorers": [{
+                "player": "Player A", "confidence": 5, "risk_factors": "TD variance",
+            }],
+        }
+        statuses = [{"player": "Player A", "status": "Active"}]
+        _apply_independent_injury_statuses(data, statuses)
+        self.assertEqual(data["picks"][0]["availability"], "Available (ESPN injury feed)")
+        self.assertEqual(data["touchdown_scorers"][0]["availability"], "Available (ESPN injury feed)")
+
     def test_unverified_sneaky_anytime_td_is_removed(self):
         data = {
             "picks": [],
