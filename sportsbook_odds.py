@@ -559,15 +559,41 @@ def research_supports_first_td(research_text: str) -> bool:
 
 
 def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
-    """Render exact sportsbook quotes with market type, book and update timestamps."""
+    """Summarize best available prices without flooding the AI prompt with duplicate books."""
     if not quotes:
         return "No sportsbook quotes were returned for the requested markets."
-    game_quotes = [q for q in quotes if q.get("market_type") == "game"]
-    player_quotes = [q for q in quotes if q.get("market_type") != "game"]
+
+    def decimal_odds(value: Any) -> float:
+        try:
+            price = float(str(value).replace("+", ""))
+        except (TypeError, ValueError):
+            return 0.0
+        if price > 0:
+            return 1.0 + price / 100.0
+        if price < 0:
+            return 1.0 + 100.0 / abs(price)
+        return 0.0
+
+    # Keep one best price per exact selection. The full unabridged quote list
+    # remains attached to research for deterministic verification after AI.
+    best: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for quote in quotes:
+        key = (
+            str(quote.get("market_key") or ""),
+            str(quote.get("player") or ""),
+            str(quote.get("side") or ""),
+            str(quote.get("point") if quote.get("point") is not None else ""),
+        )
+        prior = best.get(key)
+        if prior is None or decimal_odds(quote.get("price")) > decimal_odds(prior.get("price")):
+            best[key] = quote
+
+    game_quotes = [q for q in best.values() if q.get("market_type") == "game"]
+    player_quotes = [q for q in best.values() if q.get("market_type") != "game"]
     lines = []
     if game_quotes:
-        lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS:")
-        for quote in game_quotes:
+        lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS (best price per exact selection):")
+        for quote in sorted(game_quotes, key=lambda q: (q.get("market_key", ""), q.get("player", ""), str(q.get("point", "")), q.get("side", ""))):
             lines.append(
                 f"{quote.get('market')} | {quote.get('player')} | {quote.get('line')} "
                 f"| {quote.get('price')} | {quote.get('sportsbook')} "
@@ -575,8 +601,8 @@ def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
                 f"| retrieved {quote.get('retrieved_at')}"
             )
     if player_quotes:
-        lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (US region; American odds):")
-        for quote in player_quotes:
+        lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (best price per exact selection):")
+        for quote in sorted(player_quotes, key=lambda q: (q.get("player", ""), q.get("market_key", ""), str(q.get("point", "")), q.get("side", ""))):
             lines.append(
                 f"{quote.get('player')} | {quote.get('market')} | {quote.get('line')} "
                 f"| {quote.get('price')} | {quote.get('sportsbook')} "
