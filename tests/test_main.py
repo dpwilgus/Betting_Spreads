@@ -23,7 +23,7 @@ class MatchupFilterTests(unittest.TestCase):
             "injury_impact": [],
             "underdog_analysis": [],
             "player_research_summary": [],
-            "analysis_version": 12,
+            "analysis_version": 13,
             "ai_provider": "groq",
         }
         self.assertFalse(_cached_analysis_is_complete(cached))
@@ -36,7 +36,7 @@ class MatchupFilterTests(unittest.TestCase):
             "injury_impact": [],
             "underdog_analysis": [],
             "player_research_summary": [],
-            "analysis_version": 12,
+            "analysis_version": 13,
             "ai_provider": "groq",
         }
         for section in (
@@ -56,7 +56,7 @@ class MatchupFilterTests(unittest.TestCase):
             "ai_provider": "groq",
         }
         self.assertFalse(_cached_analysis_is_complete(cached))
-        cached["analysis_version"] = 12
+        cached["analysis_version"] = 13
         cached["ai_provider"] = ""
         self.assertFalse(_cached_analysis_is_complete(cached))
 
