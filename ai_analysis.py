@@ -1384,7 +1384,10 @@ def _filter_game_level_picks(
             continue
         if "spread" in normalized or re.search(r"[+-]\s*\d+(?:\.\d+)?", normalized):
             team_key = _team_key(str(pick.get("player_or_team") or ""))
-            line_value_match = re.search(r"([+-]\d+(?:\.\d+)?)", description)
+            pick_line_text = " ".join(str(pick.get(field) or "") for field in (
+                "bet_description", "play_threshold"
+            ))
+            line_value_match = re.search(r"([+-]\d+(?:\.\d+)?)", pick_line_text)
             if scoreboard_spread is None or not scoreboard_team or team_key not in {
                 _team_key(team_names[0]), _team_key(team_names[1])
             }:
