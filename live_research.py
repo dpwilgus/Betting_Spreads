@@ -1623,8 +1623,9 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         for term in team_terms
                     ):
                         relevant_schefter.append(article)
-                for article in relevant_schefter[:12]:
-                    news_sections.append(
+                for article in reversed(relevant_schefter[:12]):
+                    news_sections.insert(
+                        0,
                         "ADAM SCHEFTER PRIORITY NEWS — "
                         + json.dumps(article, ensure_ascii=False, separators=(",", ":"))
                     )
