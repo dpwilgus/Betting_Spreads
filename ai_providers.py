@@ -452,7 +452,7 @@ def generate_json(
                 if attempt == 0:
                     request_user_prompt = (
                         provider_user
-                        + "\\n\\nVALIDATION CORRECTION REQUIRED: Your previous JSON response "
+                        + "\n\nVALIDATION CORRECTION REQUIRED: Your previous JSON response "
                         + "was rejected: " + str(exc)[:700] + ". Return the complete corrected "
                         + "JSON object. Preserve valid analysis, fix the stated issue, and do "
                         + "not omit required fields. Do not add commentary or Markdown."
