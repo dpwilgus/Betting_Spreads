@@ -61,7 +61,8 @@ def _bounded_research_text(
                 or upper.startswith("MARKET DATA RULE")
                 or upper.startswith("ESPN CURRENT PLAYER INJURIES")
                 or upper.startswith("ESPN GAME SUMMARY INJURY DATA")
-                or upper.startswith("ESPN RECENT TEAM NEWS")):
+                or upper.startswith("ESPN RECENT TEAM NEWS")
+                or upper.startswith("ADAM SCHEFTER PRIORITY NEWS")):
             priority = 0
         elif (upper.startswith("PLAYER LOGS")
                 or upper.startswith("ESPN CURRENT-SEASON PLAYER GAME LOGS")):
@@ -391,6 +392,10 @@ def _apply_independent_injury_statuses(
                 )
                 continue
             if player_key in questionable:
+                item["availability"] = "Questionable"
+                item["availability_evidence"] = (
+                    "ESPN's injury feed lists Questionable; final game-day active status is pending."
+                )
                 item["confidence"] = min(int(item.get("confidence", 6)), 6)
                 risk = str(item.get("risk_factors", "")).strip()
                 if "question" not in risk.casefold():
@@ -1142,6 +1147,7 @@ def _separate_unverified_player_props(
     retained_sneaky = []
     for pick in data.get("sneaky_props", []):
         if pick.get("market_type") != "Player Prop":
+            retained_sneaky.append(pick)
             continue
         matched = match_quote(pick)
         if not matched:
@@ -1250,7 +1256,10 @@ def _filter_game_level_picks(
                 gaps.append(f"Removed unverified game spread {pick.get('bet_description')}: scoreboard spread could not be matched.")
                 continue
             expected = scoreboard_spread if team_key == scoreboard_team else -scoreboard_spread
-            if line_value_match and abs(abs(float(line_value_match.group(1))) - abs(expected)) > 0.001:
+            if line_value_match and (
+                abs(abs(float(line_value_match.group(1))) - abs(expected)) > 0.001
+                or float(line_value_match.group(1)) * expected < 0
+            ):
                 gaps.append(f"Removed game spread {pick.get('bet_description')}: threshold conflicts with ESPN scoreboard spread.")
                 continue
             pick["market_line"] = scoreboard_line + " (ESPN scoreboard)"
@@ -1467,7 +1476,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
     news_evidence_text = "\n".join(
         line for line in str(research.get("research_text", "")).splitlines()
-        if "ESPN RECENT TEAM NEWS" in line
+        if "ESPN RECENT TEAM NEWS" in line or "ADAM SCHEFTER PRIORITY NEWS" in line
     )
     impact_gaps = _filter_injury_impacts(
         data, research.get("injury_statuses", []), research.get("rosters"),
