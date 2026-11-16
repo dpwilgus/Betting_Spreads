@@ -693,7 +693,8 @@ class ProviderFallbackTests(unittest.TestCase):
 
     def test_touchdown_scorer_accepts_espn_team_abbreviation(self):
         data = valid_analysis()
-        data["touchdown_scorers"][0]["team"] = "SF"
+        for scorer in data["touchdown_scorers"]:
+            scorer["team"] = "SF"
         _validate_analysis(
             data,
             rosters={"San Francisco 49ers": ["Player A"], "Dallas Cowboys": ["Player B"]},
