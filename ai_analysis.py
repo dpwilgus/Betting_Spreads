@@ -724,6 +724,7 @@ def _sanitize_underdog_analysis(
     if not isinstance(rows, list):
         rows = []
     accepted = []
+    rejection_reasons: list[str] = []
     valid_teams = {_team_key(team) for team in team_names} if team_names else None
     recommendations = {
         "bet underdog spread": "Bet underdog spread", "underdog spread": "Bet underdog spread",
@@ -740,28 +741,47 @@ def _sanitize_underdog_analysis(
         candidate["underdog"] = str(candidate.get("underdog") or "").strip()
         candidate["spread"] = str(candidate.get("spread") or "").strip()
         if not candidate["underdog"] or not candidate["spread"]:
+            rejection_reasons.append("missing underdog team or spread")
             continue
         spread_match = re.search(r"[+-]?\d+(?:\.\d+)?", candidate["spread"])
         if not spread_match or float(spread_match.group(0)) <= 0:
+            rejection_reasons.append(f"invalid underdog spread value: {candidate['spread']!r}")
             continue
         if expected_spread is not None and abs(float(spread_match.group(0))) != expected_spread:
+            rejection_reasons.append(
+                f"spread mismatch: model supplied {candidate['spread']!r}; expected +{expected_spread:g}"
+            )
             continue
         if valid_teams is not None and _team_key(candidate["underdog"]) not in valid_teams:
+            rejection_reasons.append(f"team is not in matchup: {candidate['underdog']!r}")
             continue
         if expected_underdog and _team_key(candidate["underdog"]) != _team_key(expected_underdog):
+            rejection_reasons.append(
+                f"wrong underdog: model supplied {candidate['underdog']!r}; expected {expected_underdog!r}"
+            )
             continue
         try:
             cover = float(candidate.get("cover_probability"))
             upset = float(candidate.get("upset_probability"))
         except (TypeError, ValueError):
+            rejection_reasons.append("cover_probability or upset_probability is missing/non-numeric")
             continue
         if not (0 <= cover <= 100 and 0 <= upset <= cover):
+            rejection_reasons.append(
+                f"invalid probabilities: cover={candidate.get('cover_probability')!r}, "
+                f"upset={candidate.get('upset_probability')!r}"
+            )
             continue
         recommendation = str(candidate.get("recommendation") or "").strip().casefold()
         quality = str(candidate.get("evidence_quality") or "").strip().casefold()
         if recommendation not in recommendations or quality not in qualities:
+            rejection_reasons.append(
+                f"invalid recommendation/evidence_quality: {candidate.get('recommendation')!r}/"
+                f"{candidate.get('evidence_quality')!r}"
+            )
             continue
         if not str(candidate.get("rationale") or "").strip() or not str(candidate.get("risk_factors") or "").strip():
+            rejection_reasons.append("rationale or risk_factors is missing")
             continue
         candidate.update({
             "cover_probability": cover, "upset_probability": upset,
@@ -773,8 +793,12 @@ def _sanitize_underdog_analysis(
     data["underdog_analysis"] = accepted
     if not accepted:
         warning = "Underdog assessment unavailable: model output was missing, incomplete, or invalid."
+        if rejection_reasons:
+            warning += " Rejection detail: " + "; ".join(rejection_reasons[:3]) + "."
         if warning not in gaps:
             gaps.append(warning)
+        return rejection_reasons
+    return []
 
 
 def _validate_analysis(
@@ -795,7 +819,7 @@ def _validate_analysis(
     # Only a validated underdog assessment can count as usable analysis.
     # Invalid rows are discarded with a data-gap warning and cannot make an
     # otherwise empty response appear successful.
-    _sanitize_underdog_analysis(
+    underdog_rejections = _sanitize_underdog_analysis(
         data, team_names, expected_underdog=expected_underdog,
         expected_spread=expected_spread,
     )
@@ -803,8 +827,13 @@ def _validate_analysis(
     # actual betting output or an invalid attempted row must trigger fallback.
     has_analysis_or_attempt = bool(data.get("picks")) or attempted_underdog_assessment
     if require_underdog and has_analysis_or_attempt and not data.get("underdog_analysis"):
+        detail = (
+            " Rejection detail: " + "; ".join(underdog_rejections[:3]) + "."
+            if underdog_rejections else ""
+        )
         raise RuntimeError(
             "AI response omitted the required underdog cover/upset assessment for a spread matchup."
+            + detail
         )
     picks = data.get("picks")
     scorers = data.get("touchdown_scorers")
