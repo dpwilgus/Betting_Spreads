@@ -851,7 +851,7 @@ def _filter_injury_impacts(
 ) -> list[str]:
     """Keep impacts grounded in ESPN injury reports or the supplied team-news headlines."""
     reports = {
-        (_normalize_name(str(item.get("team") or "")),
+        (_team_key(str(item.get("team") or "")),
          _normalize_name(str(item.get("player") or ""))): item
         for item in injury_statuses
         if isinstance(item, dict) and item.get("team") and item.get("player")
