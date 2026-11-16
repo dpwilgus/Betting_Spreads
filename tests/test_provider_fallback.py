@@ -580,8 +580,9 @@ class ProviderFallbackTests(unittest.TestCase):
             }],
         }
         _apply_independent_injury_statuses(data, [])
-        self.assertEqual(data["touchdown_scorers"][0]["availability"], "Not independently verified")
-        self.assertIn("not independently verified", data["picks"][0]["risk_factors"].casefold())
+        self.assertEqual(data["touchdown_scorers"][0]["availability"], "No injury designation found")
+        self.assertEqual(data["picks"][0]["availability"], "No injury designation found")
+        self.assertIn("active status is not confirmed", data["touchdown_scorers"][0]["availability_evidence"])
 
 
     def test_model_only_player_props_are_not_actionable_sportsbook_picks(self):
@@ -594,7 +595,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(data["picks"], [])
         self.assertEqual(len(data["model_only_picks"]), 1)
         self.assertIn("NOT VERIFIED", data["model_only_picks"][0]["market_line"])
-        self.assertTrue(any("no verified sportsbook line" in gap for gap in gaps))
+        self.assertTrue(any("exact player market" in gap for gap in gaps))
 
     def test_player_prop_with_independent_sportsbook_quote_remains_actionable(self):
         data = {"picks":[{
