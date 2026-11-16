@@ -687,7 +687,9 @@ def _select_research_players(
 
     # Broad enough to cover the main passing/rushing options, without querying
     # every inactive/developmental roster player for every game in a full slate.
-    limits = {"QB": 2, "RB": 3, "WR": 5, "TE": 2}
+    # Research only the listed QB1; a backup is added only when injury evidence
+    # identifies that player as the next-man-up starter.
+    limits = {"QB": 1, "RB": 3, "WR": 5, "TE": 2}
     selected: list[dict[str, str]] = []
     selected_by_id: dict[str, dict[str, str]] = {}
 
