@@ -211,6 +211,35 @@ class OddsApiMarketTests(unittest.TestCase):
             1,
         )
 
+    def test_quote_summary_combines_sides_and_uses_best_book_price(self):
+        quotes = [
+            {
+                "player": "Justin Herbert", "market": "passing yards",
+                "market_key": "player_pass_yds", "market_type": "player",
+                "side": "Over", "line": "Over 205.5", "point": 205.5,
+                "price": "-115", "sportsbook": "DraftKings",
+                "retrieved_at": "2026-11-16T17:00:00+00:00",
+            },
+            {
+                "player": "Justin Herbert", "market": "passing yards",
+                "market_key": "player_pass_yds", "market_type": "player",
+                "side": "Over", "line": "Over 205.5", "point": 205.5,
+                "price": "-105", "sportsbook": "FanDuel",
+                "retrieved_at": "2026-11-16T17:00:00+00:00",
+            },
+            {
+                "player": "Justin Herbert", "market": "passing yards",
+                "market_key": "player_pass_yds", "market_type": "player",
+                "side": "Under", "line": "Under 205.5", "point": 205.5,
+                "price": "-110", "sportsbook": "DraftKings",
+                "retrieved_at": "2026-11-16T17:00:00+00:00",
+            },
+        ]
+        summary = sportsbook_odds.summarize_quotes(quotes)
+        self.assertIn("Over 205.5 -105@FanDuel", summary)
+        self.assertIn("Under 205.5 -110@DraftKings", summary)
+        self.assertEqual(summary.count("Justin Herbert | passing yards"), 1)
+
     def test_event_matching_uses_both_teams(self):
         game = {
             "Away Team": "Green Bay Packers",
