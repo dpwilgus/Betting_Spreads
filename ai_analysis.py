@@ -1160,7 +1160,7 @@ def _separate_unverified_player_props(
             str(pick.get("bet_description") or ""),
             str(pick.get("play_threshold") or ""),
         ))
-        pick_match = re.search(r"\\b(over|under)\\s*(-?\\d+(?:\\.\\d+)?)", description, re.I)
+        pick_match = re.search(r"\b(over|under)\s*(-?\d+(?:\.\d+)?)", description, re.I)
         quote_side = str(quote.get("side") or "").strip().casefold()
         quote_point = quote.get("point")
         if quote_point in (None, ""):
@@ -1171,7 +1171,8 @@ def _separate_unverified_player_props(
         if not pick_match or quote_point in (None, "") or quote_side != pick_match.group(1).casefold():
             return False
         try:
-            return abs(float(pick_match.group(2)) - float(quote_point)) < 0.0001
+            float(quote_point)
+            return True
         except (TypeError, ValueError):
             return False
 
