@@ -704,6 +704,7 @@ def _sanitize_underdog_analysis(
     data: dict[str, Any],
     team_names: tuple[str, str] | None,
     expected_underdog: str | None = None,
+    expected_spread: float | None = None,
 ) -> None:
     """Normalize or discard malformed underdog output without losing matchup analysis."""
     rows = data.get("underdog_analysis", [])
@@ -733,6 +734,8 @@ def _sanitize_underdog_analysis(
             continue
         spread_match = re.search(r"[+-]?\d+(?:\.\d+)?", candidate["spread"])
         if not spread_match or float(spread_match.group(0)) <= 0:
+            continue
+        if expected_spread is not None and abs(float(spread_match.group(0))) != expected_spread:
             continue
         if valid_teams is not None and _team_key(candidate["underdog"]) not in valid_teams:
             continue
@@ -771,6 +774,7 @@ def _validate_analysis(
     team_names: tuple[str, str] | None = None,
     require_underdog: bool = False,
     expected_underdog: str | None = None,
+    expected_spread: float | None = None,
 ) -> None:
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
@@ -778,7 +782,10 @@ def _validate_analysis(
     # Only a validated underdog assessment can count as usable analysis.
     # Invalid rows are discarded with a data-gap warning and cannot make an
     # otherwise empty response appear successful.
-    _sanitize_underdog_analysis(data, team_names, expected_underdog=expected_underdog)
+    _sanitize_underdog_analysis(
+        data, team_names, expected_underdog=expected_underdog,
+        expected_spread=expected_spread,
+    )
     if require_underdog and not data.get("underdog_analysis"):
         raise RuntimeError("AI response omitted the required underdog cover/upset assessment for a spread matchup.")
     picks = data.get("picks")
@@ -1500,9 +1507,11 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         str(game.get("Betting Line") or ""),
     )
     expected_underdog = None
+    expected_spread = None
     if spread_match:
         spread_team = _team_key(spread_match.group(1))
         spread_value = float(spread_match.group(2))
+        expected_spread = abs(spread_value)
         favorite_team = spread_team if spread_value < 0 else (
             _team_key(team_names[0]) if spread_team == _team_key(team_names[1])
             else _team_key(team_names[1])
