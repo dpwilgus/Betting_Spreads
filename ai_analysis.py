@@ -1323,15 +1323,20 @@ def _filter_game_level_picks(
                 "bet_description", "play_threshold"
             ))
             normalized_identity = _normalize_name(identity_text)
-            team_mentioned = any(
-                _normalize_name(term) in normalized_identity
-                for team in team_names
-                for term in (team, str(team).split()[-1])
-            ) or any(
-                re.search(r"\b" + abbreviation + r"\b", identity_text, re.IGNORECASE)
-                for abbreviation, canonical in _NFL_TEAM_ABBREVIATIONS.items()
-                if canonical in {_team_key(team_names[0]), _team_key(team_names[1])}
-            )
+            def mentions_team(team: str) -> bool:
+                if any(
+                    _normalize_name(term) in normalized_identity
+                    for term in (team, str(team).split()[-1])
+                ):
+                    return True
+                return any(
+                    re.search(r"\b" + abbreviation + r"\b", identity_text, re.IGNORECASE)
+                    for abbreviation, canonical in _NFL_TEAM_ABBREVIATIONS.items()
+                    if canonical == _team_key(team)
+                )
+            # A single team reference denotes a team total; both teams named
+            # together can still describe a combined game total.
+            team_mentioned = sum(1 for team in team_names if mentions_team(team)) == 1
             if "team total" in normalized or team_mentioned or pick_team in {
                 _team_key(team_names[0]), _team_key(team_names[1])
             }:
