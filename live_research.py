@@ -1573,12 +1573,21 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                     for candidate in candidates
                     if isinstance(candidate, dict) and candidate.get("name")
                 }
+                player_terms = selected_names | {
+                    name.split()[-1]
+                    for name in selected_names if len(name.split()) > 1
+                }
                 team_terms = {
                     str(team_name).casefold()
                     for team_name in teams.values()
                 } | {
                     str(team_name).split()[-1].casefold()
                     for team_name in teams.values() if str(team_name).split()
+                } | {
+                    str(team_name).split()[0].casefold()
+                    for team_name in teams.values()
+                    if len(str(team_name).split()) > 1
+                    and str(team_name).split()[0].casefold() not in {"los", "new"}
                 }
                 schefter_articles = _adam_schefter_news()
                 relevant_schefter = []
@@ -1587,7 +1596,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                         str(article.get("headline") or "") + " "
                         + str(article.get("description") or "")
                     ).casefold()
-                    if any(name.casefold() in article_text for name in selected_names) or any(
+                    if any(name.casefold() in article_text for name in player_terms) or any(
                         term and re.search(r"\b" + re.escape(term) + r"\b", article_text)
                         for term in team_terms
                     ):
