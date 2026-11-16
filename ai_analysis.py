@@ -1278,6 +1278,10 @@ def _filter_game_level_picks(
                 _normalize_name(term) in normalized_identity
                 for team in team_names
                 for term in (team, str(team).split()[-1])
+            ) or any(
+                re.search(r"\b" + abbreviation + r"\b", identity_text, re.IGNORECASE)
+                for abbreviation, canonical in _NFL_TEAM_ABBREVIATIONS.items()
+                if canonical in {_team_key(team_names[0]), _team_key(team_names[1])}
             )
             if "team total" in normalized or team_mentioned or pick_team in {
                 _team_key(team_names[0]), _team_key(team_names[1])
