@@ -1,0 +1,283 @@
+import unittest
+from unittest.mock import patch
+
+from openpyxl import Workbook
+
+from ai_analysis import (
+    _apply_independent_injury_statuses,
+    _build_player_research_summary,
+    _filter_game_level_picks,
+    _filter_injury_impacts,
+    _filter_player_props_by_usage,
+    _move_sneaky_game_picks,
+    _remove_contradictory_period_game_picks,
+    _separate_unverified_player_props,
+    _validate_analysis,
+)
+from live_research import _adam_schefter_news
+from main import _write_matchup_sheet
+
+
+class OutputQualityRuleTests(unittest.TestCase):
+    def test_yardage_thresholds_far_above_season_and_recent_average_are_rejected(self):
+        data = {"picks": [
+            {
+                "market_type": "Player Prop",
+                "player_or_team": "Justin Herbert",
+                "bet_description": "Over 235.5 passing yards",
+                "play_threshold": "Over 235.5 passing yards",
+            },
+            {
+                "market_type": "Player Prop",
+                "player_or_team": "Derrick Henry",
+                "bet_description": "Over 85.5 rushing yards",
+                "play_threshold": "Over 85.5 rushing yards",
+            },
+        ]}
+        usage = {
+            "justinherbert": {
+                "position": "QB", "games_available": 10,
+                "season": {"passingYards": "1990"},
+                "recent": [{"stats": {"passingYards": "205"}} for _ in range(3)],
+            },
+            "derrickhenry": {
+                "position": "RB", "games_available": 10,
+                "season": {"rushingYards": "766"},
+                "recent": [{"stats": {"rushingYards": "75"}} for _ in range(3)],
+            },
+        }
+        gaps = _filter_player_props_by_usage(data, usage)
+        self.assertEqual(data["picks"], [])
+        self.assertEqual(len(gaps), 2)
+        self.assertIn("season average 199.0", gaps[0])
+        self.assertIn("season average 76.6", gaps[1])
+
+    def test_team_unit_injury_impacts_keep_only_key_defensive_stars(self):
+        impacts = []
+        reports = []
+        for player in ("All-Pro Safety", "Ordinary Safety", "Starting Guard"):
+            impacts.append({
+                "impact_type": "Injury",
+                "injured_player": player,
+                "team": "Team A",
+                "availability": "Out",
+                "affected_player": "Team unit",
+                "affected_team": "Team A",
+                "impact_direction": "Negative",
+                "statistical_effect": (
+                    "All-Pro safety absence affects secondary" if player == "All-Pro Safety"
+                    else "Starter absence affects unit"
+                ),
+                "prop_market": "Opponent passing yards",
+                "evidence": "ESPN injury report",
+                "confidence": 8,
+                "conditions": "If inactive",
+            })
+            reports.append({"player": player, "team": "Team A", "status": "Out"})
+        data = {"injury_impact": impacts}
+        usage = {
+            "allprosafety": {"position": "S", "season": {"totalTackles": "42"}},
+            "ordinarysafety": {"position": "S", "season": {"totalTackles": "28"}},
+            "startingguard": {"position": "G", "season": {}},
+        }
+        gaps = _filter_injury_impacts(
+            data, reports, {"Team A": list(("All-Pro Safety", "Ordinary Safety", "Starting Guard"))},
+            ("Team A", "Team B"), player_usage=usage,
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+        self.assertEqual(data["injury_impact"][0]["injured_player"], "All-Pro Safety")
+        self.assertTrue(any("only key defensive stars" in gap for gap in gaps))
+
+    def test_missing_injury_designation_is_labeled_consistently_not_active(self):
+        data = {
+            "picks": [{
+                "market_type": "Player Prop", "player_or_team": "Player A",
+                "confidence": 6, "risk_factors": "Usage volatility",
+            }],
+            "touchdown_scorers": [{
+                "player": "Player A", "confidence": 5, "risk_factors": "Low TD rate",
+            }],
+        }
+        _apply_independent_injury_statuses(data, [])
+        pick, scorer = data["picks"][0], data["touchdown_scorers"][0]
+        self.assertEqual(pick["availability"], "No injury designation found")
+        self.assertEqual(scorer["availability"], "No injury designation found")
+        self.assertIn("active status is not confirmed", scorer["availability_evidence"])
+        self.assertNotIn("not independently verified", scorer["availability"].casefold())
+
+    def test_unverified_sneaky_anytime_td_is_removed(self):
+        data = {
+            "picks": [],
+            "sneaky_props": [{
+                "market_type": "Player Prop",
+                "player_or_team": "Mark Andrews",
+                "bet_description": "Andrews anytime TD scorer",
+                "play_threshold": "Anytime TD +180 or better",
+            }],
+        }
+        gaps = _separate_unverified_player_props(data, {"verified_player_prop_markets": []})
+        self.assertEqual(data["sneaky_props"], [])
+        self.assertTrue(any("Removed unverified sneaky player prop" in gap for gap in gaps))
+
+    def test_sneaky_game_lines_move_into_game_level_picks(self):
+        data = {
+            "picks": [],
+            "sneaky_props": [{
+                "market_type": "Game Prop",
+                "player_or_team": "Baltimore Ravens",
+                "bet_description": "BAL 1st half -2.5 spread",
+                "play_threshold": "BAL 1H -2.5 or better",
+            }],
+        }
+        self.assertTrue(_move_sneaky_game_picks(data))
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["sneaky_props"], [])
+
+    def test_unverified_total_is_removed_when_market_quote_disagrees(self):
+        data = {"picks": [{
+            "market_type": "Game Prop",
+            "player_or_team": "Baltimore Ravens",
+            "bet_description": "Under 43.5 total points",
+            "play_threshold": "Under 43.5",
+            "market_line": "Not verified",
+        }]}
+        gaps = _filter_game_level_picks(
+            data,
+            {"Betting Line": "BAL -4.5"},
+            {"verified_game_markets": [{"total": {"over": {"close": {"line": "21.5"}}}}]},
+            ("Los Angeles Chargers", "Baltimore Ravens"),
+        )
+        self.assertEqual(data["picks"], [])
+        self.assertTrue(any("no matching ESPN pickcenter total quote" in gap for gap in gaps))
+
+    def test_scoreboard_spread_is_retained_when_team_and_side_match(self):
+        data = {"picks": [{
+            "market_type": "Game Prop",
+            "player_or_team": "Los Angeles Chargers",
+            "bet_description": "LAC +4.5 spread",
+            "play_threshold": "LAC +4.5 or better",
+            "market_line": "Not verified",
+        }]}
+        _filter_game_level_picks(
+            data, {"Betting Line": "BAL -4.5"}, {"verified_game_markets": []},
+            ("Los Angeles Chargers", "Baltimore Ravens"),
+        )
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertIn("ESPN scoreboard", data["picks"][0]["market_line"])
+
+    def test_opposite_first_half_spread_is_removed_against_full_game_pick(self):
+        data = {"picks": [
+            {
+                "market_type": "Game Prop", "player_or_team": "Los Angeles Chargers",
+                "bet_description": "LAC +4.5 spread", "play_threshold": "LAC +4.5",
+            },
+            {
+                "market_type": "Game Prop", "player_or_team": "Baltimore Ravens",
+                "bet_description": "BAL 1st half -2.5 spread", "play_threshold": "BAL -2.5",
+            },
+        ]}
+        gaps = _remove_contradictory_period_game_picks(
+            data, ("Los Angeles Chargers", "Baltimore Ravens")
+        )
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["picks"][0]["player_or_team"], "Los Angeles Chargers")
+        self.assertTrue(any("opposite team" in gap for gap in gaps))
+
+    def test_underdog_assessment_is_required_for_spread_matchups(self):
+        data = {
+            "summary": "Summary", "game_script": "Script",
+            "picks": [{
+                "market_type": "Game Prop", "player_or_team": "Team A",
+                "bet_description": "Team A +3.5 spread", "market_line": "Team B -3.5",
+                "play_threshold": "Team A +3.5", "estimated_hit_probability": 52,
+                "confidence": 5, "statistical_rationale": "Evidence",
+                "risk_factors": "Risk", "data_quality": "Moderate",
+            }],
+            "touchdown_scorers": [], "sneaky_props": [], "injury_impact": [],
+            "underdog_analysis": [],
+        }
+        with self.assertRaisesRegex(RuntimeError, "omitted the required underdog"):
+            _validate_analysis(data, team_names=("Team A", "Team B"), require_underdog=True)
+
+    def test_player_research_summary_calculates_season_and_recent_averages(self):
+        usage = {
+            "quarterbackone": {
+                "position": "QB", "games_available": 2,
+                "season": {
+                    "passingYards": "500", "passingAttempts": "70",
+                    "passingTouchdowns": "4", "rushingYards": "20",
+                    "rushingAttempts": "4", "rushingTouchdowns": "1",
+                },
+                "recent": [
+                    {"stats": {"passingYards": "250", "passingAttempts": "35",
+                               "passingTouchdowns": "2", "rushingYards": "10",
+                               "rushingAttempts": "2", "rushingTouchdowns": "1"}},
+                    {"stats": {"passingYards": "250", "passingAttempts": "35",
+                               "passingTouchdowns": "2", "rushingYards": "10",
+                               "rushingAttempts": "2", "rushingTouchdowns": "0"}},
+                ],
+            },
+        }
+        result = _build_player_research_summary(
+            usage, {"Team A": [{"name": "Quarterback One", "position": "QB"}]}
+        )[0]
+        self.assertEqual(result["passing_yards_per_game"], 250)
+        self.assertEqual(result["passing_yards_recent"], 250)
+        self.assertEqual(result["passing_attempts_per_game"], 35)
+        self.assertEqual(result["passing_tds_per_game"], 2)
+        self.assertEqual(result["tds_scored_per_game"], 0.5)
+
+    def test_adam_schefter_contributor_feed_articles_are_normalized(self):
+        payload = {"items": [{
+            "headline": "Adam Schefter reports a roster move",
+            "description": "A selected player is affected.",
+            "published": "2026-11-15T18:00:00Z",
+            "links": {"web": {"href": "https://www.espn.com/nfl/story/example"}},
+        }]}
+        _adam_schefter_news.cache_clear()
+        with patch("live_research._get_json", return_value=payload) as request:
+            articles = _adam_schefter_news()
+        _adam_schefter_news.cache_clear()
+        self.assertEqual(len(articles), 1)
+        self.assertEqual(articles[0]["byline"], "Adam Schefter")
+        self.assertEqual(articles[0]["published"], "2026-11-15T18:00:00Z")
+        self.assertEqual(articles[0]["url"], "https://www.espn.com/nfl/story/example")
+        self.assertIn("contributor=adam-schefter", request.call_args.args[0])
+
+    def test_workbook_places_player_research_and_injuries_after_sneaky_props(self):
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+        game = {
+            "Away Team": "Los Angeles Chargers", "Home Team": "Baltimore Ravens",
+            "Game Date (ET)": "Monday", "Betting Line": "BAL -4.5",
+        }
+        analysis = {
+            "summary": "Summary", "game_script": "Script", "picks": [],
+            "model_only_picks": [], "underdog_analysis": [], "touchdown_scorers": [],
+            "sneaky_props": [], "player_research_summary": [{
+                "team": "Baltimore Ravens", "player": "Lamar Jackson", "position": "QB",
+                "games": 10, "passing_yards_per_game": 200, "passing_yards_recent": 210,
+            }],
+            "injury_impact": [], "data_gaps": [], "sources": [],
+            "ai_provider": "test", "research_mode": "test",
+            "research_truncated_for_prompt": False, "research_prompt_characters": 1000,
+            "odds_api_status": "test", "odds_api_usage": {},
+        }
+        _write_matchup_sheet(workbook, game, analysis, set())
+        sheet = workbook.worksheets[0]
+        row_by_title = {
+            sheet.cell(row, 1).value: row
+            for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row, 1).value
+        }
+        sneaky = row_by_title["SNEAKY PROPS & LADDER OPPORTUNITIES"]
+        research = row_by_title["PLAYER USAGE RESEARCH — CURRENT-SEASON PER-GAME AVERAGES"]
+        injuries = row_by_title["INJURY / NEWS IMPACT ANALYSIS"]
+        limitations = row_by_title["DATA LIMITATIONS"]
+        self.assertLess(sneaky, research)
+        self.assertLess(research, injuries)
+        self.assertLess(injuries, limitations)
+
+
+if __name__ == "__main__":
+    unittest.main()
