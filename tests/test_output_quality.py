@@ -5,6 +5,7 @@ from openpyxl import Workbook
 
 from ai_analysis import (
     _apply_independent_injury_statuses,
+    _bounded_research_text,
     _build_player_research_summary,
     _filter_game_level_picks,
     _filter_injury_impacts,
@@ -14,7 +15,7 @@ from ai_analysis import (
     _separate_unverified_player_props,
     _validate_analysis,
 )
-from live_research import _adam_schefter_news
+from live_research import _adam_schefter_news, _compact_team_stats
 from main import _write_matchup_sheet
 
 
@@ -243,6 +244,33 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(result["passing_attempts_per_game"], 35)
         self.assertEqual(result["passing_tds_per_game"], 2)
         self.assertEqual(result["tds_scored_per_game"], 0.5)
+
+    def test_team_points_per_game_is_derived_from_season_points(self):
+        compact = _compact_team_stats({"results": {"stats": {
+            "displayName": "Team A",
+            "categories": [
+                {"name": "general", "stats": [
+                    {"name": "gamesPlayed", "displayValue": "10"},
+                ]},
+                {"name": "scoring", "stats": [
+                    {"name": "totalPoints", "displayValue": "210"},
+                ]},
+            ],
+        }}})
+        scoring = compact["categories"]["scoring"]
+        points_per_game = next(item["value"] for item in scoring if item["name"] == "pointsPerGame")
+        self.assertEqual(points_per_game, 21.0)
+
+    def test_player_average_research_is_preserved_when_prompt_is_compacted(self):
+        research = (
+            "Low-priority historical notes " + ("x" * 500)
+            + "\\n\\nSELECTED PLAYER PER-GAME AVERAGES: "
+            + '{"player":"Quarterback One","passing_yards_per_game":199.0}'
+        )
+        bounded, truncated = _bounded_research_text(research, max_chars=180)
+        self.assertTrue(truncated)
+        self.assertIn("SELECTED PLAYER PER-GAME AVERAGES", bounded)
+        self.assertIn("199.0", bounded)
 
     def test_adam_schefter_contributor_feed_articles_are_normalized(self):
         payload = {"items": [{
