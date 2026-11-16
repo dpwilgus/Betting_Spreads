@@ -1339,13 +1339,35 @@ def _filter_game_level_picks(
     research: dict[str, Any],
     team_names: tuple[str, str],
 ) -> list[str]:
-    """Reject game bets that do not match a supplied, independently sourced market."""
+    """Require an exact sportsbook quote or clearly label an ESPN snapshot."""
     gaps = []
     totals = _game_market_total_points(research)
+    sportsbook_quotes = research.get("verified_sportsbook_game_markets", [])
+    sportsbook_quotes = sportsbook_quotes if isinstance(sportsbook_quotes, list) else []
     scoreboard_line = str(game.get("Betting Line") or "")
     spread_match = re.search(r"([A-Za-z]{2,3})\s*([+-]\d+(?:\.\d+)?)", scoreboard_line)
     scoreboard_team = _team_key(spread_match.group(1)) if spread_match else ""
     scoreboard_spread = float(spread_match.group(2)) if spread_match else None
+
+    def same_point(value: Any, expected: float) -> bool:
+        try:
+            return abs(float(value) - expected) < 0.001
+        except (TypeError, ValueError):
+            return False
+
+    def quoted_line(quote: dict[str, Any]) -> str:
+        return (
+            f"{quote.get('line')} ({quote.get('price')}) — "
+            f"{quote.get('sportsbook')}"
+        )
+
+    def valid_quote(quote: dict[str, Any]) -> bool:
+        return bool(
+            quote.get("line") and quote.get("price") not in (None, "")
+            and quote.get("sportsbook") and quote.get("source_url")
+            and quote.get("retrieved_at")
+        )
+
     retained = []
     for pick in data.get("picks", []):
         if pick.get("market_type") != "Game Prop":
@@ -1355,12 +1377,14 @@ def _filter_game_level_picks(
             "bet_description", "play_threshold", "market_line"
         ))
         normalized = description.casefold()
+        identity_text = " ".join(str(pick.get(field) or "") for field in (
+            "bet_description", "play_threshold"
+        ))
+
         if re.search(r"\b(?:over|under)\b.*(?:total|points)", normalized):
             pick_team = _team_key(str(pick.get("player_or_team") or ""))
-            identity_text = " ".join(str(pick.get(field) or "") for field in (
-                "bet_description", "play_threshold"
-            ))
             normalized_identity = _normalize_name(identity_text)
+
             def mentions_team(team: str) -> bool:
                 if any(
                     _normalize_name(term) in normalized_identity
@@ -1372,20 +1396,33 @@ def _filter_game_level_picks(
                     for abbreviation, canonical in _NFL_TEAM_ABBREVIATIONS.items()
                     if canonical == _team_key(team)
                 )
-            # A single team reference denotes a team total; both teams named
-            # together can still describe a combined game total.
+
             team_mentioned = sum(1 for team in team_names if mentions_team(team)) == 1
             if "team total" in normalized or team_mentioned or pick_team in {
                 _team_key(team_names[0]), _team_key(team_names[1])
             }:
-
                 gaps.append(
                     f"Removed ambiguous team total {pick.get('bet_description')}: the selected team requires an exact team-total quote, not a full-game total."
                 )
                 continue
             point_match = re.search(r"\b(?:over|under)\s*(-?\d+(?:\.\d+)?)", normalized)
             point = float(point_match.group(1)) if point_match else None
-            if point is None or not any(abs(point - quote) < 0.001 for quote in totals):
+            side_match = re.search(r"\b(over|under)\b", normalized)
+            side = side_match.group(1).casefold() if side_match else ""
+            quote = next((
+                q for q in sportsbook_quotes
+                if isinstance(q, dict) and q.get("market_key") == "totals"
+                and str(q.get("side") or "").casefold() == side
+                and point is not None and same_point(q.get("point"), point)
+                and valid_quote(q)
+            ), None)
+            if quote:
+                pick["market_line"] = quoted_line(quote)
+                pick["market_source"] = quote["source_url"]
+                pick["market_retrieved_at"] = quote["retrieved_at"]
+                retained.append(pick)
+                continue
+            if point is None or not any(abs(point - quote_total) < 0.001 for quote_total in totals):
                 gaps.append(
                     f"Removed game total {pick.get('bet_description')}: no matching ESPN pickcenter total quote was supplied."
                 )
@@ -1393,6 +1430,7 @@ def _filter_game_level_picks(
             pick["market_line"] = f"ESPN pickcenter total {point:g} (timestamped quote)"
             retained.append(pick)
             continue
+
         if re.search(r"\b(?:1st|first)[- ]?(?:half|quarter|qtr)|\b(?:1h|1q)\b", normalized):
             pick["market_line"] = "NOT VERIFIED — PERIOD MARKET QUOTE UNAVAILABLE"
             pick["data_quality"] = "Limited"
@@ -1411,12 +1449,47 @@ def _filter_game_level_picks(
                 f"Retained {pick.get('bet_description')} in game-level bets only as a Limited model idea; no 1Q/1H sportsbook quote was supplied."
             )
             continue
+
+        team_key = _team_key(str(pick.get("player_or_team") or ""))
+        if "moneyline" in normalized or re.search(r"\b(?:to win|ml)\b", normalized):
+            quote = next((
+                q for q in sportsbook_quotes
+                if isinstance(q, dict) and q.get("market_key") == "h2h"
+                and _team_key(str(q.get("player") or "")) == team_key
+                and valid_quote(q)
+            ), None)
+            if quote:
+                pick["market_line"] = quoted_line(quote)
+                pick["market_source"] = quote["source_url"]
+                pick["market_retrieved_at"] = quote["retrieved_at"]
+                retained.append(pick)
+            else:
+                gaps.append(
+                    f"Removed unverified game moneyline {pick.get('bet_description')}: no matching sportsbook quote was supplied."
+                )
+            continue
+
         if "spread" in normalized or re.search(r"[+-]\s*\d+(?:\.\d+)?", normalized):
-            team_key = _team_key(str(pick.get("player_or_team") or ""))
             pick_line_text = " ".join(str(pick.get(field) or "") for field in (
                 "bet_description", "play_threshold"
             ))
             line_value_match = re.search(r"([+-]\d+(?:\.\d+)?)", pick_line_text)
+            if line_value_match and team_key in {
+                _team_key(team_names[0]), _team_key(team_names[1])
+            }:
+                point = float(line_value_match.group(1))
+                quote = next((
+                    q for q in sportsbook_quotes
+                    if isinstance(q, dict) and q.get("market_key") == "spreads"
+                    and _team_key(str(q.get("player") or "")) == team_key
+                    and same_point(q.get("point"), point) and valid_quote(q)
+                ), None)
+                if quote:
+                    pick["market_line"] = quoted_line(quote)
+                    pick["market_source"] = quote["source_url"]
+                    pick["market_retrieved_at"] = quote["retrieved_at"]
+                    retained.append(pick)
+                    continue
             if scoreboard_spread is None or not scoreboard_team or team_key not in {
                 _team_key(team_names[0]), _team_key(team_names[1])
             }:
@@ -1432,6 +1505,7 @@ def _filter_game_level_picks(
             pick["market_line"] = scoreboard_line + " (ESPN scoreboard)"
             retained.append(pick)
             continue
+
         gaps.append(
             f"Removed game-level pick {pick.get('bet_description')}: no independently verified matching market was supplied."
         )
