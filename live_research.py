@@ -346,6 +346,27 @@ def _compact_team_stats(data: dict[str, Any]) -> dict[str, Any]:
                 selected.append(item)
         if selected:
             result["categories"][category_name] = selected
+
+    # Derive a transparent team scoring average when ESPN supplies season points
+    # and games played but omits a direct points-per-game field.
+    general_stats = result["categories"].get("general", [])
+    scoring_stats = result["categories"].get("scoring", [])
+    games_played = next(
+        (float(item["value"]) for item in general_stats
+         if item.get("name") == "gamesPlayed" and item.get("value") not in (None, "")),
+        0.0,
+    )
+    has_points_per_game = any(item.get("name") == "pointsPerGame" for item in scoring_stats)
+    total_points = next(
+        (float(item["value"]) for item in scoring_stats
+         if item.get("name") == "totalPoints" and item.get("value") not in (None, "")),
+        0.0,
+    )
+    if games_played > 0 and total_points > 0 and not has_points_per_game:
+        result["categories"].setdefault("scoring", []).append({
+            "name": "pointsPerGame",
+            "value": round(total_points / games_played, 2),
+        })
     return result
 
 
