@@ -445,7 +445,7 @@ class ProviderFallbackTests(unittest.TestCase):
             "openai/gpt-oss-20b", "openai",
         )
 
-        with patch(
+        with patch.dict("os.environ", {"GROQ_MAX_COMPLETION_TOKENS": "2400"}), patch(
             "ai_providers._request_json", return_value={}
         ) as request, patch(
             "ai_providers._response_text", return_value='{"ok": true}'
