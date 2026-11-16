@@ -1488,7 +1488,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
 
     rosters = research.get("rosters")
     spread_match = re.search(
-        r"([A-Za-z]{2,3})\\s*([+-]\\d+(?:\\.\\d+)?)",
+        r"([A-Za-z]{2,3})\s*([+-]\d+(?:\.\d+)?)",
         str(game.get("Betting Line") or ""),
     )
     expected_underdog = None
