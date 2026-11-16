@@ -521,7 +521,7 @@ class OutputQualityRuleTests(unittest.TestCase):
             if sheet.cell(row, 1).value
         }
         sneaky = row_by_title["SNEAKY PROPS & LADDER OPPORTUNITIES"]
-        research = row_by_title["PLAYER USAGE RESEARCH — CURRENT-SEASON PER-GAME AVERAGES"]
+        research = row_by_title["PLAYER USAGE RESEARCH — PER-GAME AVERAGES (Season average / Last 3 games average)"]
         injuries = row_by_title["INJURY / NEWS IMPACT ANALYSIS"]
         limitations = row_by_title["DATA LIMITATIONS"]
         self.assertLess(sneaky, research)
