@@ -24,7 +24,7 @@ from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
 from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
 from sportsbook_odds import (
-    fetch_event_quotes, PASS1_MARKETS, PASS2_TD_MARKETS,
+    fetch_event_quotes, PASS1_MARKETS, PASS2_TD_MARKETS, GAME_MARKETS,
     summarize_quotes, ensure_api_key_configured, research_supports_first_td,
 )
 from game_selector import select_games_gui
@@ -362,16 +362,16 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
 
     research_rows = analysis.get("player_research_summary", [])
     research_start = sneaky_start + max(len(sneaky_props), 1) + 4
-    sheet.cell(research_start, 1, "PLAYER USAGE RESEARCH — CURRENT-SEASON PER-GAME AVERAGES")
+    sheet.cell(research_start, 1, "PLAYER USAGE RESEARCH — PER-GAME AVERAGES (Season average / Last 3 games average)")
     sheet.cell(research_start, 1).font = white_bold
     sheet.cell(research_start, 1).fill = navy
     sheet.merge_cells(start_row=research_start, start_column=1, end_row=research_start, end_column=15)
     research_headers = [
         "Team", "Player", "Pos", "GP",
-        "Pass Yds/G (Season / L3)", "Pass Att/G (Season / L3)", "Pass TD/G (Season / L3)",
-        "Rush Yds/G (Season / L3)", "Rush Att/G (Season / L3)", "Rush TD/G (Season / L3)",
-        "Rec Yds/G (Season / L3)", "Receptions/G (Season / L3)", "Targets/G (Season / L3)",
-        "Rec TD/G (Season / L3)", "TDs Scored/G (Season / L3)",
+        "Pass Yds/G (Season / Last 3)", "Pass Att/G (Season / Last 3)", "Pass TD/G (Season / Last 3)",
+        "Rush Yds/G (Season / Last 3)", "Rush Att/G (Season / Last 3)", "Rush TD/G (Season / Last 3)",
+        "Rec Yds/G (Season / Last 3)", "Receptions/G (Season / Last 3)", "Targets/G (Season / Last 3)",
+        "Rec TD/G (Season / Last 3)", "TDs Scored/G (Season / Last 3)",
     ]
     for col, value in enumerate(research_headers, 1):
         _style_header(sheet.cell(research_start + 1, col, value))
@@ -496,8 +496,9 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
 
 
 def attach_sportsbook_quotes(game: dict, research: dict) -> None:
-    """Attach Pass 1 quotes and research-gated Pass 2 first-TD quotes."""
-    pass1 = fetch_event_quotes(game, PASS1_MARKETS)
+    """Discover and attach available full-game and player markets before AI analysis."""
+    requested_markets = tuple(dict.fromkeys((*GAME_MARKETS, *PASS1_MARKETS)))
+    pass1 = fetch_event_quotes(game, requested_markets)
     quotes = list(pass1.get("quotes", []))
     pass2_status = "not_eligible"
     pass2_usage = {}
@@ -506,14 +507,30 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
         quotes.extend(pass2.get("quotes", []))
         pass2_status = pass2.get("status", "unknown")
         pass2_usage = pass2.get("usage", {})
-    research["verified_player_prop_markets"] = quotes
+
+    player_quotes = [q for q in quotes if q.get("market_type") == "player"]
+    game_quotes = [q for q in quotes if q.get("market_type") == "game"]
+    research["verified_player_prop_markets"] = player_quotes
+    research["verified_sportsbook_game_markets"] = game_quotes
+    available = pass1.get("available_markets", [])
+    requested = pass1.get("requested_markets", [])
+    market_diagnostic = (
+        "ODDS API MARKET DISCOVERY: "
+        f"status={pass1.get('status', 'unknown')}; "
+        f"available event markets={', '.join(available) if available else 'none reported'}; "
+        f"requested markets={', '.join(requested) if requested else 'none'}; "
+        f"player quotes={len(player_quotes)}; game quotes={len(game_quotes)}."
+    )
+    research["research_text"] += "\n\n" + market_diagnostic
     if quotes:
         research["research_text"] += "\n\n" + summarize_quotes(quotes)
         research.setdefault("sources", []).append({
-            "title": "The Odds API live NFL player props",
+            "title": "The Odds API live NFL sportsbook markets",
             "url": "https://the-odds-api.com/sports/nfl-odds.html",
         })
     research["odds_api_status"] = (
+        f"Discovery: {len(available)} listed markets; "
+        f"player quotes: {len(player_quotes)}; game quotes: {len(game_quotes)}; "
         f"Pass 1: {pass1.get('status', 'unknown')}; Pass 2 first TD: {pass2_status}"
     )
     research["odds_api_usage"] = pass2_usage or pass1.get("usage", {})
