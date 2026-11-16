@@ -1,6 +1,7 @@
 import unittest
 
 from ai_analysis import (
+    ANALYSIS_SCHEMA,
     _bounded_research_text,
     _apply_independent_injury_statuses,
     _deduplicate_correlated_game_picks,
@@ -126,6 +127,12 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertIn('"cover_probability":NUMBER', instruction)
         self.assertIn('"upset_probability":NUMBER', instruction)
         self.assertIn("do not copy example values", instruction)
+
+    def test_analysis_schema_does_not_require_underdog_section(self):
+        self.assertNotIn("underdog_analysis", ANALYSIS_SCHEMA["required"])
+        self.assertEqual(
+            ANALYSIS_SCHEMA["properties"]["underdog_analysis"]["minItems"], 0
+        )
 
     def test_underdog_format_instruction_handles_missing_spread(self):
         instruction = _underdog_format_instruction(None, None)
