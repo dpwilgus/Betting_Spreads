@@ -334,22 +334,24 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sneaky_props = sneaky_props if isinstance(sneaky_props, list) else []
     sneaky_headers = ["Rank", "Player / Team", "Sneaky Prop / Ladder", "Market Line",
         "Model Threshold", "Hit Probability", "Confidence", "Why It Has Upside",
-        "Risk Factors", "Data Quality"]
+        "Availability / Evidence", "Risk Factors", "Data Quality"]
     sheet.cell(sneaky_start, 1, "SNEAKY PROPS & LADDER OPPORTUNITIES")
     sheet.cell(sneaky_start, 1).font = white_bold
     sheet.cell(sneaky_start, 1).fill = navy
-    sheet.merge_cells(start_row=sneaky_start, start_column=1, end_row=sneaky_start, end_column=10)
+    sheet.merge_cells(start_row=sneaky_start, start_column=1, end_row=sneaky_start, end_column=11)
     for col, value in enumerate(sneaky_headers, 1):
         _style_header(sheet.cell(sneaky_start + 1, col, value))
     if not sneaky_props:
-        sheet.merge_cells(start_row=sneaky_start + 2, start_column=1, end_row=sneaky_start + 2, end_column=10)
+        sheet.merge_cells(start_row=sneaky_start + 2, start_column=1, end_row=sneaky_start + 2, end_column=11)
         sheet.cell(sneaky_start + 2, 1, "No additional sportsbook-verified high-upside player prop met the evidence threshold.")
     for offset, pick in enumerate(sneaky_props):
         row_num = sneaky_start + 2 + offset
         values = [offset + 1, pick.get("player_or_team", ""), pick.get("bet_description", ""),
             pick.get("market_line", "NOT VERIFIED — MODEL IDEA ONLY"), pick.get("play_threshold", ""),
             f"{pick.get('estimated_hit_probability', 0):.1f}%", pick.get("confidence", ""),
-            pick.get("statistical_rationale", ""), pick.get("risk_factors", ""), pick.get("data_quality", "")]
+            pick.get("statistical_rationale", ""),
+            f"{pick.get('availability', 'No injury designation found')} — {pick.get('availability_evidence', '')}",
+            pick.get("risk_factors", ""), pick.get("data_quality", "")]
         for col, value in enumerate(values, 1):
             cell = sheet.cell(row=row_num, column=col, value=value)
             cell.alignment = Alignment(wrap_text=True, vertical="top")
