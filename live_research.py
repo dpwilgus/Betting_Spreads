@@ -1616,6 +1616,10 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
                 "limit=100&pubkey=contributor-page"
             )
             sources.append({"title": "Adam Schefter ESPN contributor feed", "url": schefter_feed_url})
+            sources.append({
+                "title": "ESPN NFL news feed (Adam Schefter byline fallback)",
+                "url": "https://site.api.espn.com/apis/site/v2/sports/football/nfl/news?limit=100",
+            })
             try:
                 selected_names = {
                     str(candidate.get("name") or "").strip()
