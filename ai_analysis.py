@@ -379,6 +379,7 @@ def _apply_independent_injury_statuses(
     unavailable: dict[str, str] = {}
     questionable: set[str] = set()
     explicitly_available: dict[str, str] = {}
+    other_statuses: dict[str, str] = {}
     for report in injury_statuses or []:
         if not isinstance(report, dict):
             continue
@@ -392,6 +393,8 @@ def _apply_independent_injury_statuses(
             questionable.add(player_key)
         elif status.casefold() in {"active", "available"}:
             explicitly_available[player_key] = status
+        elif status:
+            other_statuses[player_key] = status
 
     gaps: list[str] = []
     reported_players = set(unavailable) | set(questionable)
@@ -425,6 +428,12 @@ def _apply_independent_injury_statuses(
                 item["availability"] = "Available (ESPN injury feed)"
                 item["availability_evidence"] = (
                     f"ESPN's injury feed explicitly lists {explicitly_available[player_key]}."
+                )
+            elif player_key in other_statuses:
+                item["availability"] = f"ESPN status: {other_statuses[player_key]}"
+                item["availability_evidence"] = (
+                    f"ESPN's injury feed lists {other_statuses[player_key]}; "
+                    "final game-day active status may still be pending."
                 )
             else:
                 # ESPN's Core injury endpoint contains non-active designations, not
