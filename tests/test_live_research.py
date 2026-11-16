@@ -631,7 +631,7 @@ class LiveResearchTests(unittest.TestCase):
         selected = _select_research_players(roster, chart)
         self.assertEqual(
             [player["name"] for player in selected],
-            ["Starting QB", "Backup QB", "Starting RB", "Starting WR", "Starting TE"],
+            ["Starting QB", "Starting RB", "Starting WR", "Starting TE"],
         )
 
     def test_player_selection_includes_multiple_running_backs_and_receivers(self):
@@ -925,9 +925,10 @@ class LiveResearchTests(unittest.TestCase):
         self.assertIn("Gavin Bartholomew", names)
         self.assertIn("WR Five", names)
         self.assertNotIn("WR Six", names)
-        # The injured starter is excluded; the two available next options
-        # are researched without exceeding the healthy-candidate pool.
-        self.assertEqual(len(names), 12)
+        # QB1 only is researched; injury beneficiaries are added beyond
+        # position caps without restoring routine backup-QB research.
+        self.assertNotIn("Backup QB", names)
+        self.assertEqual(len(names), 11)
 
     def test_injury_replacements_exclude_unavailable_players_and_stop_deep_chains(self):
         from live_research import _select_research_players
