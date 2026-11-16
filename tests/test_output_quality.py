@@ -121,6 +121,22 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(data["picks"][0]["availability"], "Available (ESPN injury feed)")
         self.assertEqual(data["touchdown_scorers"][0]["availability"], "Available (ESPN injury feed)")
 
+    def test_other_explicit_injury_status_is_not_called_no_designation(self):
+        data = {
+            "picks": [{
+                "market_type": "Player Prop", "player_or_team": "Player A",
+                "confidence": 6, "risk_factors": "Workload",
+            }],
+            "touchdown_scorers": [{
+                "player": "Player A", "confidence": 5, "risk_factors": "TD variance",
+            }],
+        }
+        _apply_independent_injury_statuses(
+            data, [{"player": "Player A", "status": "Limited"}]
+        )
+        self.assertEqual(data["picks"][0]["availability"], "ESPN status: Limited")
+        self.assertEqual(data["touchdown_scorers"][0]["availability"], "ESPN status: Limited")
+
     def test_unverified_sneaky_anytime_td_is_removed(self):
         data = {
             "picks": [],
