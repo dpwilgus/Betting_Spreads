@@ -550,7 +550,7 @@ def _best_overall_bets(games: list[dict], analyses: list[dict], limit: int = 10)
             quality_bonus = {"Strong": 3, "Moderate": 2, "Limited": 0}.get(quality, 0)
             market_type = str(pick.get("market_type", ""))
             line = str(pick.get("market_line", "Not verified"))
-            if market_type == "Player Prop" and " — " in line:
+            if " — " in line and market_type in {"Player Prop", "Game Prop"}:
                 verification = "Sportsbook quote verified"
             elif market_type == "Game Prop" and "NOT VERIFIED" in line:
                 verification = "Model-only period line — not sportsbook verified"
@@ -760,7 +760,7 @@ def _cached_analysis_is_complete(cached: dict | None) -> bool:
         isinstance(cached.get("picks"), list)
         and isinstance(cached.get("touchdown_scorers"), list)
         and len(cached["touchdown_scorers"]) <= 3
-        and cached.get("analysis_version") == 12
+        and cached.get("analysis_version") == 13
         and isinstance(cached.get("underdog_analysis"), list)
         and isinstance(cached.get("player_research_summary"), list)
         and bool(cached.get("ai_provider"))
