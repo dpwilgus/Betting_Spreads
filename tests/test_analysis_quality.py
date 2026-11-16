@@ -44,13 +44,14 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertIn("INJURIES:", bounded)
         self.assertIn("PLAYER LOGS", bounded)
 
-    def test_player_prop_quote_with_different_threshold_is_not_verified(self):
+    def test_player_prop_quote_with_different_threshold_is_rejected_not_model_only(self):
         data = {"picks": [self._prop_pick("85.5")], "sneaky_props": []}
         research = {"verified_player_prop_markets": [self._gibbs_quote("89.5")]}
         gaps = _separate_unverified_player_props(data, research)
         self.assertEqual(data["picks"], [])
-        self.assertEqual(len(data["model_only_picks"]), 1)
-        self.assertIn("exact player market, side and line", gaps[0])
+        self.assertEqual(data["model_only_picks"], [])
+        self.assertIn("the sportsbook offers 89.5", gaps[0])
+        self.assertIn("line was not silently changed", gaps[0])
 
     def test_player_prop_requires_exact_side_and_market_key(self):
         data = {"picks": [self._prop_pick("89.5")], "sneaky_props": []}
