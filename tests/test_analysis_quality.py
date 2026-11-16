@@ -108,7 +108,7 @@ class AnalysisQualityTests(unittest.TestCase):
         analysis = {
             "summary": "Test", "game_script": "Test",
             "picks": [pick], "touchdown_scorers": [], "injury_impact": [],
-            "data_gaps": [], "underdog_analysis": [],
+            "data_gaps": [],
         }
         _validate_analysis(
             analysis, team_names=("New England Patriots", "Detroit Lions"),
