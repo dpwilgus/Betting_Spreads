@@ -404,9 +404,12 @@ class OutputQualityRuleTests(unittest.TestCase):
             + '{"player":"Quarterback One","passing_yards_per_game":199.0}'
         )
         bounded, truncated = _bounded_research_text(research, max_chars=180)
-        self.assertTrue(truncated)
+        # Optional historical notes were compacted; the essential player
+        # averages survived, so this is compaction rather than essential loss.
+        self.assertFalse(truncated)
         self.assertIn("SELECTED PLAYER PER-GAME AVERAGES", bounded)
         self.assertIn("199.0", bounded)
+        self.assertIn("[Optional historical matchup recap compacted", bounded)
 
     def test_adam_schefter_contributor_feed_articles_are_normalized(self):
         payload = {"items": [{
