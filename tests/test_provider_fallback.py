@@ -502,7 +502,11 @@ class ProviderFallbackTests(unittest.TestCase):
             "Game Date (ET)": "Monday", "Betting Line": "BAL -4.5",
         }
         research = {
-            "research_text": "CURRENT INJURY EVIDENCE: Example player is questionable.",
+            "research_text": (
+                "CURRENT INJURY EVIDENCE: Example player is questionable.\\n\\n"
+                "THE ODDS API VERIFIED PLAYER-PROP QUOTES: Player A | receiving yards | "
+                "Over 50.5 | -110 | DraftKings | retrieved 2026-11-16T17:00:00Z"
+            ),
             "sources": [{"title": "ESPN", "url": "https://example.test"}],
         }
 
@@ -518,6 +522,8 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("Target five verified player props", system_prompt)
         self.assertIn("model-only", system_prompt)
         self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
+        self.assertIn("THE ODDS API VERIFIED PLAYER-PROP QUOTES", user_prompt)
+        self.assertIn("Evaluate the supplied verified sportsbook quote list", user_prompt)
         self.assertIn("Analyze this upcoming NFL matchup", base_user_prompt)
         self.assertIn("statistical_rationale", user_prompt)
         self.assertIn("touchdown_scorers", user_prompt)
