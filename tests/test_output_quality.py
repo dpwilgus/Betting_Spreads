@@ -248,6 +248,36 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(len(data["picks"]), 1)
         self.assertIn("ESPN scoreboard", data["picks"][0]["market_line"])
 
+    def test_game_spread_uses_exact_sportsbook_quote_when_available(self):
+        quote = {
+            "player": "Los Angeles Chargers",
+            "market_key": "spreads",
+            "market_type": "game",
+            "side": "Los Angeles Chargers",
+            "point": 4.5,
+            "line": "Los Angeles Chargers +4.5",
+            "price": "-110",
+            "sportsbook": "DraftKings",
+            "source_url": "https://the-odds-api.com/",
+            "retrieved_at": "2026-11-16T17:00:00+00:00",
+        }
+        data = {"picks": [{
+            "market_type": "Game Prop",
+            "player_or_team": "Los Angeles Chargers",
+            "bet_description": "LAC +4.5 spread",
+            "play_threshold": "LAC +4.5",
+            "market_line": "Not verified",
+        }]}
+        _filter_game_level_picks(
+            data, {"Betting Line": "BAL -4.5"},
+            {"verified_sportsbook_game_markets": [quote]},
+            ("Los Angeles Chargers", "Baltimore Ravens"),
+        )
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertIn("DraftKings", data["picks"][0]["market_line"])
+        self.assertNotIn("ESPN scoreboard", data["picks"][0]["market_line"])
+        self.assertEqual(data["picks"][0]["market_source"], quote["source_url"])
+
     def test_unquoted_period_game_line_is_limited_and_kept_in_game_picks(self):
         data = {"picks": [{
             "market_type": "Game Prop",
