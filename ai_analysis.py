@@ -788,6 +788,10 @@ def _validate_analysis(
     data.setdefault("underdog_analysis", [])
     if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
         raise RuntimeError("AI response is missing the matchup summary or game script.")
+    # Preserve whether the model attempted an underdog assessment before
+    # sanitization replaces invalid rows with an empty list.
+    raw_underdog_rows = data.get("underdog_analysis")
+    attempted_underdog_assessment = bool(raw_underdog_rows)
     # Only a validated underdog assessment can count as usable analysis.
     # Invalid rows are discarded with a data-gap warning and cannot make an
     # otherwise empty response appear successful.
@@ -795,12 +799,9 @@ def _validate_analysis(
         data, team_names, expected_underdog=expected_underdog,
         expected_spread=expected_spread,
     )
-    # In strict spread-matchup validation, an actual betting analysis cannot
-    # pass with a missing/invalid underdog assessment. Preserve an empty
-    # placeholder response (no picks or attempted underdog row) for callers
-    # that use validation only to normalize its data-gap warning.
-    raw_underdog_rows = data.get("underdog_analysis")
-    has_analysis_or_attempt = bool(data.get("picks")) or bool(raw_underdog_rows)
+    # An empty placeholder with no picks is retained for normalization tests;
+    # actual betting output or an invalid attempted row must trigger fallback.
+    has_analysis_or_attempt = bool(data.get("picks")) or attempted_underdog_assessment
     if require_underdog and has_analysis_or_attempt and not data.get("underdog_analysis"):
         raise RuntimeError(
             "AI response omitted the required underdog cover/upset assessment for a spread matchup."
