@@ -1104,6 +1104,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
     injury_sections: list[str] = []
     injury_statuses: list[dict[str, Any]] = []
     rosters: dict[str, list[str]] = {}
+    verified_game_markets: list[dict[str, Any]] = []
 
     if not event_id:
         sections.append("No ESPN event ID was supplied; only scoreboard context is available.")
@@ -1283,6 +1284,7 @@ def collect_game_research(game: dict[str, Any]) -> dict[str, Any]:
         "sources": unique,
         "rosters": rosters,
         "injury_statuses": injury_statuses,
+        "verified_game_markets": verified_game_markets,
     }
 
     """Fetch one player's current-season game log; shared across matchup sheets."""
