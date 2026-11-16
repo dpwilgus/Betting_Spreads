@@ -136,7 +136,7 @@ class OutputQualityRuleTests(unittest.TestCase):
     def test_unverified_total_is_removed_when_market_quote_disagrees(self):
         data = {"picks": [{
             "market_type": "Game Prop",
-            "player_or_team": "Baltimore Ravens",
+            "player_or_team": "Game",
             "bet_description": "Under 43.5 total points",
             "play_threshold": "Under 43.5",
             "market_line": "Not verified",
@@ -149,6 +149,23 @@ class OutputQualityRuleTests(unittest.TestCase):
         )
         self.assertEqual(data["picks"], [])
         self.assertTrue(any("no matching ESPN pickcenter total quote" in gap for gap in gaps))
+
+    def test_team_total_is_not_mistaken_for_full_game_total(self):
+        data = {"picks": [{
+            "market_type": "Game Prop",
+            "player_or_team": "Baltimore Ravens",
+            "bet_description": "Under 21.5 team total points",
+            "play_threshold": "Under 21.5",
+            "market_line": "Not verified",
+        }]}
+        gaps = _filter_game_level_picks(
+            data,
+            {"Betting Line": "BAL -4.5"},
+            {"verified_game_markets": [{"displayed_total": "43.5"}]},
+            ("Los Angeles Chargers", "Baltimore Ravens"),
+        )
+        self.assertEqual(data["picks"], [])
+        self.assertTrue(any("ambiguous team total" in gap for gap in gaps))
 
     def test_scoreboard_spread_is_retained_when_team_and_side_match(self):
         data = {"picks": [{
