@@ -8,12 +8,41 @@ from live_research import (
     _compact_team_stats,
     _compact_tree,
     _core_team_injuries,
+    _extract_depth_chart_ids,
+    _select_research_players,
     collect_game_research,
     reset_research_cache,
 )
 
 
 class LiveResearchTests(unittest.TestCase):
+
+    def test_depth_chart_string_positions_preserve_true_qb1_order(self):
+        roster = [
+            {"id": "mills", "name": "Davis Mills", "position": "QB"},
+            {"id": "stroud", "name": "C.J. Stroud", "position": "QB"},
+            {"id": "marks", "name": "Woody Marks", "position": "RB"},
+        ]
+        depth = {"depthCharts": [{"positions": {
+            "quarterback": {
+                "position": "Quarterback",
+                "athletes": [
+                    {"rank": 1, "athlete": {"id": "stroud", "displayName": "C.J. Stroud"}},
+                    {"rank": 2, "athlete": {"id": "mills", "displayName": "Davis Mills"}},
+                ],
+            },
+            "runningBack": {
+                "position": "RB",
+                "athletes": [{"rank": 1, "athlete": {"id": "marks", "displayName": "Woody Marks"}}],
+            },
+        }}]}
+
+        ids = _extract_depth_chart_ids(depth)
+        self.assertEqual(ids["QB"], ["stroud", "mills"])
+        selected = _select_research_players(roster, depth)
+        quarterbacks = [player["name"] for player in selected if player["position"] == "QB"]
+        self.assertEqual(quarterbacks, ["C.J. Stroud"])
+
 
     def test_compact_tree_removes_unneeded_fields_and_limits_lists(self):
         data = {
