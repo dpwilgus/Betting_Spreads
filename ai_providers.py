@@ -189,8 +189,14 @@ def ensure_configured() -> list[tuple[Provider, str]]:
 
 def _configured_providers() -> list[tuple[Provider, str]]:
     configured = []
-    order = os.environ.get("AI_PROVIDER_ORDER", ",".join(PROVIDER_ORDER))
-    names = [part.strip().lower() for part in order.split(",") if part.strip()]
+    # AI_PROVIDER_ORDER changes preference only; it must not silently disable
+    # other configured free providers from the multi-model analysis.
+    preferred = [
+        part.strip().lower()
+        for part in os.environ.get("AI_PROVIDER_ORDER", "").split(",")
+        if part.strip()
+    ]
+    names = list(dict.fromkeys([*preferred, *PROVIDER_ORDER]))
     for name in names:
         if name == "openai" and os.environ.get("AI_ALLOW_PAID", "").strip().lower() not in {"1", "true", "yes"}:
             continue
