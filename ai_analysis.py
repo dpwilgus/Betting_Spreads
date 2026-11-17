@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ai_providers import generate_json
+from ai_providers import generate_json_ensemble
 from live_research import collect_game_research
 
 MAX_RESEARCH_PROMPT_CHARS = 40000
@@ -1727,14 +1727,192 @@ def _underdog_format_instruction(
     )
 
 
+def _merge_provider_analyses(
+    provider_results: list[tuple[dict[str, Any], str]],
+    verified_quotes: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str]:
+    """Merge independent model opinions, rewarding agreement on the same exact market."""
+    if not provider_results:
+        raise RuntimeError("No AI provider returned a usable analysis.")
+
+    def quote_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
+        if pick.get("market_type") != "Player Prop":
+            return None
+        return next((
+            quote for quote in verified_quotes
+            if isinstance(quote, dict) and _quote_matches_pick(pick, quote)
+            and quote.get("line") not in (None, "")
+            and quote.get("price") not in (None, "")
+            and quote.get("sportsbook") and quote.get("source_url")
+        ), None)
+
+    verified_counts = {
+        name: sum(1 for pick in result.get("picks", []) if quote_for_pick(pick))
+        for result, name in provider_results
+    }
+    primary_result, primary_name = max(
+        provider_results,
+        key=lambda pair: (
+            verified_counts.get(pair[1], 0),
+            len(pair[0].get("picks", [])),
+            sum(int(p.get("confidence", 0) or 0) for p in pair[0].get("picks", [])),
+        ),
+    )
+
+    def median(values: list[float]) -> float:
+        ordered = sorted(values)
+        if not ordered:
+            return 0.0
+        middle = len(ordered) // 2
+        return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
+    def merge_recommendations(field: str, limit: int, prefer_verified: bool = False) -> list[dict[str, Any]]:
+        groups: dict[tuple[Any, ...], list[tuple[dict[str, Any], str, dict[str, Any] | None]]] = {}
+        for result, provider_name in provider_results:
+            for raw in result.get(field, []) or []:
+                if not isinstance(raw, dict):
+                    continue
+                pick = dict(raw)
+                quote = quote_for_pick(pick) if prefer_verified else None
+                if quote:
+                    key = (
+                        "verified", _normalize_name(str(quote.get("player") or "")),
+                        str(quote.get("market_key") or ""), str(quote.get("side") or "").casefold(),
+                        str(quote.get("point") if quote.get("point") is not None else ""),
+                    )
+                else:
+                    key = (
+                        str(pick.get("market_type") or ""),
+                        _normalize_name(str(pick.get("player_or_team") or "")),
+                        _normalize_name(str(pick.get("bet_description") or "")),
+                        _normalize_name(str(pick.get("play_threshold") or "")),
+                    )
+                groups.setdefault(key, []).append((pick, provider_name, quote))
+
+        merged = []
+        for entries in groups.values():
+            entries.sort(
+                key=lambda entry: (
+                    int(entry[0].get("confidence", 0) or 0),
+                    float(entry[0].get("estimated_hit_probability", 0) or 0),
+                ),
+                reverse=True,
+            )
+            item = dict(entries[0][0])
+            probabilities = [
+                float(entry[0].get("estimated_hit_probability", 0) or 0)
+                for entry in entries
+            ]
+            confidences = [
+                float(entry[0].get("confidence", 0) or 0)
+                for entry in entries
+            ]
+            item["estimated_hit_probability"] = round(median(probabilities), 1)
+            item["confidence"] = max(1, min(10, round(median(confidences))))
+            providers = list(dict.fromkeys(entry[1] for entry in entries))
+            item["model_votes"] = len(providers)
+            item["model_providers"] = providers
+            item["model_consensus"] = f"{len(providers)}/{len(provider_results)}"
+            rationale = str(item.get("statistical_rationale") or "").strip()
+            item["statistical_rationale"] = (
+                rationale + f" Model agreement: {len(providers)}/{len(provider_results)}."
+            ).strip()
+            risks = list(dict.fromkeys(
+                str(entry[0].get("risk_factors") or "").strip()
+                for entry in entries if str(entry[0].get("risk_factors") or "").strip()
+            ))
+            if len(risks) > 1:
+                item["risk_factors"] = " | ".join(risks[:2])
+            quote = next((entry[2] for entry in entries if entry[2]), None)
+            if quote:
+                item["market_line"] = (
+                    f"{quote['line']} ({quote['price']}) — {quote['sportsbook']}"
+                )
+                item["market_source"] = quote["source_url"]
+                item["market_retrieved_at"] = quote["retrieved_at"]
+                item["_verified_quote"] = True
+            else:
+                item["_verified_quote"] = False
+            merged.append(item)
+
+        merged.sort(key=lambda item: (
+            bool(item.get("_verified_quote")) if prefer_verified else False,
+            int(item.get("model_votes", 0)),
+            int(item.get("confidence", 0)),
+            float(item.get("estimated_hit_probability", 0)),
+        ), reverse=True)
+        for item in merged:
+            item.pop("_verified_quote", None)
+        return merged[:limit]
+
+    data = dict(primary_result)
+    data["picks"] = merge_recommendations("picks", 24, prefer_verified=True)
+    data["sneaky_props"] = merge_recommendations("sneaky_props", 8, prefer_verified=True)
+
+    scorer_groups: dict[tuple[str, str], list[tuple[dict[str, Any], str]]] = {}
+    for result, provider_name in provider_results:
+        for scorer in result.get("touchdown_scorers", []) or []:
+            if isinstance(scorer, dict):
+                key = (
+                    _normalize_name(str(scorer.get("player") or "")),
+                    _team_key(str(scorer.get("team") or "")),
+                )
+                scorer_groups.setdefault(key, []).append((dict(scorer), provider_name))
+    scorers = []
+    for entries in scorer_groups.values():
+        entries.sort(key=lambda entry: int(entry[0].get("confidence", 0) or 0), reverse=True)
+        scorer = dict(entries[0][0])
+        scorer["estimated_td_probability"] = round(median([
+            float(entry[0].get("estimated_td_probability", 0) or 0)
+            for entry in entries
+        ]), 1)
+        scorer["confidence"] = max(1, min(10, round(median([
+            float(entry[0].get("confidence", 0) or 0) for entry in entries
+        ]))))
+        scorer["model_votes"] = len({entry[1] for entry in entries})
+        scorer["model_consensus"] = f"{scorer['model_votes']}/{len(provider_results)}"
+        scorers.append(scorer)
+    scorers.sort(key=lambda item: (
+        int(item.get("model_votes", 0)), int(item.get("confidence", 0)),
+        float(item.get("estimated_td_probability", 0)),
+    ), reverse=True)
+    data["touchdown_scorers"] = scorers[:5]
+
+    impacts = []
+    seen_impacts = set()
+    gaps = []
+    for result, _provider_name in provider_results:
+        for impact in result.get("injury_impact", []) or []:
+            if not isinstance(impact, dict):
+                continue
+            key = (
+                _normalize_name(str(impact.get("injured_player") or "")),
+                _normalize_name(str(impact.get("affected_player") or "")),
+                str(impact.get("impact_type") or ""),
+            )
+            if key not in seen_impacts:
+                seen_impacts.add(key)
+                impacts.append(dict(impact))
+        for gap in result.get("data_gaps", []) or []:
+            if gap and str(gap) not in gaps:
+                gaps.append(str(gap))
+    data["injury_impact"] = impacts[:5]
+    data["data_gaps"] = gaps[:6]
+    data["ensemble_provider_names"] = [name for _result, name in provider_results]
+    data["ensemble_primary_provider"] = primary_name
+    return data, primary_name
+
+
 def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -> dict[str, Any]:
     """Collect current data without AI, then use the first healthy configured AI provider."""
     research = research or collect_game_research(game)
     base = Path(__file__).resolve().parent / "agents"
-    # The analyst brief is the single compact system contract. The former
-    # appended probability checklist duplicated most of it and starved live
-    # market/player evidence under Groq's free-tier token budget.
-    instructions = (base / "NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")
+    # Restore the fuller gold-standard analysis method and independent quality review.
+    instructions = (
+        (base / "NFL_MATCHUP_ANALYST.md").read_text(encoding="utf-8")
+        + "\\n\\nQUALITY REVIEW CHECKLIST\\n"
+        + (base / "PROBABILITY_REVIEW.md").read_text(encoding="utf-8")
+    )
     matchup = f"{game['Away Team']} at {game['Home Team']}"
     team_names = (str(game["Away Team"]), str(game["Home Team"]))
     original_research = research.get("research_text", "No independent research was available.")
@@ -1758,13 +1936,17 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "Return JSON only with summary, game_script, underdog_analysis, picks, sneaky_props, "
         "touchdown_scorers (up to 5), injury_impact and data_gaps. Include all schema fields. "
         f"Only these teams: {team_names[0]} and {team_names[1]}. "
-        "Evaluate the supplied verified sportsbook quote list as the candidate universe. "
-        "For every selected player/game bet, copy the exact quoted player/team, market, side, "
-        "line, price and sportsbook; never substitute a nearby threshold or call an ESPN line "
-        "a sportsbook quote. Review all researched offensive candidates and injury beneficiaries. "
-        "Compare player thresholds with season and last-three-game averages; reject unsupported "
-        "thresholds. Target five verified props when supported; model-only leans are separate "
-        "and never actionable. Evaluate full-game moneyline, spread and total quotes. "
+        "The primary objective is to identify the strongest VERIFIED PLAYER PROPS from the "
+        "supplied Odds API quotes. Evaluate the full quoted candidate pool before considering "
+        "game-level bets. Target up to five verified player props when evidence supports them; "
+        "do not fill the list with game bets merely to reach a count. Every selected player prop "
+        "must match an exact supplied player, market, side, point, price and sportsbook quote. "
+        "If no quoted prop has a defensible edge, say so explicitly; never invent or approximate "
+        "a sportsbook line. Review the researched starters, usage leaders and named injury "
+        "beneficiaries. Compare each exact threshold with season and last-three-game averages, "
+        "opportunity volume and opponent matchup. Model-only leans remain separate and are never "
+        "described as verified. After player props, evaluate full-game moneyline, spread and total "
+        "quotes. "
         "Do not recommend unquoted 1Q/1H lines, invented team totals, or conflicting spreads; "
         "do not pair one team's moneyline and spread. "
         "For a numeric spread, attempt one assessment for the team receiving points, using its "
@@ -1834,20 +2016,29 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             (team for team in team_names if _team_key(team) != favorite_team),
             None,
         )
-    data, provider_name = generate_json(
+    validator = lambda result: _validate_analysis(
+        result, rosters=rosters, team_names=team_names,
+        require_underdog=bool(spread_match),
+        expected_underdog=expected_underdog,
+        expected_spread=expected_spread,
+    )
+    provider_results, provider_failures, configured_provider_names = generate_json_ensemble(
         instructions,
         user_prefix,
-        validator=lambda result: _validate_analysis(
-            result, rosters=rosters, team_names=team_names,
-            require_underdog=bool(spread_match),
-            expected_underdog=expected_underdog,
-            expected_spread=expected_spread,
-        ),
+        validator=validator,
         prompt_factory=prompts_for_provider,
     )
-    research_truncated, research_compacted, prompt_research_characters = prompt_metadata.get(
-        provider_name, (False, False, 0)
+    data, primary_provider = _merge_provider_analyses(
+        provider_results, research.get("verified_player_prop_markets", [])
     )
+    used_provider_names = [name for _result, name in provider_results]
+    provider_name = "ensemble: " + " + ".join(used_provider_names)
+    used_prompt_metadata = [
+        prompt_metadata[name] for name in used_provider_names if name in prompt_metadata
+    ]
+    research_truncated = any(item[0] for item in used_prompt_metadata)
+    research_compacted = any(item[1] for item in used_prompt_metadata)
+    prompt_research_characters = max((item[2] for item in used_prompt_metadata), default=0)
     injury_gaps = _apply_independent_injury_statuses(
         data, research.get("injury_statuses", [])
     )
@@ -1901,7 +2092,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
     data["player_research_summary"] = player_research_summary
-    data["analysis_version"] = 13
+    data["analysis_version"] = 14
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})
@@ -1909,7 +2100,11 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     data["sources"] = list(research.get("sources", []))
     data["independent_research"] = original_research
     data["ai_provider"] = provider_name
-    data["research_mode"] = "independent_espn_plus_ai"
+    data["ai_providers_used"] = used_provider_names
+    data["ai_providers_configured"] = configured_provider_names
+    data["ai_provider_failures"] = provider_failures
+    data["ai_provider_consensus"] = len(used_provider_names)
+    data["research_mode"] = "independent_espn_plus_multi_model_ai"
     data["research_truncated_for_prompt"] = research_truncated
     data["research_compacted_for_prompt"] = research_compacted
     data["research_prompt_characters"] = prompt_research_characters
