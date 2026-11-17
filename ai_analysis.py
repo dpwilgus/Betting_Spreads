@@ -1883,7 +1883,8 @@ def _merge_provider_analyses(
         return merged[:limit]
 
     data = dict(primary_result)
-    data["picks"] = merge_recommendations("picks", 24, prefer_verified=True)
+    # Preserve the gold-standard five-pick slate, with exact verified player props ranked first.
+    data["picks"] = merge_recommendations("picks", 5, prefer_verified=True)
     data["sneaky_props"] = merge_recommendations("sneaky_props", 8, prefer_verified=True)
 
     scorer_groups: dict[tuple[str, str], list[tuple[dict[str, Any], str]]] = {}
