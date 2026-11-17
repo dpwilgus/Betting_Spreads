@@ -520,6 +520,12 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
 
     player_quotes = [q for q in quotes if q.get("market_type") == "player"]
     game_quotes = [q for q in quotes if q.get("market_type") == "game"]
+    candidate_names = [
+        str(candidate.get("name") or "")
+        for candidates in research.get("selected_player_candidates", {}).values()
+        for candidate in candidates
+        if isinstance(candidate, dict) and candidate.get("name")
+    ]
     research["verified_player_prop_markets"] = player_quotes
     research["verified_sportsbook_game_markets"] = game_quotes
     available = pass1.get("available_markets", [])
@@ -533,7 +539,9 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
         f"discovery error={pass1.get('market_discovery_error') or 'none'}."
     )
     research["research_text"] += "\n\n" + market_diagnostic
-    research["research_text"] += "\n\n" + summarize_quotes(quotes)
+    research["research_text"] += "\n\n" + summarize_quotes(
+        quotes, candidate_players=candidate_names
+    )
     if pass1.get("status") != "no_api_key":
         research.setdefault("sources", []).append({
             "title": "The Odds API market discovery and live NFL sportsbook odds",
