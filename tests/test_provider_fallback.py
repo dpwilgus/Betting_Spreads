@@ -285,7 +285,10 @@ class ProviderFallbackTests(unittest.TestCase):
             "ai_providers._saved_key", return_value="test-key"
         ):
             providers = _configured_providers()
-        self.assertEqual([provider.name for provider, _ in providers], ["nvidia"])
+        self.assertEqual(
+            [provider.name for provider, _ in providers],
+            ["nvidia", "gemini", "groq", "openrouter"],
+        )
 
     def test_nvidia_request_uses_hosted_nim_compatible_payload(self):
         provider = Provider(
