@@ -1965,6 +1965,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         "game-level bets. Target up to five verified player props when evidence supports them; "
         "do not fill the list with game bets merely to reach a count. Every selected player prop "
         "must match an exact supplied player, market, side, point, price and sportsbook quote. "
+        "For Over/Under props, begin bet_description with the exact side and numeric line "
+        "(for example, 'Over 50.5 rushing yards'); do not paraphrase or round the point. "
         "If no quoted prop has a defensible edge, say so explicitly; never invent or approximate "
         "a sportsbook line. Review the researched starters, usage leaders and named injury "
         "beneficiaries. Compare each exact threshold with season and last-three-game averages, "
