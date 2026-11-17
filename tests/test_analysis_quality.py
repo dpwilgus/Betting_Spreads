@@ -17,9 +17,9 @@ class AnalysisQualityTests(unittest.TestCase):
 
     def test_research_quote_block_survives_prompt_trimming(self):
         research = (
-            "ODDS QUOTES RETRIEVED: 2026-11-16T20:00:00Z\\n"
+            "ODDS QUOTES RETRIEVED: 2026-11-16T20:00:00Z\n"
             "THE ODDS API VERIFIED PLAYER-PROP QUOTES: C.J. Stroud | passing yards | Over 245.5 -110@DraftKings"
-            "\\n\\n" + "OPTIONAL OLD RECAP: " + ("x" * 1200)
+            "\n\n" + "OPTIONAL OLD RECAP: " + ("x" * 1200)
         )
         bounded, truncated = _bounded_research_text(research, max_chars=220)
         self.assertIn("ODDS QUOTES RETRIEVED", bounded)
