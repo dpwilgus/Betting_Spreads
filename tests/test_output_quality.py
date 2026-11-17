@@ -494,7 +494,7 @@ class OutputQualityRuleTests(unittest.TestCase):
         self.assertEqual(request.call_count, 2)
         self.assertIn("/sports/football/nfl/news", request.call_args_list[1].args[0])
 
-    def test_workbook_places_player_research_and_injuries_after_sneaky_props(self):
+    def test_workbook_removes_usage_table_and_places_averages_beside_picks(self):
         workbook = Workbook()
         workbook.remove(workbook.active)
         game = {
@@ -502,16 +502,29 @@ class OutputQualityRuleTests(unittest.TestCase):
             "Game Date (ET)": "Monday", "Betting Line": "BAL -4.5",
         }
         analysis = {
-            "summary": "Summary", "game_script": "Script", "picks": [],
-            "model_only_picks": [], "underdog_analysis": [], "touchdown_scorers": [],
-            "sneaky_props": [], "player_research_summary": [{
-                "team": "Baltimore Ravens", "player": "Lamar Jackson", "position": "QB",
-                "games": 10, "passing_yards_per_game": 200, "passing_yards_recent": 210,
+            "summary": "Summary", "game_script": "Script",
+            "picks": [{
+                "market_type": "Player Prop", "player_or_team": "Lamar Jackson",
+                "bet_description": "Over 40.5 rushing yards",
+                "average_per_game": "Rushing yards: 52.4 season / 48.0 last 3",
+                "market_line": "Over 40.5 (-110) — DraftKings",
+                "play_threshold": "Over 40.5", "estimated_hit_probability": 61.0,
+                "confidence": 7, "statistical_rationale": "Volume supports the line.",
+                "risk_factors": "Game script.", "data_quality": "Strong",
             }],
-            "injury_impact": [], "data_gaps": [], "sources": [],
-            "ai_provider": "test", "research_mode": "test",
-            "research_truncated_for_prompt": False, "research_prompt_characters": 1000,
-            "odds_api_status": "test", "odds_api_usage": {},
+            "model_only_picks": [], "underdog_analysis": [],
+            "touchdown_scorers": [{
+                "player": "Lamar Jackson", "team": "Baltimore Ravens",
+                "availability": "No injury designation found",
+                "availability_evidence": "ESPN injury feed.",
+                "average_per_game": "Offensive TDs: 0.8 season / 1.0 last 3",
+                "estimated_td_probability": 62.0, "confidence": 7,
+                "rationale": "Designed runs.", "risk_factors": "Red-zone volume.",
+            }],
+            "sneaky_props": [], "injury_impact": [], "data_gaps": [], "sources": [],
+            "ai_provider": "ensemble: gemini + nvidia", "ai_providers_configured": ["gemini", "nvidia"],
+            "research_mode": "test", "research_truncated_for_prompt": False,
+            "research_prompt_characters": 1000, "odds_api_status": "test", "odds_api_usage": {},
         }
         _write_matchup_sheet(workbook, game, analysis, set())
         sheet = workbook.worksheets[0]
@@ -520,12 +533,21 @@ class OutputQualityRuleTests(unittest.TestCase):
             for row in range(1, sheet.max_row + 1)
             if sheet.cell(row, 1).value
         }
+        self.assertNotIn(
+            "PLAYER USAGE RESEARCH — PER-GAME AVERAGES (Season average / Last 3 games average)",
+            row_by_title,
+        )
+        self.assertNotIn("PLAYER USAGE RESEARCH", row_by_title)
+        verified_header = row_by_title["VERIFIED PLAYER PROPS (SPORTSBOOK LINE REQUIRED)"] + 1
+        self.assertEqual(sheet.cell(verified_header, 4).value, "Player Stat Avg/G (Season / Last 3)")
+        self.assertEqual(sheet.cell(verified_header + 1, 4).value, "Rushing yards: 52.4 season / 48.0 last 3")
+        td_header = row_by_title["ANYTIME TOUCHDOWN SCORERS"] + 1
+        self.assertIn("Offensive TDs/G", sheet.cell(td_header, 6).value)
+        self.assertEqual(sheet.cell(td_header + 1, 6).value, "Offensive TDs: 0.8 season / 1.0 last 3")
         sneaky = row_by_title["SNEAKY PROPS & LADDER OPPORTUNITIES"]
-        research = row_by_title["PLAYER USAGE RESEARCH — PER-GAME AVERAGES (Season average / Last 3 games average)"]
         injuries = row_by_title["INJURY / NEWS IMPACT ANALYSIS"]
         limitations = row_by_title["DATA LIMITATIONS"]
-        self.assertLess(sneaky, research)
-        self.assertLess(research, injuries)
+        self.assertLess(sneaky, injuries)
         self.assertLess(injuries, limitations)
 
 
