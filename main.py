@@ -466,18 +466,25 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
 
     player_quotes = [q for q in quotes if q.get("market_type") == "player"]
     game_quotes = [q for q in quotes if q.get("market_type") == "game"]
-    candidate_names = [
-        str(candidate.get("name") or "")
+    candidate_lists = [
+        [
+            str(candidate.get("name") or "")
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("name")
+        ]
         for candidates in research.get("selected_player_candidates", {}).values()
-        for candidate in candidates
-        if isinstance(candidate, dict) and candidate.get("name")
     ]
-    seen_candidate_names = {name.casefold() for name in candidate_names}
-    for roster_names in research.get("rosters", {}).values():
-        for roster_name in roster_names:
-            if str(roster_name).casefold() not in seen_candidate_names:
-                candidate_names.append(str(roster_name))
-                seen_candidate_names.add(str(roster_name).casefold())
+    candidate_names = []
+    for index in range(max((len(items) for items in candidate_lists), default=0)):
+        for items in candidate_lists:
+            if index < len(items):
+                candidate_names.append(items[index])
+    roster_lists = list(research.get("rosters", {}).values())
+    for index in range(max((len(items) for items in roster_lists), default=0)):
+        for items in roster_lists:
+            if index < len(items):
+                candidate_names.append(str(items[index]))
+    candidate_names = list(dict.fromkeys(candidate_names))
     research["verified_player_prop_markets"] = player_quotes
     research["verified_sportsbook_game_markets"] = game_quotes
     available = pass1.get("available_markets", [])
