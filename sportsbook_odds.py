@@ -644,12 +644,17 @@ def summarize_quotes(
                 item for item in player_lines
                 if normalize_player(item[1]) in candidate_order
             ]
+        else:
+            matching = []
+        if matching:
             player_lines = matching
             player_lines.sort(key=lambda item: (
                 candidate_order.get(normalize_player(item[1]), 999),
                 item[0], item[1], item[2],
             ))
         else:
+            # Preserve the event-wide quote pool if candidate/roster names do
+            # not normalize to the sportsbook feed's player labels.
             player_lines.sort(key=lambda item: (item[0], item[1], item[2]))
         shown = player_lines[:45]
         lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (best price per exact side):")
