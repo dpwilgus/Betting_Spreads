@@ -730,7 +730,7 @@ def _cached_analysis_is_complete(cached: dict | None) -> bool:
     structurally_complete = (
         isinstance(cached.get("picks"), list)
         and isinstance(cached.get("touchdown_scorers"), list)
-        and len(cached["touchdown_scorers"]) <= 3
+        and len(cached["touchdown_scorers"]) <= 5
         and cached.get("analysis_version") == 14
         and isinstance(cached.get("underdog_analysis"), list)
         and isinstance(cached.get("player_research_summary"), list)
