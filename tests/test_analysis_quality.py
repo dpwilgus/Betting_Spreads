@@ -141,6 +141,37 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertNotIn("OPTIONAL HISTORICAL RECAP", bounded)
         self.assertFalse(truncated)
 
+    def test_invalid_td_scorer_is_dropped_without_rejecting_valid_pick(self):
+        pick = {
+            "rank": 1, "market_type": "Game Prop",
+            "player_or_team": "Baltimore Ravens",
+            "bet_description": "Ravens moneyline",
+            "market_line": "Not verified", "play_threshold": "Ravens to win",
+            "estimated_hit_probability": 58, "confidence": 6,
+            "statistical_rationale": "Supported by matchup evidence",
+            "risk_factors": "Confirm price", "data_quality": "Moderate",
+        }
+        analysis = {
+            "summary": "Competitive matchup",
+            "game_script": "Baltimore has a modest home-field edge.",
+            "picks": [pick], "sneaky_props": [], "touchdown_scorers": [{
+                "rank": 1, "player": "Invalid Candidate", "team": "Baltimore Ravens",
+                "availability": "Active", "availability_evidence": "Test evidence",
+                "estimated_td_probability": 140, "confidence": 11,
+                "rationale": "Test", "risk_factors": "Test",
+            }],
+            "injury_impact": [], "data_gaps": [],
+        }
+        _validate_analysis(
+            analysis, team_names=("Los Angeles Chargers", "Baltimore Ravens")
+        )
+        self.assertEqual(analysis["picks"], [pick])
+        self.assertEqual(analysis["touchdown_scorers"], [])
+        self.assertTrue(any(
+            "invalid touchdown probability/confidence" in gap
+            for gap in analysis["data_gaps"]
+        ))
+
     def test_analysis_schema_does_not_require_underdog_section(self):
         self.assertNotIn("underdog_analysis", ANALYSIS_SCHEMA["required"])
         self.assertEqual(
