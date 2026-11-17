@@ -835,6 +835,40 @@ def _validate_analysis(
     sneaky_response = data.get("sneaky_props", [])
     injury_response = data.get("injury_impact", [])
     underdog_response = data.get("underdog_analysis", [])
+
+    # TD scorers are supplemental candidates, not the core betting analysis.
+    # A malformed probability/confidence on one scorer must not erase otherwise
+    # valid player props, game bets, or injury analysis. Drop only the bad row
+    # and retain a visible data-gap explanation.
+    valid_scorers = []
+    for scorer in scorers:
+        if not isinstance(scorer, dict):
+            data.setdefault("data_gaps", []).append(
+                "Removed a touchdown candidate because its response was not an object."
+            )
+            continue
+        try:
+            td_probability = float(scorer.get("estimated_td_probability", -1))
+            td_confidence = int(scorer.get("confidence", 0))
+        except (TypeError, ValueError):
+            data.setdefault("data_gaps", []).append(
+                f"Removed {scorer.get('player', 'a touchdown candidate')}: "
+                "touchdown probability or confidence was not numeric."
+            )
+            continue
+        if not 0 <= td_probability <= 100 or not 1 <= td_confidence <= 10:
+            data.setdefault("data_gaps", []).append(
+                f"Removed {scorer.get('player', 'a touchdown candidate')}: "
+                f"invalid touchdown probability/confidence "
+                f"({scorer.get('estimated_td_probability')!r}/"
+                f"{scorer.get('confidence')!r}); expected probability 0–100 "
+                "and confidence 1–10."
+            )
+            continue
+        valid_scorers.append(scorer)
+    data["touchdown_scorers"] = valid_scorers
+    scorers = valid_scorers
+
     # An invalid raw underdog row is not usable analysis: only count it
     # after _sanitize_underdog_analysis has retained a valid assessment.
     # Likewise, count injury impacts only when both teams belong to this
