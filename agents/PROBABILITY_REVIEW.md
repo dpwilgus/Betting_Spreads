@@ -1,8 +1,16 @@
-# Probability and Quality Review
+# NFL Betting Probability and Quality Review
 
-Review player/team identity, current availability, recent usage and sample size. Use the displayed player usage research (season and last-three per-game averages) as the baseline for every player-prop threshold. Assess researched offensive players for evidence-supported props and evaluate defensive leaders' sacks/tackles only as inputs to defensive matchup analytics. Do not recommend defensive sacks/tackles, kicking points, field goals, kicker or punter props. Assess full-game/first-quarter/first-half game markets when evidence and quotes support them. Prefer a broad set of evidence-backed verified player props when the sportsbook quote and independent usage evidence agree; do not force a fixed number. Keep model-only thresholds separate from actionable sportsbook picks, and omit weak or poorly grounded model-only leans rather than padding the worksheet. Never invent a line. Keep game bets separate; avoid overlapping same-team moneyline/spread picks. Assess underdog cover and upset chances in every spread game; only recommend a priced edge, never force a dog bet. Verify every line or label it "Not verified"; thresholds are model targets. Keep probability distinct from confidence. TDs need current availability and scoring/opportunity evidence; QBs need 3+ rushing TDs, or 2+ rushing TDs plus 3+ carries/game (passing TDs do not count). Questionable is conditional (max 6/10 with explicit risk); exclude Doubtful, Out and IR. Never invent evidence, stats, lines, odds, sources, samples, simulations or backtests; disclose gaps and lower confidence when evidence is weak.
-
-- Review every researched offensive candidate, defensive starter/leader, kicker and punter, plus next-man-up candidates added for relevant injuries. Check attempts, completions, TDs (including anytime TD), interceptions, receptions, targets, longest reception and other supported offensive markets. Use tackles, sacks and defensive takeaways only to assess opposing offense matchups; do not make them betting recommendations. Do not omit a high-profile starter merely because the AI did not select that player in its initial picks.
-- Prioritize dated Adam Schefter ESPN contributor-feed reporting for selected players and matchup teams; cite the article and publication date in the research evidence.
-- Reject self-referential injury impacts: the subject cannot be their own affected player. Player beneficiaries must be on a matchup roster, available and supported by structured ESPN game-log evidence. Use "Team unit" only for a key defensive star, not ordinary starters or offensive-line absences. Verify news/role-change impacts against supplied team-news headlines and dates. Injury replacements are candidates to assess, not automatic positive beneficiaries.
-- The matchup summary must use dated team news and compare pass/rush/points defense separately. Sacks alone do not make a defense elite; identify missing metrics. Verify neutral venues and QB experience/former-team ties; heritage is context, not a performance edge by itself.
+Review each matchup analysis before workbook export:
+- Confirm every player named belongs to the correct team and appears active/available from current reporting.
+- Confirm each statistic is relevant to the prop (targets for receiving yards, carries/goal-line role for rushing or touchdowns).
+- Check current-season data and recent role, with sample size made clear.
+- Consider injury, weather, offensive-line, pace, and opponent factors where material.
+- A claimed market line must be sourced. Otherwise it must be Not verified.
+- A play threshold must be identified as a model target, not a claimed sportsbook offer.
+- Hit probability must be distinct from confidence.
+- Recommendations must be supported by measurable evidence, not narrative or star status alone.
+- State uncertainty and downside risks.
+- Return exactly five ranked recommendations as requested. When later-ranked options have weaker evidence, disclose the limitations and lower confidence; never fabricate supporting facts.
+- Return exactly three touchdown candidates. Tie probabilities to role, red-zone and goal-line usage; clearly lower confidence for weaker candidates.
+- Prefer confidence 7-10 when genuinely supported, but never inflate a score. Confidence measures evidence quality and role/sample stability, not win probability.
+- Reject fabricated lines, statistics, injury claims, sources, and false claims of simulation or backtesting.
