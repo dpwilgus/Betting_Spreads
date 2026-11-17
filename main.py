@@ -23,7 +23,10 @@ from openpyxl.utils import get_column_letter
 
 from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
-from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
+from ai_providers import (
+    configure_providers, ensure_configured, get_provider_usage_stats,
+    reset_provider_run_state,
+)
 from sportsbook_odds import (
     fetch_event_quotes, PASS1_MARKETS, PASS2_TD_MARKETS, GAME_MARKETS,
     summarize_quotes, ensure_api_key_configured, research_supports_first_td,
@@ -838,8 +841,20 @@ def main() -> int:
     reset_research_cache()
     log_path = application_directory() / "Betting_Spreads.log"
     try:
+        if "--configure-ai" in sys.argv[1:]:
+            configured_names = configure_providers()
+            message = (
+                "AI provider credentials saved. Available providers: "
+                + (", ".join(configured_names) if configured_names else "none")
+            )
+            log_path.write_text(message + "\\n", encoding="utf-8")
+            if sys.stdout is not None:
+                print(message)
+            return 0
+
         reuse_cache = "--reuse-cache" in sys.argv[1:]
         refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
+        startup_configured_names: list[str] = []
         selected_week = requested_week(sys.argv[1:])
         data = fetch_scoreboard(week=selected_week)
         games, season, week = extract_games(data)
@@ -848,7 +863,9 @@ def main() -> int:
         if not any(flag in command_args for flag in ('--matchup', '--week', '--reuse-cache', '--refresh-incomplete', '--no-gui')):
             games = select_games_gui(games)
         if not reuse_cache:
-            ensure_configured()
+            startup_configured_names = [
+                provider.name for provider, _key in ensure_configured()
+            ]
             cli_mode = any(
                 flag in command_args
                 for flag in ("--matchup", "--week", "--refresh-incomplete", "--no-gui")
@@ -952,10 +969,12 @@ def main() -> int:
                 )
             usage_lines.append(usage_line)
         usage_report = "\n".join(usage_lines) or "No AI provider requests were made."
-        configured_names = sorted({
-            name for analysis in analyses
-            for name in analysis.get("ai_providers_configured", [])
-        })
+        configured_names = sorted(
+            set(startup_configured_names) | {
+                name for analysis in analyses
+                for name in analysis.get("ai_providers_configured", [])
+            }
+        )
         used_names = sorted({
             name for analysis in analyses
             for name in analysis.get("ai_providers_used", [])
