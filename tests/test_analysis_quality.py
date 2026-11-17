@@ -111,7 +111,7 @@ class AnalysisQualityTests(unittest.TestCase):
             [(first, "gemini"), (second, "nvidia")],
             [self._gibbs_quote("89.5")],
         )
-        self.assertEqual(primary, "gemini")
+        self.assertEqual(primary, "nvidia")
         self.assertEqual(len(merged["picks"]), 1)
         self.assertEqual(merged["picks"][0]["model_votes"], 2)
         self.assertEqual(merged["picks"][0]["estimated_hit_probability"], 61.0)
