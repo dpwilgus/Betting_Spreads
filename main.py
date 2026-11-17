@@ -158,14 +158,14 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     white_bold = Font(bold=True, color="FFFFFF")
     thin_gray = Side(style="thin", color="D9E1F2")
 
-    sheet.merge_cells("A1:J1")
+    sheet.merge_cells("A1:K1")
     sheet["A1"] = f"{game['Away Team']} at {game['Home Team']} — AI Betting Analysis"
     sheet["A1"].font = Font(bold=True, size=15, color="FFFFFF")
     sheet["A1"].fill = navy
     sheet["A1"].alignment = Alignment(horizontal="center")
     sheet.row_dimensions[1].height = 28
 
-    sheet.merge_cells("A2:J2")
+    sheet.merge_cells("A2:K2")
     sheet["A2"] = (
         f"Kickoff: {game.get('Game Date (ET)', 'Unknown')} | "
         f"ESPN game line: {game.get('Betting Line', 'Unavailable')}"
@@ -173,7 +173,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A2"].font = Font(italic=True, color="17365D")
     sheet["A2"].alignment = Alignment(wrap_text=True)
 
-    sheet.merge_cells("A3:J3")
+    sheet.merge_cells("A3:K3")
     if analysis.get("cache_reused"):
         sheet["A3"] = (
             "CACHED ANALYSIS — research has not been refreshed for current injuries, "
@@ -208,8 +208,8 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A4"] = "MATCHUP SUMMARY"
     sheet["A4"].font = white_bold
     sheet["A4"].fill = navy
-    sheet.merge_cells("A4:J4")
-    sheet.merge_cells("A5:J6")
+    sheet.merge_cells("A4:K4")
+    sheet.merge_cells("A5:K6")
     sheet["A5"] = analysis.get("summary", "No summary returned.")
     sheet["A5"].alignment = Alignment(wrap_text=True, vertical="top")
     sheet.row_dimensions[5].height = 38
@@ -218,15 +218,16 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A8"] = "EXPECTED GAME SCRIPT"
     sheet["A8"].font = white_bold
     sheet["A8"].fill = navy
-    sheet.merge_cells("A8:J8")
-    sheet.merge_cells("A9:J10")
+    sheet.merge_cells("A8:K8")
+    sheet.merge_cells("A9:K10")
     sheet["A9"] = analysis.get("game_script", "")
     sheet["A9"].alignment = Alignment(wrap_text=True, vertical="top")
     sheet.row_dimensions[9].height = 40
     sheet.row_dimensions[10].height = 25
 
     headers = [
-        "Rank", "Player / Team", "Recommended Bet", "Verified Market Line",
+        "Rank", "Player / Team", "Recommended Bet",
+        "Player Stat Avg/G (Season / Last 3)", "Verified Market Line",
         "Model Play Threshold", "Estimated Hit Probability", "Confidence (1–10)",
         "Statistical Rationale", "Risk Factors", "Data Quality",
     ]
@@ -238,7 +239,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         sheet.cell(start_row, 1, title)
         sheet.cell(start_row, 1).font = white_bold
         sheet.cell(start_row, 1).fill = navy
-        sheet.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=10)
+        sheet.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=11)
         for col, value in enumerate(headers, 1):
             _style_header(sheet.cell(start_row + 1, col, value))
         if not items:
@@ -250,8 +251,8 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             row_num = start_row + 2 + offset
             values = [
                 offset + 1, pick.get("player_or_team", ""),
-                pick.get("bet_description", ""), pick.get("market_line", "Not verified"),
-                pick.get("play_threshold", ""),
+                pick.get("bet_description", ""), pick.get("average_per_game", ""),
+                pick.get("market_line", "Not verified"), pick.get("play_threshold", ""),
                 f"{pick.get('estimated_hit_probability', 0):.1f}%",
                 pick.get("confidence", ""), pick.get("statistical_rationale", ""),
                 pick.get("risk_factors", ""), pick.get("data_quality", ""),
@@ -313,8 +314,10 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(td_start, 1, "ANYTIME TOUCHDOWN SCORERS")
     sheet.cell(td_start, 1).font = white_bold
     sheet.cell(td_start, 1).fill = navy
-    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=9)
-    td_headers = ["Rank", "Player", "Team", "Availability", "Availability Evidence", "Estimated TD Probability", "Confidence (1–10)", "Rationale", "Risk Factors"]
+    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=10)
+    td_headers = ["Rank", "Player", "Team", "Availability", "Availability Evidence",
+        "Offensive TDs/G (Season / Last 3)", "Estimated TD Probability",
+        "Confidence (1–10)", "Rationale", "Risk Factors"]
     for col, value in enumerate(td_headers, 1):
         _style_header(sheet.cell(td_start + 1, col, value))
     scorers = analysis.get("touchdown_scorers", [])
@@ -326,6 +329,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             scorer.get("rank", row_num - td_start - 1), scorer.get("player", ""),
             scorer.get("team", ""), scorer.get("availability", "Not verified"),
             scorer.get("availability_evidence", "No current evidence supplied"),
+            scorer.get("average_per_game", "Not available"),
             f"{scorer.get('estimated_td_probability', 0):.1f}%",
             scorer.get("confidence", ""), scorer.get("rationale", ""),
             scorer.get("risk_factors", ""),
@@ -370,65 +374,8 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 cell.fill = light
         sheet.row_dimensions[row_num].height = 78
 
-    research_rows = analysis.get("player_research_summary", [])
-    research_start = sneaky_start + max(len(sneaky_props), 1) + 4
-    sheet.cell(research_start, 1, "PLAYER USAGE RESEARCH — PER-GAME AVERAGES (Season average / Last 3 games average)")
-    sheet.cell(research_start, 1).font = white_bold
-    sheet.cell(research_start, 1).fill = navy
-    sheet.merge_cells(start_row=research_start, start_column=1, end_row=research_start, end_column=15)
-    research_headers = [
-        "Team", "Player", "Pos", "GP",
-        "Pass Yds/G (Season / Last 3)", "Pass Att/G (Season / Last 3)", "Pass TD/G (Season / Last 3)",
-        "Rush Yds/G (Season / Last 3)", "Rush Att/G (Season / Last 3)", "Rush TD/G (Season / Last 3)",
-        "Rec Yds/G (Season / Last 3)", "Receptions/G (Season / Last 3)", "Targets/G (Season / Last 3)",
-        "Rec TD/G (Season / Last 3)", "TDs Scored/G (Season / Last 3)",
-    ]
-    for col, value in enumerate(research_headers, 1):
-        _style_header(sheet.cell(research_start + 1, col, value))
-    if not research_rows:
-        sheet.merge_cells(start_row=research_start + 2, start_column=1, end_row=research_start + 2, end_column=15)
-        sheet.cell(research_start + 2, 1, "No selected offensive player game-log averages were available.")
-        sheet.cell(research_start + 2, 1).alignment = Alignment(wrap_text=True)
-    metric_columns = [
-        ("passing_yards_per_game", "passing_yards_recent"),
-        ("passing_attempts_per_game", "passing_attempts_recent"),
-        ("passing_tds_per_game", "passing_tds_recent"),
-        ("rushing_yards_per_game", "rushing_yards_recent"),
-        ("rushing_attempts_per_game", "rushing_attempts_recent"),
-        ("rushing_tds_per_game", "rushing_tds_recent"),
-        ("receiving_yards_per_game", "receiving_yards_recent"),
-        ("receptions_per_game", "receptions_recent"),
-        ("targets_per_game", "targets_recent"),
-        ("receiving_tds_per_game", "receiving_tds_recent"),
-    ]
-    def average_label(season_value, recent_value=None):
-        if season_value is None:
-            return "—"
-        if recent_value is None:
-            return f"{season_value:.1f} / —"
-        return f"{season_value:.1f} / {recent_value:.1f}"
-    for offset, player in enumerate(research_rows):
-        row_num = research_start + 2 + offset
-        values = [
-            player.get("team", ""), player.get("player", ""), player.get("position", ""),
-            player.get("games", 0),
-        ]
-        values.extend(
-            average_label(player.get(season_key), player.get(recent_key))
-            for season_key, recent_key in metric_columns
-        )
-        values.append(
-            average_label(player.get("tds_scored_per_game"), player.get("tds_scored_recent"))
-        )
-        for col, value in enumerate(values, 1):
-            cell = sheet.cell(row=row_num, column=col, value=value)
-            cell.alignment = Alignment(wrap_text=True, vertical="top")
-            cell.border = Border(bottom=thin_gray)
-            if row_num % 2 == 0:
-                cell.fill = light
-        sheet.row_dimensions[row_num].height = 34
-
-    # Injury/news impacts are deliberately near the bottom and limited to material items.
+    # Keep injury/news impacts near the bottom without a separate player-usage table.
+    injury_start = sneaky_start + max(len(sneaky_props), 1) + 4
     impacts = analysis.get("injury_impact", [])
     injury_start = research_start + max(len(research_rows), 1) + 4
     sheet.cell(injury_start, 1, "INJURY / NEWS IMPACT ANALYSIS")
@@ -436,7 +383,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(injury_start, 1).fill = navy
     sheet.merge_cells(
         start_row=injury_start, start_column=1,
-        end_row=injury_start, end_column=10,
+        end_row=injury_start, end_column=11,
     )
     injury_headers = [
         "Impact Type / Subject", "Team", "Status / Development", "Affected Player",
