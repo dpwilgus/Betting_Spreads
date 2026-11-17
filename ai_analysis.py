@@ -53,7 +53,11 @@ def _bounded_research_text(
             continue
         section = _compact_matchup_evidence(original)
         upper = section[:120].upper()
-        if (upper.startswith("HEADER") or upper.startswith("INJURIES:")
+        if (upper.startswith("ODDS QUOTES RETRIEVED")
+                or upper.startswith("THE ODDS API VERIFIED PLAYER-PROP QUOTES")
+                or upper.startswith("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS")):
+            priority = -1
+        elif (upper.startswith("HEADER") or upper.startswith("INJURIES:")
                 or upper.startswith("ODDS API MARKET DISCOVERY")
                 or upper.startswith("THE ODDS API VERIFIED FULL-GAME")
                 or upper.startswith("THE ODDS API VERIFIED PLAYER-PROP")
