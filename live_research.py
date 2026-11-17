@@ -511,10 +511,15 @@ def _team_depth_chart(team_id: str) -> dict[str, Any]:
 
 
 def _extract_depth_chart_ids(payload: Any) -> dict[str, list[str]]:
-    """Return ESPN depth-chart athlete IDs ordered by listed rank."""
-    result: dict[str, list[tuple[int, str]]] = {}
+    """Return unique ESPN depth-chart athlete IDs in their best listed order.
+
+    ESPN can return several formation charts for a team. The same athlete may
+    appear in more than one chart; keep one entry per position/player and use
+    the best (lowest) rank, preserving the earliest chart as a tie-breaker.
+    """
+    result: dict[str, dict[str, tuple[int, int, int]]] = {}
     charts = payload.get("depthCharts", []) if isinstance(payload, dict) else []
-    for chart in charts:
+    for chart_index, chart in enumerate(charts):
         positions = chart.get("positions", {}) if isinstance(chart, dict) else {}
         for position_data in positions.values():
             if not isinstance(position_data, dict):
@@ -533,130 +538,27 @@ def _extract_depth_chart_ids(payload: Any) -> dict[str, list[str]]:
             }.get(abbreviation, abbreviation)
             if abbreviation not in {"QB", "RB", "WR", "TE"}:
                 continue
-            for item in position_data.get("athletes", []):
+            for item_index, item in enumerate(position_data.get("athletes", [])):
                 athlete = item.get("athlete") or {}
                 athlete_id = str(athlete.get("id") or "")
-                if athlete_id:
-                    try:
-                        rank = int(item.get("rank", 999))
-                    except (TypeError, ValueError):
-                        rank = 999
-                    result.setdefault(abbreviation, []).append((rank, athlete_id))
+                if not athlete_id:
+                    continue
+                try:
+                    rank = int(item.get("rank", 999))
+                except (TypeError, ValueError):
+                    rank = 999
+                order = (rank, chart_index, item_index)
+                by_id = result.setdefault(abbreviation, {})
+                prior = by_id.get(athlete_id)
+                if prior is None or order < prior:
+                    by_id[athlete_id] = order
     return {
-        position: [athlete_id for _, athlete_id in sorted(entries)]
+        position: [
+            athlete_id
+            for athlete_id, _order in sorted(entries.items(), key=lambda entry: entry[1])
+        ]
         for position, entries in result.items()
     }
-
-
-def _normalize_player_gamelog(payload: dict[str, Any], recent_limit: int = 5) -> dict[str, Any]:
-    """Join ESPN's split stat arrays to event metadata and emit concise player evidence."""
-    names = payload.get("names", [])
-    labels = payload.get("labels", [])
-    display_names = payload.get("displayNames", [])
-    definitions = []
-    for index, name in enumerate(names):
-        definitions.append({
-            "name": str(name),
-            "label": str(labels[index]) if index < len(labels) else str(name),
-            "display": str(display_names[index]) if index < len(display_names) else str(name),
-        })
-
-    event_metadata = payload.get("events", {})
-    if not isinstance(event_metadata, dict):
-        event_metadata = {}
-    season_totals = {}
-    recent_games = []
-    season_types = payload.get("seasonTypes", [])
-    for season_type in season_types if isinstance(season_types, list) else []:
-        for category in season_type.get("categories", []):
-            if not isinstance(category, dict):
-                continue
-            totals = category.get("totals", [])
-            if totals:
-                season_totals[category.get("displayName", "Season totals")] = {
-                    definitions[i]["name"]: totals[i]
-                    for i in range(min(len(totals), len(definitions)))
-                }
-            for event_stats in category.get("events", []):
-                if not isinstance(event_stats, dict):
-                    continue
-                event_id = str(event_stats.get("eventId", ""))
-                metadata = event_metadata.get(event_id, {})
-                values = event_stats.get("stats", [])
-                stats = {
-                    definitions[i]["name"]: values[i]
-                    for i in range(min(len(values), len(definitions)))
-                }
-                opponent = metadata.get("opponent") or {}
-                recent_games.append({
-                    "week": metadata.get("week"),
-                    "date": metadata.get("gameDate"),
-                    "opponent": opponent.get("displayName"),
-                    "home_away": metadata.get("atVs"),
-                    "result": metadata.get("gameResult"),
-                    "score": metadata.get("score"),
-                    "stats": stats,
-                })
-    recent_games.sort(key=lambda game: str(game.get("date") or ""), reverse=True)
-    if recent_games or season_totals:
-        return {
-            "stat_definitions": definitions,
-            "season_totals": season_totals,
-            "recent_games": recent_games[:recent_limit],
-            "games_available": len(recent_games),
-        }
-
-    # Retain compatibility with incomplete/unexpected ESPN payloads, but keep bounded.
-    return _compact_player_data(payload)
-
-
-@lru_cache(maxsize=128)
-def _player_gamelog(athlete_id: str, season: int) -> dict[str, Any]:
-    """Fetch one player's current-season game log; shared across matchup sheets."""
-    url = (
-        "https://site.web.api.espn.com/apis/common/v3/sports/football/nfl/"
-        f"athletes/{athlete_id}/gamelog?season={season}&seasontype=2"
-    )
-    return _normalize_player_gamelog(_get_json(url, timeout=15))
-
-
-def _fetch_player_gamelog(athlete_id: str, season: int) -> dict[str, Any]:
-    """Retry one transient player-log failure once; never disable other players."""
-    try:
-        return _player_gamelog(athlete_id, season)
-    except urllib.error.HTTPError:
-        # A 4xx/5xx response is explicit; do not amplify provider throttling.
-        raise
-    except (urllib.error.URLError, TimeoutError, ssl.SSLError, ValueError):
-        time.sleep(0.35)
-        return _player_gamelog(athlete_id, season)
-
-
-def _compact_player_data(value: Any, depth: int = 0) -> Any:
-    """Bound player game-log payloads while retaining labels, dates, opponents and stats."""
-    if depth > 6:
-        return None
-    if isinstance(value, dict):
-        result = {}
-        for key, item in list(value.items())[:45]:
-            if key.casefold() in {"links", "images", "videos", "news", "headlines", "notes"}:
-                continue
-            compacted = _compact_player_data(item, depth + 1)
-            if compacted not in (None, {}, []):
-                result[str(key)[:60]] = compacted
-        return result
-    if isinstance(value, list):
-        return [
-            item for item in (
-                _compact_player_data(entry, depth + 1) for entry in value[:6]
-            )
-            if item not in (None, {}, [])
-        ]
-    if isinstance(value, str):
-        return value[:140]
-    if isinstance(value, (int, float, bool)) or value is None:
-        return value
-    return str(value)[:140]
 
 
 def _select_research_players(
@@ -713,20 +615,28 @@ def _select_research_players(
         )
     }
 
-    def add_player(athlete_id: str, reason: str) -> None:
+    def add_player(
+        athlete_id: str,
+        reason: str,
+        expected_position: str | None = None,
+    ) -> bool:
+        """Add one eligible, correctly-positioned roster player; report new additions."""
         player = roster_by_id.get(str(athlete_id))
         if player is None or normalize(player.get("name")) in unavailable_names:
-            return
+            return False
+        if expected_position and str(player.get("position") or "").upper() != expected_position:
+            return False
         existing = selected_by_id.get(str(athlete_id))
         if existing is not None:
             prior = existing.get("research_reason", "")
             if reason not in prior:
                 existing["research_reason"] = "; ".join(filter(None, (prior, reason)))
-            return
+            return False
         candidate = dict(player)
         candidate["research_reason"] = reason
         selected_by_id[str(athlete_id)] = candidate
         selected.append(candidate)
+        return True
 
     def find_depth_chart_id(value: Any, wanted_name: str) -> str | None:
         if isinstance(value, dict):
@@ -751,8 +661,12 @@ def _select_research_players(
         for athlete_id in position_ids[position]:
             if athlete_id not in roster_by_id:
                 continue
-            add_player(athlete_id, "Core depth-chart/roster candidate")
-            added += 1
+            if add_player(
+                athlete_id,
+                "Core depth-chart/roster candidate",
+                expected_position=position,
+            ):
+                added += 1
             if added >= limit:
                 break
 
@@ -800,6 +714,7 @@ def _select_research_players(
             add_player(
                 athlete_id,
                 f"Potential replacement for {report.get('player')} ({report.get('status')})",
+                expected_position=position,
             )
 
     return selected
