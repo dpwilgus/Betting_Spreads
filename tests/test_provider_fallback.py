@@ -8,7 +8,8 @@ from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_t
                          _research_player_usage, _separate_unverified_player_props,
                          _normalize_name, _validate_analysis, analyze_game)
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
-                          get_provider_usage_stats, reset_provider_run_state)
+                          generate_json_ensemble, get_provider_usage_stats,
+                          reset_provider_run_state)
 from live_research import collect_game_research, _extract_roster_names
 
 
@@ -37,6 +38,27 @@ def valid_analysis():
 
 
 class ProviderFallbackTests(unittest.TestCase):
+
+    def test_ensemble_calls_every_configured_provider_after_success(self):
+        gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+        nvidia = Provider("nvidia", "NVIDIA_API_KEY", "nvidia", "url", "model", "openai")
+        with patch(
+            "ai_providers.ensure_configured",
+            return_value=[(gemini, "key-one"), (nvidia, "key-two")],
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers._call_provider",
+            side_effect=[{"summary": "Gemini"}, {"summary": "NVIDIA"}],
+        ) as call:
+            results, failures, configured = generate_json_ensemble("system", "user")
+
+        self.assertEqual(configured, ["gemini", "nvidia"])
+        self.assertEqual([name for _result, name in results], ["gemini", "nvidia"])
+        self.assertEqual(len(results), 2)
+        self.assertEqual(failures, [])
+        self.assertEqual(call.call_count, 2)
+
     def test_provider_skip_list_resets_for_new_run(self):
         skipped = {"gemini", "groq"}
 
