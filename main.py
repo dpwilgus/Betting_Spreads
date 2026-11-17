@@ -243,7 +243,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         for col, value in enumerate(headers, 1):
             _style_header(sheet.cell(start_row + 1, col, value))
         if not items:
-            sheet.merge_cells(start_row=start_row + 2, start_column=1, end_row=start_row + 2, end_column=10)
+            sheet.merge_cells(start_row=start_row + 2, start_column=1, end_row=start_row + 2, end_column=11)
             sheet.cell(start_row + 2, 1, empty_message)
             sheet.cell(start_row + 2, 1).alignment = Alignment(wrap_text=True)
             return start_row + 4
@@ -322,7 +322,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         _style_header(sheet.cell(td_start + 1, col, value))
     scorers = analysis.get("touchdown_scorers", [])
     if not scorers:
-        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=9)
+        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=10)
         sheet.cell(td_start + 2, 1, "No touchdown scorer met the evidence threshold.")
     for row_num, scorer in enumerate(scorers, td_start + 2):
         values = [
@@ -342,7 +342,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 cell.fill = light
         sheet.row_dimensions[row_num].height = 65
 
-    # Sneaky ideas are followed by transparent season/recent player usage research.
+    # Keep the existing sneaky-prop section; detailed player averages appear beside the relevant picks.
     sneaky_start = td_start + max(len(scorers), 1) + 4
     sneaky_props = analysis.get("sneaky_props", [])
     sneaky_props = sneaky_props if isinstance(sneaky_props, list) else []
@@ -377,7 +377,6 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     # Keep injury/news impacts near the bottom without a separate player-usage table.
     injury_start = sneaky_start + max(len(sneaky_props), 1) + 4
     impacts = analysis.get("injury_impact", [])
-    injury_start = research_start + max(len(research_rows), 1) + 4
     sheet.cell(injury_start, 1, "INJURY / NEWS IMPACT ANALYSIS")
     sheet.cell(injury_start, 1).font = white_bold
     sheet.cell(injury_start, 1).fill = navy
@@ -427,9 +426,9 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(gap_row, 1, "DATA LIMITATIONS")
     sheet.cell(gap_row, 1).font = white_bold
     sheet.cell(gap_row, 1).fill = navy
-    sheet.merge_cells(start_row=gap_row, start_column=1, end_row=gap_row, end_column=15)
+    sheet.merge_cells(start_row=gap_row, start_column=1, end_row=gap_row, end_column=11)
     gaps = analysis.get("data_gaps", [])
-    sheet.merge_cells(start_row=gap_row + 1, start_column=1, end_row=gap_row + 2, end_column=15)
+    sheet.merge_cells(start_row=gap_row + 1, start_column=1, end_row=gap_row + 2, end_column=11)
     sheet.cell(gap_row + 1, 1, "\n".join(f"• {gap}" for gap in gaps) if gaps else "No material data gaps were reported.")
     sheet.cell(gap_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
 
@@ -437,7 +436,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(source_row, 1, "RESEARCH SOURCES")
     sheet.cell(source_row, 1).font = white_bold
     sheet.cell(source_row, 1).fill = navy
-    sheet.merge_cells(start_row=source_row, start_column=1, end_row=source_row, end_column=15)
+    sheet.merge_cells(start_row=source_row, start_column=1, end_row=source_row, end_column=11)
     sources = analysis.get("sources", [])
     if not sources:
         sheet.cell(source_row + 1, 1, "No source URLs were returned by the research tool.")
@@ -594,7 +593,7 @@ def _write_best_overall_sheet(workbook: Workbook, games: list[dict], analyses: l
             cell = sheet.cell(row_num, col, value)
             cell.alignment = Alignment(vertical="top", wrap_text=True)
         sheet.cell(row_num, 9).number_format = '0.0"%"'
-    widths = [8, 27, 25, 15, 23, 34, 32, 20, 16, 12, 29, 48, 42]
+    widths = [8, 22, 30, 28, 24, 22, 18, 16, 48, 34, 16]
     for col, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(col)].width = width
     sheet.freeze_panes = "A5"
