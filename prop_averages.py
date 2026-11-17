@@ -53,6 +53,8 @@ def format_per_game_average(
         games = int(usage.get("games_available") or 0)
     except (TypeError, ValueError):
         games = 0
+    if market_key == "player_pass_yds_q1":
+        return "First-quarter passing yards: period split unavailable"
     definition = STAT_MAP.get(market_key)
     if games <= 0 or not definition:
         return "Not available"
