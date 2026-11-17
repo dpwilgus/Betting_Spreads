@@ -472,6 +472,12 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
         for candidate in candidates
         if isinstance(candidate, dict) and candidate.get("name")
     ]
+    seen_candidate_names = {name.casefold() for name in candidate_names}
+    for roster_names in research.get("rosters", {}).values():
+        for roster_name in roster_names:
+            if str(roster_name).casefold() not in seen_candidate_names:
+                candidate_names.append(str(roster_name))
+                seen_candidate_names.add(str(roster_name).casefold())
     research["verified_player_prop_markets"] = player_quotes
     research["verified_sportsbook_game_markets"] = game_quotes
     available = pass1.get("available_markets", [])
