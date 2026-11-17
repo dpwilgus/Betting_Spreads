@@ -5,6 +5,8 @@ from main import (
     _cached_analysis_is_complete,
     _write_matchup_sheet,
     filter_requested_matchup,
+    requested_week,
+    scoreboard_url,
 )
 
 
@@ -82,6 +84,22 @@ class MatchupFilterTests(unittest.TestCase):
 
     def test_filter_without_option_keeps_full_slate(self):
         self.assertEqual(filter_requested_matchup(self.games, []), self.games)
+
+    def test_requested_week_parses_week_11(self):
+        self.assertEqual(requested_week(["--week", "11", "--matchup", "Colts at Texans"]), 11)
+
+    def test_requested_week_rejects_missing_or_invalid_values(self):
+        for arguments in (["--week"], ["--week", "0"], ["--week", "19"], ["--week", "next"]):
+            with self.subTest(arguments=arguments):
+                with self.assertRaises(ValueError):
+                    requested_week(arguments)
+
+    def test_scoreboard_url_targets_requested_regular_season_week(self):
+        self.assertEqual(
+            scoreboard_url(11, 2026),
+            "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard?dates=2026&seasontype=2&week=11",
+        )
+        self.assertEqual(scoreboard_url(), "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard")
 
     def test_matchup_sheet_displays_underdog_watch_and_compacted_status(self):
         workbook = Workbook()
