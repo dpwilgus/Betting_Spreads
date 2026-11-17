@@ -132,7 +132,7 @@ def _bounded_research_text(
                     compact_lines.append(line)
                     compact_length += addition
                 if compact_lines:
-                    compact_section = "\\n".join(compact_lines)
+                    compact_section = "\n".join(compact_lines)
                     kept.append(compact_section)
                     used += separator + len(compact_section)
                 essential_omitted = True
