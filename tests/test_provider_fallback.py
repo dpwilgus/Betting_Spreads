@@ -572,19 +572,20 @@ class ProviderFallbackTests(unittest.TestCase):
         }
 
         with patch(
-            "ai_analysis.generate_json",
-            return_value=(valid_analysis(), "gemini"),
+            "ai_analysis.generate_json_ensemble",
+            return_value=([(valid_analysis(), "gemini")], [], ["gemini"]),
         ) as generate:
             result = analyze_game(game, research=research)
 
         system_prompt, base_user_prompt = generate.call_args.args[:2]
         prompt_factory = generate.call_args.kwargs["prompt_factory"]
         system_prompt, user_prompt = prompt_factory("gemini")
-        self.assertIn("Target five verified player props", system_prompt)
-        self.assertIn("model-only", system_prompt)
+        self.assertIn("Return exactly five ranked betting opportunities", system_prompt)
+        self.assertIn("The primary objective is to identify the strongest VERIFIED PLAYER PROPS", user_prompt)
+        self.assertIn("Model-only leans remain separate", user_prompt)
         self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
         self.assertIn("THE ODDS API VERIFIED PLAYER-PROP QUOTES", user_prompt)
-        self.assertIn("Evaluate the supplied verified sportsbook quote list", user_prompt)
+        self.assertIn("Evaluate the full quoted candidate pool", user_prompt)
         self.assertIn("Analyze this upcoming NFL matchup", base_user_prompt)
         self.assertIn("statistical_rationale", user_prompt)
         self.assertIn("touchdown_scorers", user_prompt)
@@ -592,17 +593,15 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn('"underdog":"Los Angeles Chargers"', user_prompt)
         self.assertIn('"spread":"+4.5"', user_prompt)
         self.assertIn('"cover_probability":NUMBER', user_prompt)
-        self.assertIn("Never default to the favorite", system_prompt)
-        self.assertIn("unit elite", system_prompt)
-        self.assertIn("heritage", system_prompt)
+        self.assertIn("Never default to the favorite", user_prompt)
+        self.assertIn("elite defensive absence", user_prompt)
         self.assertIn("summary <= 90 words", user_prompt)
         self.assertIn("statistical_rationale <= 24 words", user_prompt)
         self.assertIn("return no more than five material injury/news impacts", user_prompt)
-        self.assertIn("risk_factors must start 'Questionable:'", user_prompt)
-        self.assertIn("'Questionable:'", user_prompt)
+        self.assertIn("Questionable TD risk_factors must start 'Questionable:'", user_prompt)
         self.assertNotIn('"additionalProperties"', user_prompt)
         self.assertLess(len(system_prompt) + len(user_prompt), 15000)
-        self.assertEqual(result["ai_provider"], "gemini")
+        self.assertEqual(result["ai_provider"], "ensemble: gemini")
         self.assertEqual(result["sources"], research["sources"])
 
     def test_provider_usage_tracks_requests_and_reported_tokens(self):
