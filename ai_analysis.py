@@ -119,7 +119,24 @@ def _bounded_research_text(
     for priority, _, section in prioritized:
         separator = 2 if kept else 0
         if len(section) + separator > budget - used:
-            if priority <= 2:
+            if priority == -1:
+                # Never discard the whole verified quote block. Retain as many
+                # complete quote lines as fit, beginning with its heading.
+                remaining_budget = max(0, budget - used - separator)
+                compact_lines = []
+                compact_length = 0
+                for line in section.splitlines():
+                    addition = len(line) + (1 if compact_lines else 0)
+                    if compact_length + addition > remaining_budget:
+                        break
+                    compact_lines.append(line)
+                    compact_length += addition
+                if compact_lines:
+                    compact_section = "\\n".join(compact_lines)
+                    kept.append(compact_section)
+                    used += separator + len(compact_section)
+                essential_omitted = True
+            elif priority <= 2:
                 essential_omitted = True
             else:
                 optional_omitted = True
