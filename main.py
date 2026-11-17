@@ -847,7 +847,7 @@ def main() -> int:
                 "AI provider credentials saved. Available providers: "
                 + (", ".join(configured_names) if configured_names else "none")
             )
-            log_path.write_text(message + "\\n", encoding="utf-8")
+            log_path.write_text(message + "\n", encoding="utf-8")
             if sys.stdout is not None:
                 print(message)
             return 0
