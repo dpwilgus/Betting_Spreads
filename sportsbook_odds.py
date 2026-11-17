@@ -558,8 +558,11 @@ def research_supports_first_td(research_text: str) -> bool:
     return False
 
 
-def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
-    """Summarize exact lines compactly; keep the full quote set for later validation."""
+def summarize_quotes(
+    quotes: list[dict[str, Any]],
+    candidate_players: list[str] | None = None,
+) -> str:
+    """Summarize exact lines, prioritizing researched matchup players and retaining full quotes for validation."""
     if not quotes:
         return "No sportsbook quotes were returned for the requested markets."
 
@@ -626,9 +629,28 @@ def summarize_quotes(quotes: list[dict[str, Any]]) -> str:
         lines.append("THE ODDS API VERIFIED FULL-GAME SPORTSBOOK MARKETS:")
         lines.extend(line for _, line in sorted(game_lines))
     if player_lines:
-        # Bound prompt size so quotes do not crowd out the player logs and injury
-        # evidence. Full quote records remain available for exact post-AI checks.
-        player_lines.sort(key=lambda item: (item[0], item[1], item[2]))
+        # Put quotes for researched matchup candidates first. The full quote
+        # records remain available for exact post-AI validation.
+        def normalize_player(value: str) -> str:
+            return re.sub(r"[^a-z0-9]", "", str(value or "").casefold())
+
+        candidate_order = {
+            normalize_player(name): index
+            for index, name in enumerate(candidate_players or [])
+            if str(name or "").strip()
+        }
+        if candidate_order:
+            matching = [
+                item for item in player_lines
+                if normalize_player(item[1]) in candidate_order
+            ]
+            player_lines = matching
+            player_lines.sort(key=lambda item: (
+                candidate_order.get(normalize_player(item[1]), 999),
+                item[0], item[1], item[2],
+            ))
+        else:
+            player_lines.sort(key=lambda item: (item[0], item[1], item[2]))
         shown = player_lines[:45]
         lines.append("THE ODDS API VERIFIED PLAYER-PROP QUOTES (best price per exact side):")
         lines.extend(line for _, _, line in shown)
