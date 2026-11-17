@@ -60,7 +60,10 @@ class ProviderFallbackTests(unittest.TestCase):
             "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
         ), patch(
             "ai_providers._call_provider",
-            side_effect=[{"summary": "Gemini"}, {"summary": "NVIDIA"}],
+            side_effect=[
+                {"candidates": [{"content": {"parts": [{"text": '{"summary":"Gemini"}'}]}}]},
+                {"choices": [{"message": {"content": '{"summary":"NVIDIA"}'}}]},
+            ],
         ) as call:
             results, failures, configured = generate_json_ensemble("system", "user")
 
