@@ -1,5 +1,7 @@
 import unittest
 
+from prop_averages import attach_per_game_averages
+
 from ai_analysis import (
     ANALYSIS_SCHEMA,
     _bounded_research_text,
@@ -12,6 +14,47 @@ from ai_analysis import (
 
 
 class AnalysisQualityTests(unittest.TestCase):
+
+    def test_research_quote_block_survives_prompt_trimming(self):
+        research = (
+            "ODDS QUOTES RETRIEVED: 2026-11-16T20:00:00Z\\n"
+            "THE ODDS API VERIFIED PLAYER-PROP QUOTES: C.J. Stroud | passing yards | Over 245.5 -110@DraftKings"
+            "\\n\\n" + "OPTIONAL OLD RECAP: " + ("x" * 1200)
+        )
+        bounded, truncated = _bounded_research_text(research, max_chars=220)
+        self.assertIn("ODDS QUOTES RETRIEVED", bounded)
+        self.assertIn("DraftKings", bounded)
+        self.assertTrue(truncated)
+
+    def test_prop_average_is_stat_specific_and_td_average_is_offensive_tds(self):
+        usage = {
+            "playera": {
+                "games_available": 2,
+                "season": {
+                    "rushingYards": 100,
+                    "rushingTouchdowns": 1,
+                    "receivingTouchdowns": 1,
+                },
+                "recent": [
+                    {"stats": {"rushingYards": 40, "rushingTouchdowns": 0, "receivingTouchdowns": 1}},
+                    {"stats": {"rushingYards": 60, "rushingTouchdowns": 1, "receivingTouchdowns": 0}},
+                ],
+            }
+        }
+        data = {
+            "picks": [{
+                "market_type": "Player Prop", "player_or_team": "Player A",
+                "bet_description": "Over 50.5 rushing yards",
+            }],
+            "touchdown_scorers": [{"player": "Player A"}],
+        }
+        attach_per_game_averages(
+            data, usage,
+            lambda description: "player_rush_yds" if "rushing yards" in description else None,
+        )
+        self.assertEqual(data["picks"][0]["average_per_game"], "Rushing yards: 50.0 season / 50.0 last 2")
+        self.assertEqual(data["touchdown_scorers"][0]["average_per_game"], "Offensive TDs: 1.0 season / 1.0 last 2")
+
     def _prop_pick(self, line):
         return {
             "market_type": "Player Prop",
