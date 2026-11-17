@@ -9,6 +9,7 @@ from ai_analysis import (
     _deduplicate_correlated_game_picks,
     _separate_unverified_player_props,
     _underdog_format_instruction,
+    _merge_provider_analyses,
     _validate_analysis,
 )
 
@@ -24,7 +25,7 @@ class AnalysisQualityTests(unittest.TestCase):
         bounded, truncated = _bounded_research_text(research, max_chars=220)
         self.assertIn("ODDS QUOTES RETRIEVED", bounded)
         self.assertIn("DraftKings", bounded)
-        self.assertTrue(truncated)
+        self.assertFalse(truncated)
 
     def test_prop_average_is_stat_specific_and_td_average_is_offensive_tds(self):
         usage = {
@@ -88,6 +89,33 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertIn("HEADER", bounded)
         self.assertIn("INJURIES:", bounded)
         self.assertIn("PLAYER LOGS", bounded)
+
+    def test_model_ensemble_merges_votes_for_exact_verified_quote(self):
+        first = {
+            "summary": "Gemini summary", "game_script": "Gemini script",
+            "picks": [dict(self._prop_pick("89.5"), estimated_hit_probability=58.0,
+                confidence=6, statistical_rationale="Season and recent usage align.",
+                risk_factors="Opponent pressure.", data_quality="Moderate")],
+            "sneaky_props": [], "touchdown_scorers": [],
+            "injury_impact": [], "data_gaps": [],
+        }
+        second = {
+            "summary": "NVIDIA summary", "game_script": "NVIDIA script",
+            "picks": [dict(self._prop_pick("89.5"), estimated_hit_probability=64.0,
+                confidence=8, statistical_rationale="Volume supports the over.",
+                risk_factors="Game-script risk.", data_quality="Strong")],
+            "sneaky_props": [], "touchdown_scorers": [],
+            "injury_impact": [], "data_gaps": [],
+        }
+        merged, primary = _merge_provider_analyses(
+            [(first, "gemini"), (second, "nvidia")],
+            [self._gibbs_quote("89.5")],
+        )
+        self.assertEqual(primary, "gemini")
+        self.assertEqual(len(merged["picks"]), 1)
+        self.assertEqual(merged["picks"][0]["model_votes"], 2)
+        self.assertEqual(merged["picks"][0]["estimated_hit_probability"], 61.0)
+        self.assertIn("DraftKings", merged["picks"][0]["market_line"])
 
     def test_player_prop_quote_with_different_threshold_is_rejected_not_model_only(self):
         data = {"picks": [self._prop_pick("85.5")], "sneaky_props": []}
