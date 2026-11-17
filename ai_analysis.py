@@ -1267,6 +1267,33 @@ def _quote_matches_pick(pick: dict[str, Any], quote: dict[str, Any]) -> bool:
     return pick_match.group(1).casefold() == quote_side and same_point
 
 
+def _best_matching_quote(
+    pick: dict[str, Any],
+    quotes: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Select the best available price for the exact player, market, side and point."""
+    matches = [
+        quote for quote in quotes
+        if isinstance(quote, dict)
+        and _quote_matches_pick(pick, quote)
+        and quote.get("line") not in (None, "")
+        and quote.get("price") not in (None, "")
+        and quote.get("sportsbook") and quote.get("source_url")
+        and quote.get("retrieved_at")
+    ]
+    if not matches:
+        return None
+
+    def price_score(quote: dict[str, Any]) -> tuple[float, str]:
+        try:
+            price = float(str(quote.get("price") or "").replace("+", ""))
+        except (TypeError, ValueError):
+            price = float("-inf")
+        return price, str(quote.get("retrieved_at") or "")
+
+    return max(matches, key=price_score)
+
+
 def _separate_unverified_player_props(
     data: dict[str, Any],
     research: dict[str, Any],
@@ -1304,15 +1331,7 @@ def _separate_unverified_player_props(
 
 
     def match_quote(pick: dict[str, Any]) -> dict[str, Any] | None:
-        return next((
-            quote for quote in verified_quotes
-            if isinstance(quote, dict)
-            and _quote_matches_pick(pick, quote)
-            and quote.get("line") not in (None, "")
-            and quote.get("price") not in (None, "")
-            and quote.get("sportsbook") and quote.get("source_url")
-            and quote.get("retrieved_at")
-        ), None)
+        return _best_matching_quote(pick, verified_quotes)
 
     def mismatched_line_quote(pick: dict[str, Any]) -> dict[str, Any] | None:
         return next((
@@ -1762,13 +1781,7 @@ def _merge_provider_analyses(
     def quote_for_pick(pick: dict[str, Any]) -> dict[str, Any] | None:
         if pick.get("market_type") != "Player Prop":
             return None
-        return next((
-            quote for quote in verified_quotes
-            if isinstance(quote, dict) and _quote_matches_pick(pick, quote)
-            and quote.get("line") not in (None, "")
-            and quote.get("price") not in (None, "")
-            and quote.get("sportsbook") and quote.get("source_url")
-        ), None)
+        return _best_matching_quote(pick, verified_quotes)
 
     verified_counts = {
         name: sum(1 for pick in result.get("picks", []) if quote_for_pick(pick))
