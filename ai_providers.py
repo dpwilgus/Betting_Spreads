@@ -374,11 +374,13 @@ def generate_json(
     system_prompt: str, user_prompt: str,
     validator: Callable[[dict[str, Any]], None] | None = None,
     prompt_factory: Callable[[str], tuple[str, str]] | None = None,
+    provider_filter: str | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Try configured providers in order; retry transient failures with bounded waits, then fall back."""
+    """Try configured providers in order, optionally restricting the call to one provider."""
     configured = [
         item for item in ensure_configured()
         if item[0].name not in _SKIP_PROVIDER_FOR_RUN
+        and (provider_filter is None or item[0].name == provider_filter)
     ]
     if not configured:
         raise RuntimeError("No configured AI providers remain available for this run. Check API keys and quotas.")
@@ -482,3 +484,34 @@ def generate_json(
         "All configured AI providers failed. Check provider quotas, keys, and model availability. "
         "The independent NFL research step still runs before AI analysis.\n" + details
     )
+
+
+def generate_json_ensemble(
+    system_prompt: str,
+    user_prompt: str,
+    validator: Callable[[dict[str, Any]], None] | None = None,
+    prompt_factory: Callable[[str], tuple[str, str]] | None = None,
+) -> tuple[list[tuple[dict[str, Any], str]], list[str], list[str]]:
+    """Ask every configured provider for an independent analysis; retain healthy responses."""
+    configured = ensure_configured()
+    configured_names = [provider.name for provider, _ in configured]
+    results: list[tuple[dict[str, Any], str]] = []
+    failures: list[str] = []
+    for provider, _key in configured:
+        try:
+            result, provider_name = generate_json(
+                system_prompt,
+                user_prompt,
+                validator=validator,
+                prompt_factory=prompt_factory,
+                provider_filter=provider.name,
+            )
+            results.append((result, provider_name))
+        except Exception as exc:
+            failures.append(f"{provider.name}: {exc}")
+    if not results:
+        details = "\\n".join(failures)
+        raise RuntimeError(
+            "No configured AI provider returned a valid matchup analysis.\\n" + details
+        )
+    return results, failures, configured_names
