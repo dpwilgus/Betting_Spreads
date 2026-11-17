@@ -44,6 +44,14 @@ You can also configure environment variables before launching:
 - `NVIDIA_API_KEY` (optional; final free-provider fallback)
 - `OPENAI_API_KEY` (optional; paid)
 
+If you initially saved only one provider key, add or update credentials later without removing the existing keys:
+
+```bash
+python main.py --configure-ai
+```
+
+The credential editor can be reopened after initial setup. Leave fields blank to retain their previously saved keys. Normal analysis attempts every configured free provider; OpenAI remains excluded unless paid usage is explicitly enabled with `AI_ALLOW_PAID=1` and `OPENAI` is included in `AI_PROVIDER_ORDER`.
+
 The default free-provider order is Gemini → Groq → OpenRouter → NVIDIA. Providers without a saved key are skipped. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,NVIDIA,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI,NVIDIA`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, `NVIDIA_MODEL`, and `OPENAI_MODEL`.
 
 ### NVIDIA NIM (experimental fallback)
