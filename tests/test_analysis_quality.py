@@ -107,15 +107,19 @@ class AnalysisQualityTests(unittest.TestCase):
             "sneaky_props": [], "touchdown_scorers": [],
             "injury_impact": [], "data_gaps": [],
         }
+        best_quote = self._gibbs_quote("89.5")
+        best_quote["price"] = "-105"
+        best_quote["sportsbook"] = "FanDuel"
         merged, primary = _merge_provider_analyses(
             [(first, "gemini"), (second, "nvidia")],
-            [self._gibbs_quote("89.5")],
+            [self._gibbs_quote("89.5"), best_quote],
         )
         self.assertEqual(primary, "nvidia")
         self.assertEqual(len(merged["picks"]), 1)
         self.assertEqual(merged["picks"][0]["model_votes"], 2)
         self.assertEqual(merged["picks"][0]["estimated_hit_probability"], 61.0)
-        self.assertIn("DraftKings", merged["picks"][0]["market_line"])
+        self.assertIn("FanDuel", merged["picks"][0]["market_line"])
+        self.assertIn("-105", merged["picks"][0]["market_line"])
 
     def test_player_prop_quote_with_different_threshold_is_rejected_not_model_only(self):
         data = {"picks": [self._prop_pick("85.5")], "sneaky_props": []}
