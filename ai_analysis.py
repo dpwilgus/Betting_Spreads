@@ -836,6 +836,9 @@ def _validate_analysis(
     injury_response = data.get("injury_impact", [])
     underdog_response = data.get("underdog_analysis", [])
 
+    if not isinstance(data.get("data_gaps"), list):
+        data["data_gaps"] = []
+
     # TD scorers are supplemental candidates, not the core betting analysis.
     # A malformed probability/confidence on one scorer must not erase otherwise
     # valid player props, game bets, or injury analysis. Drop only the bad row
