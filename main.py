@@ -11,6 +11,7 @@ import sys
 import traceback
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -46,8 +47,17 @@ def application_directory() -> Path:
     return Path(__file__).resolve().parent
 
 
-def fetch_scoreboard() -> dict:
-    request = urllib.request.Request(ESPN_URL, headers=HEADERS)
+def scoreboard_url(week: int | None = None, season_year: int | None = None) -> str:
+    """Build the ESPN scoreboard URL for the current slate or a requested regular-season week."""
+    if week is None:
+        return ESPN_URL
+    year = season_year or datetime.now(ET).year
+    query = urlencode({"dates": year, "seasontype": 2, "week": week})
+    return f"{ESPN_URL}?{query}"
+
+
+def fetch_scoreboard(week: int | None = None) -> dict:
+    request = urllib.request.Request(scoreboard_url(week), headers=HEADERS)
     try:
         context = ssl.create_default_context(cafile=certifi.where())
         with urllib.request.urlopen(request, timeout=30, context=context) as response:
@@ -840,6 +850,22 @@ def filter_requested_matchup(games: list[dict], arguments: list[str]) -> list[di
     return matches
 
 
+def requested_week(arguments: list[str]) -> int | None:
+    """Read an optional --week N selector without confusing it with --matchup."""
+    if "--week" not in arguments:
+        return None
+    index = arguments.index("--week")
+    if index + 1 >= len(arguments) or arguments[index + 1].startswith("--"):
+        raise ValueError("Use --week 1 through 18 to select an NFL regular-season week.")
+    try:
+        week = int(arguments[index + 1])
+    except ValueError as exc:
+        raise ValueError("The --week value must be an integer from 1 through 18.") from exc
+    if not 1 <= week <= 18:
+        raise ValueError("The --week value must be an integer from 1 through 18.")
+    return week
+
+
 def main() -> int:
     reset_provider_run_state()
     reset_research_cache()
@@ -847,17 +873,18 @@ def main() -> int:
     try:
         reuse_cache = "--reuse-cache" in sys.argv[1:]
         refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
-        data = fetch_scoreboard()
+        selected_week = requested_week(sys.argv[1:])
+        data = fetch_scoreboard(week=selected_week)
         games, season, week = extract_games(data)
         games = filter_requested_matchup(games, sys.argv[1:])
         command_args = sys.argv[1:]
-        if not any(flag in command_args for flag in ('--matchup', '--reuse-cache', '--refresh-incomplete', '--no-gui')):
+        if not any(flag in command_args for flag in ('--matchup', '--week', '--reuse-cache', '--refresh-incomplete', '--no-gui')):
             games = select_games_gui(games)
         if not reuse_cache:
             ensure_configured()
             cli_mode = any(
                 flag in command_args
-                for flag in ("--matchup", "--refresh-incomplete", "--no-gui")
+                for flag in ("--matchup", "--week", "--refresh-incomplete", "--no-gui")
             )
             ensure_api_key_configured(use_gui=not cli_mode)
         analyses = []
