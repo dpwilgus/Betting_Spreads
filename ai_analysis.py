@@ -91,6 +91,7 @@ def _bounded_research_text(
     # the first team's logs consume the entire provider budget before the second
     # team's candidates are considered. Interleave log sections by team so both
     # sides retain comparable evidence under tight free-tier TPM limits.
+    priority_critical = [item for item in prioritized if item[0] < 0]
     priority_zero = [item for item in prioritized if item[0] == 0]
     player_logs = [item for item in prioritized if item[0] == 1]
     remaining = [item for item in prioritized if item[0] > 1]
@@ -107,7 +108,7 @@ def _bounded_research_text(
         for team_key in list(logs_by_team):
             if logs_by_team[team_key]:
                 balanced_player_logs.append(logs_by_team[team_key].pop(0))
-    prioritized = priority_zero + balanced_player_logs + remaining
+    prioritized = priority_critical + priority_zero + balanced_player_logs + remaining
 
     kept = []
     used = 0
