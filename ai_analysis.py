@@ -9,6 +9,7 @@ from typing import Any
 
 from ai_providers import generate_json_ensemble
 from live_research import collect_game_research
+from prop_averages import attach_per_game_averages
 
 MAX_RESEARCH_PROMPT_CHARS = 40000
 
@@ -2091,6 +2092,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         if (_normalize_name(str(item.get("player_or_team") or "")),
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
+    attach_per_game_averages(data, player_usage, _expected_market_key)
     data["player_research_summary"] = player_research_summary
     data["analysis_version"] = 14
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
