@@ -39,6 +39,17 @@ def valid_analysis():
 
 class ProviderFallbackTests(unittest.TestCase):
 
+    def test_provider_order_override_does_not_exclude_other_configured_models(self):
+        keys = {"groq": "groq-key", "gemini": "gemini-key", "nvidia": "nvidia-key"}
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "groq"}), patch(
+            "ai_providers._saved_key",
+            side_effect=lambda provider: keys.get(provider.name, ""),
+        ):
+            configured = [provider.name for provider, _key in __import__(
+                "ai_providers"
+            )._configured_providers()]
+        self.assertEqual(configured, ["groq", "gemini", "nvidia"])
+
     def test_ensemble_calls_every_configured_provider_after_success(self):
         gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
         nvidia = Provider("nvidia", "NVIDIA_API_KEY", "nvidia", "url", "model", "openai")
