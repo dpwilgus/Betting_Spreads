@@ -199,7 +199,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             f" ({odds_remaining} credits remaining)" if odds_remaining is not None else ""
         )
         sheet["A3"] = (
-            f"AI provider: {provider} | Research: {analysis.get('research_mode', 'Not recorded')} "
+            f"AI providers: {provider} | Configured: {', '.join(analysis.get('ai_providers_configured', [])) or 'unknown'} | Research: {analysis.get('research_mode', 'Not recorded')} "
             f"| {odds_label} | AI research prompt: {prompt_status} | Live sources are listed at the bottom of this sheet."
         )
         sheet["A3"].font = Font(italic=True, color="9C6500" if research_truncated is True else "526579")
@@ -725,7 +725,7 @@ def _cached_analysis_is_complete(cached: dict | None) -> bool:
         isinstance(cached.get("picks"), list)
         and isinstance(cached.get("touchdown_scorers"), list)
         and len(cached["touchdown_scorers"]) <= 3
-        and cached.get("analysis_version") == 13
+        and cached.get("analysis_version") == 14
         and isinstance(cached.get("underdog_analysis"), list)
         and isinstance(cached.get("player_research_summary"), list)
         and bool(cached.get("ai_provider"))
@@ -922,7 +922,7 @@ def main() -> int:
             f"AI analysis completed for {success_count} of {len(games)} games.\n"
             + ("Cached analysis reused; no AI API calls were made.\n" if reuse_cache else
                "Only missing/incomplete cache entries were refreshed; complete entries were reused.\n" if refresh_incomplete else
-               "Fresh AI research completed with provider fallback; results were saved to the local cache.\n")
+               "Fresh independent research and multi-provider analysis completed; results were saved to the local cache.\n")
             + f"\nSaved to:\n{output}"
         )
         provider_usage = get_provider_usage_stats()
@@ -939,7 +939,26 @@ def main() -> int:
                 )
             usage_lines.append(usage_line)
         usage_report = "\n".join(usage_lines) or "No AI provider requests were made."
-        message += f"\n\nProvider API usage:\n{usage_report}"
+        configured_names = sorted({
+            name for analysis in analyses
+            for name in analysis.get("ai_providers_configured", [])
+        })
+        used_names = sorted({
+            name for analysis in analyses
+            for name in analysis.get("ai_providers_used", [])
+        })
+        provider_failures = [
+            failure
+            for analysis in analyses
+            for failure in analysis.get("ai_provider_failures", [])
+        ]
+        provider_summary = (
+            f"Configured: {', '.join(configured_names) or 'none recorded'}\n"
+            f"Used: {', '.join(used_names) or 'none recorded'}"
+        )
+        if provider_failures:
+            provider_summary += "\nProvider failures: " + " | ".join(provider_failures)
+        message += f"\n\nAI provider ensemble:\n{provider_summary}\n\nProvider API usage:\n{usage_report}"
         if failures:
             message += f"\n\n{len(failures)} matchup analyses failed. See Betting_Spreads.log."
         log_path.write_text(message + ("\n\n" + "\n".join(failures) if failures else "") + "\n", encoding="utf-8")
