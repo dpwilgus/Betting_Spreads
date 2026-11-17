@@ -1906,7 +1906,7 @@ def _merge_provider_analyses(
 
 
 def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Collect current data without AI, then use the first healthy configured AI provider."""
+    """Collect independent evidence, query every configured AI provider, and reconcile their picks."""
     research = research or collect_game_research(game)
     base = Path(__file__).resolve().parent / "agents"
     # Restore the fuller gold-standard analysis method and independent quality review.
