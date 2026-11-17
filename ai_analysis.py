@@ -1194,7 +1194,12 @@ def _expected_market_key(description: str) -> str | None:
         return "player_1st_td"
     if any(term in text for term in ("anytime touchdown", "anytime td", "touchdown scorer")):
         return "player_anytime_td"
+    if re.search(r"(first quarter|1st quarter|q1).*passing yards|passing yards.*(first quarter|1st quarter|q1)", text):
+        return "player_pass_yds_q1"
     patterns = (
+        (r"passing, rushing and receiving yards|passing plus rushing plus receiving yards", "player_pass_rush_reception_yds"),
+        (r"passing plus rushing yards|pass(?:ing)? and rushing yards", "player_pass_rush_yds"),
+        (r"rushing plus receiving yards|rush(?:ing)? and receiving yards", "player_rush_reception_yds"),
         (r"passing touchdowns?", "player_pass_tds"),
         (r"passing yards?", "player_pass_yds"),
         (r"passing attempts?", "player_pass_attempts"),
