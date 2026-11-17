@@ -141,6 +141,37 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertNotIn("OPTIONAL HISTORICAL RECAP", bounded)
         self.assertFalse(truncated)
 
+    def test_unsupported_injury_direction_is_dropped_without_rejecting_valid_pick(self):
+        pick = {
+            "rank": 1, "market_type": "Game Prop",
+            "player_or_team": "Houston Texans",
+            "bet_description": "Texans moneyline", "market_line": "Not verified",
+            "play_threshold": "Texans to win", "estimated_hit_probability": 55,
+            "confidence": 5, "statistical_rationale": "Supported by matchup evidence",
+            "risk_factors": "Price must be checked", "data_quality": "Moderate",
+        }
+        analysis = {
+            "summary": "Test", "game_script": "Test",
+            "picks": [pick], "sneaky_props": [], "touchdown_scorers": [],
+            "injury_impact": [{
+                "impact_type": "Injury", "injured_player": "Defender A",
+                "team": "Indianapolis Colts", "availability": "Out",
+                "affected_player": "Receiver B", "affected_team": "Houston Texans",
+                "impact_direction": "Boosted", "statistical_effect": "More targets",
+                "prop_market": "Receiving yards", "evidence": "Injury report",
+                "confidence": 7, "conditions": "If role expands",
+            }],
+            "underdog_analysis": [], "data_gaps": [],
+        }
+        _validate_analysis(
+            analysis,
+            team_names=("Indianapolis Colts", "Houston Texans"),
+        )
+        self.assertEqual(len(analysis["picks"]), 1)
+        self.assertEqual(analysis["injury_impact"], [])
+        self.assertTrue(any("unsupported impact direction 'Boosted'" in gap for gap in analysis["data_gaps"]))
+
+
     def test_invalid_td_scorer_is_dropped_without_rejecting_valid_pick(self):
         pick = {
             "rank": 1, "market_type": "Game Prop",
