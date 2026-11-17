@@ -839,6 +839,34 @@ def _validate_analysis(
     if not isinstance(data.get("data_gaps"), list):
         data["data_gaps"] = []
 
+    # Injury impacts are supplemental context. A provider occasionally emits
+    # an unsupported direction label; discard only that row rather than
+    # rejecting valid picks and the rest of the matchup analysis.
+    if isinstance(injury_response, list):
+        valid_injury_rows = []
+        for impact in injury_response:
+            if not isinstance(impact, dict):
+                data["data_gaps"].append(
+                    "Removed an injury/news impact because the response row was not an object."
+                )
+                continue
+            direction = impact.get("impact_direction")
+            if direction not in ("Positive", "Negative", "Mixed"):
+                data["data_gaps"].append(
+                    f"Removed injury/news impact for {impact.get('injured_player') or 'an unspecified player'}: "
+                    f"unsupported impact direction {direction!r}; expected Positive, Negative, or Mixed."
+                )
+                continue
+            valid_injury_rows.append(impact)
+        data["injury_impact"] = valid_injury_rows
+        injury_response = valid_injury_rows
+    else:
+        data["injury_impact"] = []
+        data["data_gaps"].append(
+            "Removed injury/news impacts because the response section was not a list."
+        )
+        injury_response = []
+
     # TD scorers are supplemental candidates, not the core betting analysis.
     # A malformed probability/confidence on one scorer must not erase otherwise
     # valid player props, game bets, or injury analysis. Drop only the bad row
