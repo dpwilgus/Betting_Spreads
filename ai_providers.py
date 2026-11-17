@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import ssl
@@ -16,7 +17,7 @@ import certifi
 import keyring
 
 SERVICE_NAME = "Betting Spreads"
-PROVIDER_ORDER = ("gemini", "groq", "openrouter")  # NVIDIA stays opt-in for local development.
+PROVIDER_ORDER = ("gemini", "groq", "openrouter", "nvidia")  # Every configured provider participates in the ensemble.
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
 _CONFIGURED_PROVIDERS_CACHE: list[tuple["Provider", str]] | None = None
 _PROVIDER_USAGE: dict[str, dict[str, int]] = {}
@@ -28,6 +29,15 @@ def reset_provider_run_state() -> None:
     _SKIP_PROVIDER_FOR_RUN.clear()
     _CONFIGURED_PROVIDERS_CACHE = None
     _PROVIDER_USAGE.clear()
+
+
+class IncompleteResponseError(RuntimeError):
+    """A provider explicitly reported that its generated response was truncated."""
+
+
+def _estimate_prompt_tokens(system_prompt: str, user_prompt: str) -> int:
+    """Conservative character-based estimate used for provider TPM preflight checks."""
+    return math.ceil((len(system_prompt or "") + len(user_prompt or "")) / 3.5)
 
 
 @dataclass(frozen=True)
@@ -56,7 +66,7 @@ PROVIDERS = {
         "https://openrouter.ai/api/v1/chat/completions",
         "openrouter/free", "openai",
     ),
-    # Experimental NVIDIA-hosted NIM endpoint. Never included in the default order.
+    # NVIDIA-hosted NIM endpoint; included whenever a key is configured.
     "nvidia": Provider(
         "nvidia", "NVIDIA_API_KEY", "nvidia_api_key",
         "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -93,8 +103,8 @@ def _configure_keys() -> None:
         from tkinter import messagebox
     except Exception as exc:
         raise RuntimeError(
-            "No AI API keys are configured for the selected providers. Set the relevant "
-            "provider key (for example NVIDIA_API_KEY) and AI_PROVIDER_ORDER, then restart."
+            "No AI API keys are configured for the selected providers. Set a key for one of the selected providers (for example NVIDIA_API_KEY), "
+            "and AI_PROVIDER_ORDER if you want to override the default order, then restart."
         ) from exc
 
     root = tk.Tk()
@@ -105,7 +115,7 @@ def _configure_keys() -> None:
     tk.Label(
         root,
         text=("Add one or more API keys. Gemini, Groq and OpenRouter offer free usage "
-              "with limits. NVIDIA NIM is experimental and for development/testing only. "
+              "with limits. NVIDIA NIM is an additional fallback; its limits may vary. "
               "OpenAI is optional and usage is paid. Keys are stored in your computer's "
               "secure credential store."),
         wraplength=580, justify="left",
@@ -155,7 +165,7 @@ def _configure_keys() -> None:
     root.mainloop()
     if not result["saved"]:
         raise RuntimeError(
-            "No AI API keys were saved. Add a Gemini, Groq or OpenRouter key to continue."
+            "No AI API keys were saved. Add a Gemini, Groq, OpenRouter or NVIDIA key to continue."
         )
 
 
@@ -179,8 +189,14 @@ def ensure_configured() -> list[tuple[Provider, str]]:
 
 def _configured_providers() -> list[tuple[Provider, str]]:
     configured = []
-    order = os.environ.get("AI_PROVIDER_ORDER", ",".join(PROVIDER_ORDER))
-    names = [part.strip().lower() for part in order.split(",") if part.strip()]
+    # AI_PROVIDER_ORDER changes preference only; it must not silently disable
+    # other configured free providers from the multi-model analysis.
+    preferred = [
+        part.strip().lower()
+        for part in os.environ.get("AI_PROVIDER_ORDER", "").split(",")
+        if part.strip()
+    ]
+    names = list(dict.fromkeys([*preferred, *PROVIDER_ORDER]))
     for name in names:
         if name == "openai" and os.environ.get("AI_ALLOW_PAID", "").strip().lower() not in {"1", "true", "yes"}:
             continue
@@ -288,12 +304,27 @@ def _call_provider(
         if provider.name == "nvidia":
             # NVIDIA's hosted Nemotron endpoint uses max_tokens. Its API does
             # not guarantee JSON mode, so rely on the prompt and our validator.
-            payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "2600"))
+            payload["max_tokens"] = int(os.environ.get("NVIDIA_MAX_TOKENS", "5000"))
+            # Nemotron 3 Ultra defaults to high-effort internal reasoning. Those
+            # tokens consume the same max_tokens budget as the JSON answer. Keep
+            # reasoning off by default for this structured-output workload; users
+            # can opt into medium/high effort when experimenting.
+            if "nemotron-3-ultra" in model.lower():
+                reasoning_effort = os.environ.get(
+                    "NVIDIA_REASONING_EFFORT", "none"
+                ).strip().lower()
+                if reasoning_effort not in {"none", "medium", "high"}:
+                    raise RuntimeError(
+                        "NVIDIA_REASONING_EFFORT must be none, medium, or high."
+                    )
+                payload["reasoning_effort"] = reasoning_effort
         else:
-            payload["max_completion_tokens"] = int(
-                os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")
-                if provider.name == "groq" else "1400"
-            )
+            if provider.name == "groq":
+                payload["max_completion_tokens"] = max(
+                    256, min(int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")), 1600)
+                )
+            else:
+                payload["max_completion_tokens"] = 1400
             payload["response_format"] = {"type": "json_object"}
         if provider.name == "groq":
             if model.startswith("openai/gpt-oss"):
@@ -316,26 +347,70 @@ def _call_provider(
             _record_provider_request(provider, system_prompt, user_prompt)
             result = _request_json(provider.endpoint, payload, headers)
     _record_provider_response(provider, result)
+
+    # Detect provider-reported truncation before attempting JSON parsing. Retrying
+    # the identical oversized prompt only burns another full output allowance.
+    if provider.style == "gemini":
+        candidates = result.get("candidates") or []
+        finish_reason = candidates[0].get("finishReason", "") if candidates else ""
+        truncated = str(finish_reason).upper() in {"MAX_TOKENS", "LENGTH"}
+    else:
+        choices = result.get("choices") or []
+        finish_reason = choices[0].get("finish_reason", "") if choices else ""
+        truncated = str(finish_reason).lower() in {"length", "max_tokens"}
+    limit = payload.get("max_tokens", payload.get("max_completion_tokens"))
+    if provider.name == "nvidia" and not finish_reason and isinstance(limit, int):
+        # Some compatible gateways omit finish_reason. If usage exactly reaches
+        # max_tokens, treat the response as truncated rather than retrying blindly.
+        metadata = result.get("usage") or {}
+        completion_tokens = metadata.get("completion_tokens")
+        if isinstance(completion_tokens, (int, float)) and completion_tokens >= limit:
+            truncated = True
+            finish_reason = "token_limit_reached"
+    if truncated:
+        raise IncompleteResponseError(
+            f"{provider.name} truncated its response (finish_reason={finish_reason}; "
+            f"output limit={limit}). Shorten the requested analysis or raise the "
+            "provider output limit if the account permits it."
+        )
     return json.loads(_response_text(provider, result))
 
 
 def generate_json(
     system_prompt: str, user_prompt: str,
     validator: Callable[[dict[str, Any]], None] | None = None,
+    prompt_factory: Callable[[str], tuple[str, str]] | None = None,
+    provider_filter: str | None = None,
 ) -> tuple[dict[str, Any], str]:
-    """Try configured providers in order; retry transient failures with bounded waits, then fall back."""
+    """Try configured providers in order, optionally restricting the call to one provider."""
     configured = [
         item for item in ensure_configured()
         if item[0].name not in _SKIP_PROVIDER_FOR_RUN
+        and (provider_filter is None or item[0].name == provider_filter)
     ]
     if not configured:
         raise RuntimeError("No configured AI providers remain available for this run. Check API keys and quotas.")
 
     failures = []
     for provider, key in configured:
+        provider_system, provider_user = (
+            prompt_factory(provider.name) if prompt_factory else (system_prompt, user_prompt)
+        )
+        if provider.name == "groq":
+            output_tokens = max(
+                256, min(int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")), 1600)
+            )
+            estimated_total = _estimate_prompt_tokens(provider_system, provider_user) + output_tokens
+            if estimated_total > 6500:
+                failures.append(
+                    "groq: request skipped by local TPM preflight "
+                    f"(estimated prompt + output {estimated_total} tokens; 6,500-token safety budget under the 8,000 TPM limit)."
+                )
+                continue
+        request_user_prompt = provider_user
         for attempt in range(3):
             try:
-                result = _call_provider(provider, key, system_prompt, user_prompt)
+                result = _call_provider(provider, key, provider_system, request_user_prompt)
                 if not isinstance(result, dict):
                     raise RuntimeError("The AI response was not a JSON object.")
                 if validator is not None:
@@ -356,6 +431,13 @@ def generate_json(
                     )
                 except ValueError:
                     delay = 1.0
+                # Groq's TPM response reports the exact refill time, but retrying
+                # at that exact boundary can race the rolling-window counter.
+                # Groq's reported refill estimate can still race its rolling
+                # 60-second TPM window. Wait an additional 10 seconds for explicit
+                # TPM errors; leave all other provider retry behavior unchanged.
+                if exc.code == 429 and "tokens per minute" in body.lower() and wait_match:
+                    delay += 10.0
                 quota_exhausted = exc.code == 429 and any(
                     marker in body.lower()
                     for marker in ("quota", "insufficient_quota", "resource_exhausted",
@@ -377,10 +459,23 @@ def generate_json(
                     continue
                 failures.append(f"{provider.name}: connection error: {exc}")
                 break
+            except IncompleteResponseError as exc:
+                # The provider confirmed that the output hit its cap. Repeating the
+                # same request cannot fix truncation and wastes tokens; try fallback.
+                failures.append(f"{provider.name}: {exc}")
+                break
             except (ValueError, KeyError, RuntimeError) as exc:
-                # Invalid model output is not evidence that the provider is offline.
-                # Retry once for this matchup, then allow the next matchup to try again.
+                # Give the same provider actionable validation feedback instead of
+                # spending a retry on an identical prompt. This is especially useful
+                # for structured fields such as the required underdog assessment.
                 if attempt == 0:
+                    request_user_prompt = (
+                        provider_user
+                        + "\n\nVALIDATION CORRECTION REQUIRED: Your previous JSON response "
+                        + "was rejected: " + str(exc)[:700] + ". Return the complete corrected "
+                        + "JSON object. Preserve valid analysis, fix the stated issue, and do "
+                        + "not omit required fields. Do not add commentary or Markdown."
+                    )
                     time.sleep(1)
                     continue
                 failures.append(f"{provider.name}: {exc}")
@@ -395,3 +490,34 @@ def generate_json(
         "All configured AI providers failed. Check provider quotas, keys, and model availability. "
         "The independent NFL research step still runs before AI analysis.\n" + details
     )
+
+
+def generate_json_ensemble(
+    system_prompt: str,
+    user_prompt: str,
+    validator: Callable[[dict[str, Any]], None] | None = None,
+    prompt_factory: Callable[[str], tuple[str, str]] | None = None,
+) -> tuple[list[tuple[dict[str, Any], str]], list[str], list[str]]:
+    """Ask every configured provider for an independent analysis; retain healthy responses."""
+    configured = ensure_configured()
+    configured_names = [provider.name for provider, _ in configured]
+    results: list[tuple[dict[str, Any], str]] = []
+    failures: list[str] = []
+    for provider, _key in configured:
+        try:
+            result, provider_name = generate_json(
+                system_prompt,
+                user_prompt,
+                validator=validator,
+                prompt_factory=prompt_factory,
+                provider_filter=provider.name,
+            )
+            results.append((result, provider_name))
+        except Exception as exc:
+            failures.append(f"{provider.name}: {exc}")
+    if not results:
+        details = "\\n".join(failures)
+        raise RuntimeError(
+            "No configured AI provider returned a valid matchup analysis.\\n" + details
+        )
+    return results, failures, configured_names

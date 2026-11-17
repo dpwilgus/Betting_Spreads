@@ -8,12 +8,41 @@ from live_research import (
     _compact_team_stats,
     _compact_tree,
     _core_team_injuries,
+    _extract_depth_chart_ids,
+    _select_research_players,
     collect_game_research,
     reset_research_cache,
 )
 
 
 class LiveResearchTests(unittest.TestCase):
+
+    def test_depth_chart_string_positions_preserve_true_qb1_order(self):
+        roster = [
+            {"id": "mills", "name": "Davis Mills", "position": "QB"},
+            {"id": "stroud", "name": "C.J. Stroud", "position": "QB"},
+            {"id": "marks", "name": "Woody Marks", "position": "RB"},
+        ]
+        depth = {"depthCharts": [{"positions": {
+            "quarterback": {
+                "position": "Quarterback",
+                "athletes": [
+                    {"rank": 1, "athlete": {"id": "stroud", "displayName": "C.J. Stroud"}},
+                    {"rank": 2, "athlete": {"id": "mills", "displayName": "Davis Mills"}},
+                ],
+            },
+            "runningBack": {
+                "position": "RB",
+                "athletes": [{"rank": 1, "athlete": {"id": "marks", "displayName": "Woody Marks"}}],
+            },
+        }}]}
+
+        ids = _extract_depth_chart_ids(depth)
+        self.assertEqual(ids["QB"], ["stroud", "mills"])
+        selected = _select_research_players(roster, depth)
+        quarterbacks = [player["name"] for player in selected if player["position"] == "QB"]
+        self.assertEqual(quarterbacks, ["C.J. Stroud"])
+
 
     def test_compact_tree_removes_unneeded_fields_and_limits_lists(self):
         data = {
@@ -103,7 +132,7 @@ class LiveResearchTests(unittest.TestCase):
                             "name": "passing",
                             "stats": [
                                 {"name": "completionPct", "displayValue": "65%"},
-                                {"name": "passingYardsPerGame", "displayValue": "240"},
+                                {"name": "passingYardsPerGame", "displayValue": "240", "rankDisplayValue": "32nd"},
                                 {"name": "unneededField", "displayValue": "999"},
                             ],
                         }
@@ -116,6 +145,7 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(
             len(result["categories"]["passing"]), 2
         )
+        self.assertEqual(result["categories"]["passing"][1]["rank"], "32nd")
         self.assertNotIn(
             "unneededField",
             [item["name"] for item in result["categories"]["passing"]],
@@ -155,7 +185,7 @@ class LiveResearchTests(unittest.TestCase):
 
         _core_team_injuries.cache_clear()
 
-    def test_current_injuries_precede_team_stats_in_research_prompt(self):
+    def test_player_research_and_injuries_precede_team_statistics(self):
         summary = {
             "header": {
                 "id": "event-1",
@@ -194,14 +224,9 @@ class LiveResearchTests(unittest.TestCase):
             })
 
         research = result["research_text"]
-        self.assertLess(
-            research.index("ESPN CURRENT PLAYER INJURIES"),
-            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
-        )
-        self.assertLess(
-            research.index("ESPN GAME SUMMARY INJURY DATA"),
-            research.index("ESPN CURRENT-SEASON TEAM STATISTICS"),
-        )
+        self.assertIn("ESPN CURRENT PLAYER INJURIES", research)
+        self.assertIn("ESPN CURRENT-SEASON TEAM STATISTICS", research)
+        self.assertIn("ESPN GAME SUMMARY INJURY DATA", research)
         self.assertIn("MARKET DATA RULE", research)
 
     def test_team_statistics_are_cached_across_matchups(self):
@@ -368,18 +393,42 @@ class LiveResearchTests(unittest.TestCase):
         from live_research import _select_research_players
 
         roster = [
-            {"id": "1", "name": "QB", "position": "QB"},
+            {"id": "1", "name": "Quarterback One", "position": "QB"},
             {"id": "2", "name": "RB1", "position": "RB"},
             {"id": "3", "name": "RB2", "position": "RB"},
-            {"id": "4", "name": "WR", "position": "WR"},
-            {"id": "5", "name": "TE", "position": "TE"},
+            {"id": "4", "name": "Wideout One", "position": "WR"},
+            {"id": "5", "name": "Tight End One", "position": "TE"},
             {"id": "6", "name": "K", "position": "K"},
         ]
         self.assertEqual(
             [player["name"] for player in _select_research_players(roster)],
-            ["QB", "RB1", "WR", "TE"],
+            ["Quarterback One", "RB1", "RB2", "Wideout One", "Tight End One"],
         )
 
+
+    def test_player_usage_research_excludes_backup_quarterbacks(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id": "qb1", "name": "Starting Quarterback", "position": "QB"},
+            {"id": "qb2", "name": "Backup Quarterback", "position": "QB"},
+            {"id": "rb1", "name": "Starting Running Back", "position": "RB"},
+        ]
+        chart = {"depthCharts": [{
+            "positions": {
+                "QB": {"position": {"abbreviation": "QB"}, "athletes": [
+                    {"rank": 1, "athlete": {"id": "qb1"}},
+                    {"rank": 2, "athlete": {"id": "qb2"}},
+                ]},
+                "RB": {"position": {"abbreviation": "RB"}, "athletes": [
+                    {"rank": 1, "athlete": {"id": "rb1"}},
+                ]},
+            }
+        }]}
+        selected = _select_research_players(roster, chart)
+        names = [player["name"] for player in selected]
+        self.assertIn("Starting Quarterback", names)
+        self.assertNotIn("Backup Quarterback", names)
 
     def test_collect_research_adds_player_game_logs_and_source_links(self):
         summary = {
@@ -427,6 +476,8 @@ class LiveResearchTests(unittest.TestCase):
             })
 
         self.assertIn("ESPN CURRENT-SEASON PLAYER GAME LOGS", result["research_text"])
+        self.assertIn("usage_and_recent_stats", result["research_text"])
+        self.assertNotIn("season_game_log", result["research_text"])
         self.assertIn("Away QB", result["research_text"])
         self.assertIn("Home TE", result["research_text"])
         player_sources = [
@@ -437,9 +488,7 @@ class LiveResearchTests(unittest.TestCase):
         self.assertTrue(all("/gamelog?season=2026" in item["url"] for item in player_sources))
 
 
-    def test_repeated_player_log_errors_stop_extra_requests_for_the_slate(self):
-        from live_research import PLAYER_GAMELOG_FAILURE_LIMIT
-
+    def test_player_log_errors_are_isolated_and_remaining_players_are_attempted(self):
         reset_research_cache()
         summary = {
             "header": {
@@ -478,9 +527,75 @@ class LiveResearchTests(unittest.TestCase):
                 "home_team_id": "2",
             })
 
-        self.assertEqual(get_gamelog.call_count, PLAYER_GAMELOG_FAILURE_LIMIT)
-        self.assertIn("skipped after repeated ESPN player-log errors", result["research_text"])
+        self.assertEqual(get_gamelog.call_count, 8)
+        self.assertNotIn("skipped after repeated ESPN player-log errors", result["research_text"])
+        self.assertEqual(result["research_text"].count('"game_log_unavailable"'), 8)
         reset_research_cache()
+
+    def test_newer_confirmed_starting_qb_news_overrides_older_injury_status(self):
+        summary = {
+            "header": {
+                "competitions": [{
+                    "competitors": [
+                        {"team": {"id": "1", "displayName": "Away"}},
+                        {"team": {"id": "2", "displayName": "Home"}},
+                    ]
+                }]
+            }
+        }
+        roster = (
+            {"id": "10", "name": "Veteran QB", "position": "QB"},
+        )
+        with patch("live_research._get_json", return_value=summary), patch(
+            "live_research._team_roster_players", return_value=roster
+        ), patch(
+            "live_research._team_depth_chart", return_value={}
+        ), patch(
+            "live_research._player_gamelog",
+            return_value={"games_available": 1, "season_totals": {"Regular Season Stats": {}}},
+        ), patch(
+            "live_research._core_team_injuries",
+            side_effect=[
+                [{"player": "Veteran QB", "position": "QB", "status": "Out",
+                  "report_date": "2026-11-12", "comment": "Older status"}],
+                [],
+            ],
+        ), patch(
+            "live_research._team_news",
+            side_effect=[
+                {"articles": [{
+                    "headline": "Veteran QB to start Sunday",
+                    "description": "Coach confirms the veteran will start.",
+                    "published": "2026-11-13T16:00:00Z",
+                    "url": "https://example.test/qb-news",
+                }]},
+                {"articles": []},
+            ],
+        ), patch(
+            "live_research._team_statistics", return_value={"team": "Team"}
+        ):
+            result = collect_game_research({
+                "event_id": "event-1", "Away Team": "Away", "Home Team": "Home",
+                "away_team_id": "1", "home_team_id": "2",
+            })
+
+        self.assertFalse(any(
+            item.get("player") == "Veteran QB" for item in result["injury_statuses"]
+        ))
+        self.assertIn("CONFIRMED STARTING QB ROLE", result["research_text"])
+        self.assertIn("Veteran QB to start Sunday", result["research_text"])
+        self.assertNotIn("Older status", result["research_text"])
+        self.assertIn("https://example.test/qb-news", [source["url"] for source in result["sources"]])
+
+    def test_transient_player_log_error_is_retried_once(self):
+        from live_research import _fetch_player_gamelog
+
+        with patch("live_research._player_gamelog", side_effect=[
+            TimeoutError("temporary timeout"), {"games_available": 1}
+        ]) as fetch, patch("live_research.time.sleep"):
+            result = _fetch_player_gamelog("123", 2026)
+        self.assertEqual(result, {"games_available": 1})
+        self.assertEqual(fetch.call_count, 2)
 
 
     def test_depth_chart_extractor_orders_players_by_position_rank(self):
@@ -578,7 +693,7 @@ class LiveResearchTests(unittest.TestCase):
         )
         self.assertEqual(
             [player["name"] for player in selected],
-            ["QB1", "RB1", "RB2", "WR1", "WR2", "TE1"],
+            ["QB1", "RB1", "RB2", "RB3", "WR1", "WR2", "WR3", "TE1"],
         )
 
     def test_player_gamelog_compaction_keeps_role_relevant_usage_only(self):
@@ -605,7 +720,7 @@ class LiveResearchTests(unittest.TestCase):
         self.assertEqual(compact["usage_status"], "established_volume")
         self.assertEqual(compact["season"]["receivingTargets"], "42")
         self.assertNotIn("passingAttempts", compact["season"])
-        self.assertNotIn("longReception", compact["recent"][0]["stats"])
+        self.assertEqual(compact["recent"][0]["stats"]["longReception"], "30")
         self.assertEqual(len(compact["recent"]), 3)
 
 
@@ -653,7 +768,501 @@ class LiveResearchTests(unittest.TestCase):
 
         self.assertIn("Core Injury Player", result["research_text"])
         self.assertIn("Summary Injury Player", result["research_text"])
+        self.assertEqual(result["injury_statuses"][0]["player"], "Core Injury Player")
+        self.assertEqual(result["injury_statuses"][0]["status"], "Out")
 
+
+    def test_core_injuries_searches_beyond_first_twelve_records(self):
+        _core_team_injuries.cache_clear()
+        items = [{"$ref": f"active-record-{index}"} for index in range(12)]
+        items.append({"$ref":"jacobs-record"})
+        responses = [{"items":items}]
+        responses.extend({"status":"Active"} for _ in range(12))
+        responses.extend([
+            {
+                "status":"Out","date":"2026-11-13","shortComment":"Finger surgery",
+                "athlete":{"$ref":"jacobs-athlete"},
+            },
+            {"displayName":"Josh Jacobs","position":{"abbreviation":"RB"}},
+        ])
+        with patch("live_research._get_json", side_effect=responses) as get_json:
+            result = _core_team_injuries("123")
+        self.assertEqual([item["player"] for item in result], ["Josh Jacobs"])
+        self.assertEqual(result[0]["status"], "Out")
+        self.assertEqual(get_json.call_count, 15)
+        _core_team_injuries.cache_clear()
+
+
+    def test_select_research_players_fills_secondary_roles_from_roster(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"1","name":"Quarterback One","position":"QB"},
+            {"id":"2","name":"RB One","position":"RB"},
+            {"id":"3","name":"RB Two","position":"RB"},
+            {"id":"4","name":"WR One","position":"WR"},
+            {"id":"5","name":"WR Two","position":"WR"},
+            {"id":"6","name":"Tight End One","position":"TE"},
+        ]
+        depth = {
+            "depthCharts":[{
+                "positions":{
+                    "QB":{"position":{"abbreviation":"QB"},"athletes":[{"rank":1,"athlete":{"id":"1"}}]},
+                    "RB":{"position":{"abbreviation":"RB"},"athletes":[{"rank":1,"athlete":{"id":"2"}}]},
+                    "WR":{"position":{"abbreviation":"WR"},"athletes":[{"rank":1,"athlete":{"id":"4"}}]},
+                    "TE":{"position":{"abbreviation":"TE"},"athletes":[{"rank":1,"athlete":{"id":"6"}}]},
+                }
+            }]
+        }
+        selected = _select_research_players(roster, depth)
+        self.assertEqual(
+            [player["name"] for player in selected],
+            ["Quarterback One","RB One","RB Two","WR One","WR Two","Tight End One"],
+        )
+
+
+    def test_placeholder_depth_chart_label_does_not_block_roster_receiver(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"qb","name":"Quarterback One","position":"QB"},
+            {"id":"rb","name":"Running Back One","position":"RB"},
+            {"id":"wr1","name":"Jordan Addison","position":"WR"},
+            {"id":"wr2","name":"Justin Jefferson","position":"WR"},
+            {"id":"te","name":"Tight End One","position":"TE"},
+        ]
+        chart = {"depthCharts":[{
+            "positions":{
+                "QB":{"position":{"abbreviation":"QB"},"athletes":[{"rank":1,"athlete":{"id":"qb"}}]},
+                "RB":{"position":{"abbreviation":"RB"},"athletes":[{"rank":1,"athlete":{"id":"rb"}}]},
+                "WR":{"position":{"abbreviation":"WR"},"athletes":[
+                    {"rank":1,"athlete":{"id":"wr1"}},
+                    {"rank":2,"athlete":{"id":"placeholder"}},
+                ]},
+                "TE":{"position":{"abbreviation":"TE"},"athletes":[{"rank":1,"athlete":{"id":"te"}}]},
+            }
+        }]}
+        roster_with_placeholder = roster + [
+            {"id":"placeholder","name":"Wide Receiver","position":"WR"}
+        ]
+        selected = _select_research_players(roster_with_placeholder, chart)
+        self.assertIn("Justin Jefferson", [item["name"] for item in selected])
+        self.assertNotIn("Wide Receiver", [item["name"] for item in selected])
+
+    def test_compact_injury_prompt_limits_long_report_payload(self):
+        from live_research import _compact_injury_prompt_reports
+
+        reports = [
+            {"player":f"Player {i}","position":"LB","status":"Out",
+             "report_date":f"2026-11-{i:02d}","comment":"x"*200,
+             "injury_details":{"type":"Knee"}}
+            for i in range(1,12)
+        ]
+        compact = _compact_injury_prompt_reports(reports, limit=8)
+        self.assertEqual(len(compact), 8)
+        self.assertLess(len(str(compact)), len(str(reports)))
+        self.assertEqual(compact[0]["player"], "Player 11")
+
+
+    def test_prompt_compaction_preserves_core_evidence_and_venue(self):
+        from ai_analysis import _bounded_research_text
+
+        summary = {
+            "header": {"id": "event-1"},
+            "game_info": {"venue": {"fullName": "Munich Stadium"}},
+            "pickcenter_markets": [{"provider": "Book", "spread": {"home": {"close": {"line": -2.5}}}}],
+            "recent_games": [{"summary": "x" * 5000}],
+        }
+        research = "\n\n".join([
+            "INDEPENDENT LIVE NFL RESEARCH",
+            "ESPN MATCHUP, PLAYER, INJURY, MARKET AND RECENT-GAME DATA: "
+            + json.dumps(summary),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Away: " + ("A" * 350),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Home: " + ("B" * 350),
+            "ESPN CURRENT PLAYER INJURIES — Away: " + ("I" * 250),
+            "ESPN RECENT TEAM NEWS — Home: " + ("N" * 250),
+            "ESPN CURRENT-SEASON TEAM STATISTICS — Away: " + ("T" * 250),
+        ])
+        with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 2500):
+            prompt, truncated = _bounded_research_text(research)
+
+        self.assertFalse(truncated)
+        self.assertIn("PLAYER GAME LOGS — Away", prompt)
+        self.assertIn("PLAYER GAME LOGS — Home", prompt)
+        self.assertIn("CURRENT PLAYER INJURIES", prompt)
+        self.assertIn("RECENT TEAM NEWS", prompt)
+        self.assertIn("Munich Stadium", prompt)
+        self.assertIn("pickcenter_markets", prompt)
+        self.assertNotIn("recent_games", prompt)
+
+    def test_prompt_trimming_keeps_both_teams_player_logs_before_injuries(self):
+        from ai_analysis import _bounded_research_text
+
+        research = "\n\n".join([
+            "INDEPENDENT LIVE NFL RESEARCH",
+            "CURRENT ESPN ACTIVE TEAM ROSTER — Minnesota Vikings: " + ("R"*2500),
+            "ESPN MATCHUP, PLAYER, INJURY, MARKET AND RECENT-GAME DATA: " + ("S"*2000),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Minnesota Vikings: " + ("M"*5000),
+            "ESPN CURRENT-SEASON PLAYER GAME LOGS — Green Bay Packers: " + ("G"*5000),
+            "ESPN CURRENT-SEASON TEAM STATISTICS — Minnesota Vikings: " + ("T"*1000),
+            "ESPN CURRENT PLAYER INJURIES — Minnesota Vikings: " + ("I"*4000),
+        ])
+        with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 15000):
+            prompt, truncated = _bounded_research_text(research)
+        self.assertTrue(truncated)
+        self.assertIn("PLAYER GAME LOGS — Minnesota Vikings", prompt)
+        self.assertIn("PLAYER GAME LOGS — Green Bay Packers", prompt)
+        self.assertNotIn("CURRENT ESPN ACTIVE TEAM ROSTER", prompt)
+
+
+    def test_injury_replacement_candidates_are_added_beyond_position_caps(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"qb1","name":"Starter QB","position":"QB"},
+            {"id":"qb2","name":"Backup QB","position":"QB"},
+            {"id":"rb1","name":"RB One","position":"RB"},
+            {"id":"rb2","name":"RB Two","position":"RB"},
+            {"id":"rb3","name":"RB Three","position":"RB"},
+            {"id":"wr1","name":"WR One","position":"WR"},
+            {"id":"wr2","name":"WR Two","position":"WR"},
+            {"id":"wr3","name":"WR Three","position":"WR"},
+            {"id":"wr4","name":"WR Four","position":"WR"},
+            {"id":"wr5","name":"WR Five","position":"WR"},
+            {"id":"wr6","name":"WR Six","position":"WR"},
+            {"id":"te1","name":"T.J. Hockenson","position":"TE"},
+            {"id":"te2","name":"TE Two","position":"TE"},
+            {"id":"te3","name":"Gavin Bartholomew","position":"TE"},
+        ]
+        depth = {"depthCharts":[{"positions":{
+            position: {
+                "position":{"abbreviation":position},
+                "athletes":[{"rank":rank,"athlete":{"id":player["id"]}}
+                            for rank, player in enumerate(
+                                [p for p in roster if p["position"] == position], 1)],
+            }
+            for position in ("QB","RB","WR","TE")
+        }}]}
+        injuries = [{
+            "player":"T.J. Hockenson","position":"TE","team":"Minnesota Vikings",
+            "status":"Out",
+        }]
+        selected = _select_research_players(
+            roster, depth, injuries, "Minnesota Vikings"
+        )
+        names = [item["name"] for item in selected]
+        self.assertIn("Gavin Bartholomew", names)
+        self.assertIn("WR Five", names)
+        self.assertNotIn("WR Six", names)
+        # QB1 only is researched; injury beneficiaries are added beyond
+        # position caps without restoring routine backup-QB research.
+        self.assertNotIn("Backup QB", names)
+        self.assertEqual(len(names), 11)
+
+    def test_injury_replacements_exclude_unavailable_players_and_stop_deep_chains(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"qb1","name":"QB One","position":"QB"},
+            {"id":"te1","name":"TE Starter","position":"TE"},
+            {"id":"te2","name":"TE Backup","position":"TE"},
+            {"id":"te3","name":"TE Third","position":"TE"},
+            {"id":"te4","name":"TE Fourth","position":"TE"},
+            {"id":"te5","name":"TE Fifth","position":"TE"},
+        ]
+        chart = {"depthCharts":[{"positions":{
+            "quarterback":{
+                "position":{"abbreviation":"QB"},
+                "athletes":[{"rank":1,"athlete":{"id":"qb1","displayName":"QB One"}}],
+            },
+            "tightEnd":{
+                "position":{"abbreviation":"TE"},
+                "athletes":[
+                    {"rank":1,"athlete":{"id":"te1","displayName":"TE Starter"}},
+                    {"rank":2,"athlete":{"id":"te2","displayName":"TE Backup"}},
+                    {"rank":3,"athlete":{"id":"te3","displayName":"TE Third"}},
+                    {"rank":4,"athlete":{"id":"te4","displayName":"TE Fourth"}},
+                    {"rank":5,"athlete":{"id":"te5","displayName":"TE Fifth"}},
+                ],
+            },
+        }}]}
+        injuries = [
+            {"player":"TE Starter","position":"TE","team":"Test Team","status":"Out"},
+            {"player":"TE Backup","position":"TE","team":"Test Team","status":"Out"},
+            {"player":"TE Third","position":"TE","team":"Test Team","status":"Injured Reserve"},
+        ]
+
+        selected = _select_research_players(roster, chart, injuries, "Test Team")
+        names = [item["name"] for item in selected]
+
+        self.assertNotIn("TE Starter", names)
+        self.assertNotIn("TE Backup", names)
+        self.assertNotIn("TE Third", names)
+        self.assertIn("TE Fourth", names)
+        self.assertNotIn("TE Fifth", names)
+
+    def test_injury_impact_rejects_injured_player_as_own_beneficiary(self):
+        from ai_analysis import _filter_injury_impacts
+
+        data = {"injury_impact":[
+            {
+                "injured_player":"Jordan Addison","team":"Minnesota Vikings",
+                "affected_player":"Jordan Addison","affected_team":"Minnesota Vikings",
+                "impact_direction":"Mixed",
+            },
+            {
+                "injured_player":"T.J. Hockenson","team":"Minnesota Vikings",
+                "affected_player":"Gavin Bartholomew","affected_team":"Minnesota Vikings",
+                "impact_direction":"Positive",
+            },
+        ]}
+        statuses = [
+            {"player":"Jordan Addison","team":"Minnesota Vikings","status":"Questionable"},
+            {"player":"T.J. Hockenson","team":"Minnesota Vikings","status":"Out"},
+        ]
+        rosters = {"Minnesota Vikings":["Jordan Addison","Gavin Bartholomew"]}
+        usage = {"gavinbartholomew":{"player":"Gavin Bartholomew","position":"TE"}}
+        gaps = _filter_injury_impacts(
+            data, statuses, rosters, ("Minnesota Vikings","Green Bay Packers"),
+            player_usage=usage,
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+        self.assertEqual(data["injury_impact"][0]["affected_player"], "Gavin Bartholomew")
+        self.assertTrue(any("cannot be listed as their own beneficiary" in gap for gap in gaps))
+
+    def test_team_news_compaction_preserves_headline_date_and_source(self):
+        from live_research import _team_news
+
+        _team_news.cache_clear()
+        with patch("live_research._get_json", return_value={"articles":[{
+            "headline":"Team acquires veteran quarterback",
+            "description":"A veteran quarterback returns to the team.",
+            "published":"2026-11-13T15:00:00Z",
+            "links":{"web":{"href":"https://example.com/story"}},
+        }]}):
+            result = _team_news("123")
+        _team_news.cache_clear()
+        self.assertEqual(result["articles"][0]["headline"], "Team acquires veteran quarterback")
+        self.assertEqual(result["articles"][0]["published"], "2026-11-13T15:00:00Z")
+        self.assertEqual(result["articles"][0]["url"], "https://example.com/story")
+
+
+    def test_injury_replacement_selection_finds_injured_player_missing_from_roster(self):
+        from live_research import _select_research_players
+
+        roster = [
+            {"id":"te1","name":"Healthy TE One","position":"TE"},
+            {"id":"te2","name":"Healthy TE Two","position":"TE"},
+            {"id":"te3","name":"Gavin Bartholomew","position":"TE"},
+            {"id":"te4","name":"Healthy TE Four","position":"TE"},
+            {"id":"qb1","name":"QB One","position":"QB"},
+        ]
+        chart = {"depthCharts":[{"positions":{
+            "tightEnd":{
+                "position":{"abbreviation":"TE"},
+                "athletes":[
+                    {"rank":1,"athlete":{"id":"te1","displayName":"Healthy TE One"}},
+                    {"rank":2,"athlete":{"id":"hock","displayName":"T.J. Hockenson"}},
+                    {"rank":3,"athlete":{"id":"te2","displayName":"Healthy TE Two"}},
+                    {"rank":4,"athlete":{"id":"te3","displayName":"Gavin Bartholomew"}},
+                    {"rank":5,"athlete":{"id":"te4","displayName":"Healthy TE Four"}},
+                ],
+            },
+            "quarterback":{
+                "position":{"abbreviation":"QB"},
+                "athletes":[{"rank":1,"athlete":{"id":"qb1","displayName":"QB One"}}],
+            },
+        }}]}
+        selected = _select_research_players(
+            roster, chart,
+            [{"player":"T.J. Hockenson","position":"TE","status":"Out"}],
+            "Minnesota Vikings",
+        )
+        names = [item["name"] for item in selected]
+        self.assertIn("Gavin Bartholomew", names)
+
+    def test_team_stats_keep_defensive_matchup_metrics(self):
+        result = _compact_team_stats({
+            "results":{"stats":{
+                "displayName":"Example Defense",
+                "categories":[{
+                    "name":"defensive",
+                    "stats":[
+                        {"name":"passingYardsAllowed","displayValue":"190.2"},
+                        {"name":"rushingYardsAllowed","displayValue":"98.4"},
+                        {"name":"sacks","displayValue":"31"},
+                        {"name":"unneededField","displayValue":"999"},
+                    ],
+                }],
+            }},
+        })
+        values = {item["name"]:item["value"] for item in result["categories"]["defensive"]}
+        self.assertEqual(values["passingYardsAllowed"], "190.2")
+        self.assertEqual(values["rushingYardsAllowed"], "98.4")
+        self.assertEqual(values["sacks"], "31")
+        self.assertNotIn("unneededField", values)
+
+
+
+    def test_defensive_research_selects_depth_chart_leaders(self):
+        from live_research import _select_defensive_research_players
+
+        roster = [
+            {"id": "lb1", "name": "Leading Tackler", "position": "LB"},
+            {"id": "de1", "name": "Top Pass Rusher", "position": "DE"},
+            {"id": "cb1", "name": "Starting Corner", "position": "CB"},
+            {"id": "lb2", "name": "Backup Linebacker", "position": "LB"},
+        ]
+        depth = {"depthCharts": [{"positions": {
+            "linebacker": {"position": {"abbreviation": "LB"}, "athletes": [
+                {"rank": 1, "athlete": {"id": "lb1"}},
+                {"rank": 2, "athlete": {"id": "lb2"}},
+            ]},
+            "defensiveEnd": {"position": {"abbreviation": "DE"}, "athletes": [
+                {"rank": 1, "athlete": {"id": "de1"}},
+            ]},
+            "cornerback": {"position": {"abbreviation": "CB"}, "athletes": [
+                {"rank": 1, "athlete": {"id": "cb1"}},
+            ]},
+        }}]}
+        selected = _select_defensive_research_players(roster, depth)
+        names = [player["name"] for player in selected]
+        self.assertEqual(names, ["Leading Tackler", "Backup Linebacker", "Top Pass Rusher", "Starting Corner"])
+
+    def test_defensive_gamelog_compaction_keeps_tackles_sacks_and_takeaways(self):
+        from live_research import _compact_player_gamelog
+
+        compact = _compact_player_gamelog({
+            "games_available": 8,
+            "season_totals": {"Regular Season Stats": {
+                "totalTackles": "72", "soloTackles": "43", "sacks": "5.5",
+                "interceptions": "2", "passesDefended": "7",
+                "tacklesForLoss": "8", "quarterbackHits": "11",
+                "forcedFumbles": "1", "unneededStat": "999",
+            }},
+            "recent_games": [{"week": 8, "stats": {
+                "totalTackles": "10", "sacks": "1", "interceptions": "1",
+                "passesDefended": "2",
+            }}],
+        }, "LB")
+        self.assertEqual(compact["season"]["totalTackles"], "72")
+        self.assertEqual(compact["season"]["sacks"], "5.5")
+        self.assertEqual(compact["season"]["interceptions"], "2")
+        self.assertNotIn("unneededStat", compact["season"])
+
+    def test_news_role_change_impact_does_not_require_injury_report(self):
+        from ai_analysis import _filter_injury_impacts
+
+        data = {"injury_impact": [{
+            "impact_type": "Role Change",
+            "injured_player": "Minnesota Vikings quarterback room",
+            "team": "Minnesota Vikings",
+            "availability": "Confirmed starting quarterback change",
+            "affected_player": "Kirk Cousins",
+            "affected_team": "Minnesota Vikings",
+            "impact_direction": "Positive",
+            "statistical_effect": "Starting snaps and passing volume",
+            "prop_market": "Passing attempts and completions",
+            "evidence": "Dated team report confirms Cousins will start",
+            "confidence": 8,
+            "conditions": "Subject to final active roster",
+        }]}
+        usage = {"kirkcousins": {"player": "Kirk Cousins", "position": "QB"}}
+        gaps = _filter_injury_impacts(
+            data, [], {"Minnesota Vikings": ["Kirk Cousins"]},
+            ("Minnesota Vikings", "Green Bay Packers"), player_usage=usage,
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+        self.assertEqual(data["injury_impact"][0]["affected_player"], "Kirk Cousins")
+        self.assertEqual(gaps, [])
+
+    def test_player_prop_validation_supports_completion_sack_and_period_markets(self):
+        from ai_analysis import _filter_player_props_by_usage
+
+        data = {"picks": [
+            {"market_type": "Player Prop", "player_or_team": "Quarterback One",
+             "bet_description": "Over 25.5 passing completions", "play_threshold": "25.5"},
+            {"market_type": "Player Prop", "player_or_team": "Defender One",
+             "bet_description": "Over 0.5 sacks", "play_threshold": "0.5"},
+            {"market_type": "Player Prop", "player_or_team": "Quarterback One",
+             "bet_description": "Over 125.5 first-half passing yards", "play_threshold": "125.5"},
+        ]}
+        usage = {
+            "quarterbackone": {"player": "Quarterback One", "position": "QB",
+                "games_available": 10, "season": {"completions": "300", "passingYards": "2500"},
+                "recent": [{"stats": {"completions": "30", "passingYards": "250"}}]},
+            "defenderone": {"player": "Defender One", "position": "LB",
+                "games_available": 10, "season": {"sacks": "6"},
+                "recent": [{"stats": {"sacks": "1"}}]},
+        }
+        gaps = _filter_player_props_by_usage(data, usage)
+        self.assertEqual(len(data["picks"]), 3)
+        self.assertEqual(data["picks"][2]["confidence"], 5)
+        self.assertEqual(data["picks"][2]["data_quality"], "Limited")
+        self.assertTrue(any("period-specific prop" in gap for gap in gaps))
+
+
+    def test_empty_analysis_rejects_injury_impact_from_outside_matchup(self):
+        from ai_analysis import _validate_analysis
+
+        impact = {
+            "injured_player": "Unrelated Player",
+            "team": "Unrelated Team",
+            "availability": "Out",
+            "affected_player": "Team unit",
+            "affected_team": "Dallas Cowboys",
+            "impact_direction": "Positive",
+            "statistical_effect": "Potential usage shift",
+            "prop_market": "Receiving yards",
+            "evidence": "No matchup evidence",
+            "confidence": 5,
+            "conditions": "If role changes",
+        }
+        data = {
+            "summary": "A matchup summary.",
+            "game_script": "A game script.",
+            "picks": [],
+            "sneaky_props": [],
+            "touchdown_scorers": [],
+            "injury_impact": [impact],
+            "underdog_analysis": [],
+        }
+        with self.assertRaisesRegex(RuntimeError, "no usable matchup analysis"):
+            _validate_analysis(
+                data,
+                rosters={"Dallas Cowboys": ["Player One"]},
+                team_names=("San Francisco 49ers", "Dallas Cowboys"),
+            )
+
+    def test_valid_matchup_injury_impact_can_stand_alone(self):
+        from ai_analysis import _validate_analysis
+
+        data = {
+            "summary": "A matchup summary.",
+            "game_script": "A game script.",
+            "picks": [],
+            "sneaky_props": [],
+            "touchdown_scorers": [],
+            "injury_impact": [{
+                "injured_player": "Starter One",
+                "team": "Dallas Cowboys",
+                "availability": "Out",
+                "affected_player": "Backup One",
+                "affected_team": "Dallas Cowboys",
+                "impact_direction": "Positive",
+                "statistical_effect": "More route opportunities",
+                "prop_market": "Receiving yards",
+                "evidence": "ESPN injury report",
+                "confidence": 6,
+                "conditions": "If elevated into the starting role",
+            }],
+            "underdog_analysis": [],
+        }
+        _validate_analysis(
+            data,
+            rosters={"Dallas Cowboys": ["Starter One", "Backup One"]},
+            team_names=("San Francisco 49ers", "Dallas Cowboys"),
+        )
 
 if __name__ == "__main__":
     unittest.main()

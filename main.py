@@ -11,6 +11,7 @@ import sys
 import traceback
 import urllib.error
 import urllib.request
+from urllib.parse import urlencode
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -23,6 +24,11 @@ from openpyxl.utils import get_column_letter
 from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
 from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
+from sportsbook_odds import (
+    fetch_event_quotes, PASS1_MARKETS, PASS2_TD_MARKETS, GAME_MARKETS,
+    summarize_quotes, ensure_api_key_configured, research_supports_first_td,
+)
+from game_selector import select_games_gui
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
@@ -41,8 +47,17 @@ def application_directory() -> Path:
     return Path(__file__).resolve().parent
 
 
-def fetch_scoreboard() -> dict:
-    request = urllib.request.Request(ESPN_URL, headers=HEADERS)
+def scoreboard_url(week: int | None = None, season_year: int | None = None) -> str:
+    """Build the ESPN scoreboard URL for the current slate or a requested regular-season week."""
+    if week is None:
+        return ESPN_URL
+    year = season_year or datetime.now(ET).year
+    query = urlencode({"dates": year, "seasontype": 2, "week": week})
+    return f"{ESPN_URL}?{query}"
+
+
+def fetch_scoreboard(week: int | None = None) -> dict:
+    request = urllib.request.Request(scoreboard_url(week), headers=HEADERS)
     try:
         context = ssl.create_default_context(cafile=certifi.where())
         with urllib.request.urlopen(request, timeout=30, context=context) as response:
@@ -92,6 +107,7 @@ def extract_games(data: dict) -> tuple[list[dict], object, object]:
 
         games.append({
             "event_id": str(event.get("id", "")),
+            "event_start_utc": kickoff,
             "away_team_id": str(away.get("team", {}).get("id", "")),
             "home_team_id": str(home.get("team", {}).get("id", "")),
             "Game Date (ET)": kickoff_text,
@@ -142,14 +158,14 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     white_bold = Font(bold=True, color="FFFFFF")
     thin_gray = Side(style="thin", color="D9E1F2")
 
-    sheet.merge_cells("A1:J1")
+    sheet.merge_cells("A1:K1")
     sheet["A1"] = f"{game['Away Team']} at {game['Home Team']} — AI Betting Analysis"
     sheet["A1"].font = Font(bold=True, size=15, color="FFFFFF")
     sheet["A1"].fill = navy
     sheet["A1"].alignment = Alignment(horizontal="center")
     sheet.row_dimensions[1].height = 28
 
-    sheet.merge_cells("A2:J2")
+    sheet.merge_cells("A2:K2")
     sheet["A2"] = (
         f"Kickoff: {game.get('Game Date (ET)', 'Unknown')} | "
         f"ESPN game line: {game.get('Betting Line', 'Unavailable')}"
@@ -157,7 +173,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A2"].font = Font(italic=True, color="17365D")
     sheet["A2"].alignment = Alignment(wrap_text=True)
 
-    sheet.merge_cells("A3:J3")
+    sheet.merge_cells("A3:K3")
     if analysis.get("cache_reused"):
         sheet["A3"] = (
             "CACHED ANALYSIS — research has not been refreshed for current injuries, "
@@ -170,13 +186,21 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         research_chars = analysis.get("research_prompt_characters")
         if research_truncated is True:
             prompt_status = f"TRUNCATED ({research_chars:,} chars)" if isinstance(research_chars, int) else "TRUNCATED"
+        elif analysis.get("research_compacted_for_prompt") is True:
+            prompt_status = f"COMPACTED ({research_chars:,} chars)" if isinstance(research_chars, int) else "COMPACTED"
         elif research_truncated is False:
             prompt_status = f"complete ({research_chars:,} chars)" if isinstance(research_chars, int) else "complete"
         else:
             prompt_status = "not recorded"
+        odds_status = analysis.get("odds_api_status", "not recorded")
+        odds_usage = analysis.get("odds_api_usage", {})
+        odds_remaining = odds_usage.get("requests_remaining") if isinstance(odds_usage, dict) else None
+        odds_label = f"Odds API: {odds_status}" + (
+            f" ({odds_remaining} credits remaining)" if odds_remaining is not None else ""
+        )
         sheet["A3"] = (
-            f"AI provider: {provider} | Research: {analysis.get('research_mode', 'Not recorded')} "
-            f"| AI research prompt: {prompt_status} | Live sources are listed at the bottom of this sheet."
+            f"AI providers: {provider} | Configured: {', '.join(analysis.get('ai_providers_configured', [])) or 'unknown'} | Research: {analysis.get('research_mode', 'Not recorded')} "
+            f"| {odds_label} | AI research prompt: {prompt_status} | Live sources are listed at the bottom of this sheet."
         )
         sheet["A3"].font = Font(italic=True, color="9C6500" if research_truncated is True else "526579")
     sheet["A3"].alignment = Alignment(wrap_text=True)
@@ -184,8 +208,8 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A4"] = "MATCHUP SUMMARY"
     sheet["A4"].font = white_bold
     sheet["A4"].fill = navy
-    sheet.merge_cells("A4:J4")
-    sheet.merge_cells("A5:J6")
+    sheet.merge_cells("A4:K4")
+    sheet.merge_cells("A5:K6")
     sheet["A5"] = analysis.get("summary", "No summary returned.")
     sheet["A5"].alignment = Alignment(wrap_text=True, vertical="top")
     sheet.row_dimensions[5].height = 38
@@ -194,63 +218,119 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet["A8"] = "EXPECTED GAME SCRIPT"
     sheet["A8"].font = white_bold
     sheet["A8"].fill = navy
-    sheet.merge_cells("A8:J8")
-    sheet.merge_cells("A9:J10")
+    sheet.merge_cells("A8:K8")
+    sheet.merge_cells("A9:K10")
     sheet["A9"] = analysis.get("game_script", "")
     sheet["A9"].alignment = Alignment(wrap_text=True, vertical="top")
     sheet.row_dimensions[9].height = 40
     sheet.row_dimensions[10].height = 25
 
-    sheet["A12"] = "TOP BETTING OPPORTUNITIES"
-    sheet["A12"].font = white_bold
-    sheet["A12"].fill = navy
-    sheet.merge_cells("A12:J12")
     headers = [
-        "Rank", "Type", "Player / Team", "Recommended Bet", "Verified Market Line",
+        "Rank", "Player / Team", "Recommended Bet",
+        "Player Stat Avg/G (Season / Last 3)", "Verified Market Line",
         "Model Play Threshold", "Estimated Hit Probability", "Confidence (1–10)",
-        "Statistical Rationale", "Risk Factors",
+        "Statistical Rationale", "Risk Factors", "Data Quality",
     ]
-    for col, value in enumerate(headers, 1):
-        cell = sheet.cell(row=13, column=col, value=value)
-        _style_header(cell)
     picks = analysis.get("picks", [])
-    if not picks:
-        sheet.merge_cells("A14:J14")
-        sheet["A14"] = "No bets met the analyst's evidence threshold for this matchup."
-        sheet["A14"].alignment = Alignment(wrap_text=True)
-    for row_num, pick in enumerate(picks, 14):
+    player_props = [pick for pick in picks if pick.get("market_type") == "Player Prop"]
+    game_picks = [pick for pick in picks if pick.get("market_type") == "Game Prop"]
+
+    def write_pick_section(start_row, title, items, empty_message):
+        sheet.cell(start_row, 1, title)
+        sheet.cell(start_row, 1).font = white_bold
+        sheet.cell(start_row, 1).fill = navy
+        sheet.merge_cells(start_row=start_row, start_column=1, end_row=start_row, end_column=11)
+        for col, value in enumerate(headers, 1):
+            _style_header(sheet.cell(start_row + 1, col, value))
+        if not items:
+            sheet.merge_cells(start_row=start_row + 2, start_column=1, end_row=start_row + 2, end_column=11)
+            sheet.cell(start_row + 2, 1, empty_message)
+            sheet.cell(start_row + 2, 1).alignment = Alignment(wrap_text=True)
+            return start_row + 4
+        for offset, pick in enumerate(items):
+            row_num = start_row + 2 + offset
+            values = [
+                offset + 1, pick.get("player_or_team", ""),
+                pick.get("bet_description", ""), pick.get("average_per_game", ""),
+                pick.get("market_line", "Not verified"), pick.get("play_threshold", ""),
+                f"{pick.get('estimated_hit_probability', 0):.1f}%",
+                pick.get("confidence", ""), pick.get("statistical_rationale", ""),
+                pick.get("risk_factors", ""), pick.get("data_quality", ""),
+            ]
+            for col, value in enumerate(values, 1):
+                cell = sheet.cell(row=row_num, column=col, value=value)
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell.border = Border(bottom=thin_gray)
+                if row_num % 2 == 0:
+                    cell.fill = light
+            sheet.row_dimensions[row_num].height = 82
+        return start_row + len(items) + 3
+
+    next_pick_row = write_pick_section(
+        12, "VERIFIED PLAYER PROPS (SPORTSBOOK LINE REQUIRED)", player_props,
+        "No verified sportsbook player-prop lines were available for this matchup."
+    )
+    model_only_props = analysis.get("model_only_picks", [])
+    next_pick_row = write_pick_section(
+        next_pick_row,
+        "MODEL-ONLY PROP LEANS (NOT VERIFIED SPORTSBOOK BETS)",
+        model_only_props,
+        "No model-only player-prop leans met the evidence threshold."
+    )
+    next_pick_row = write_pick_section(
+        next_pick_row, "GAME-LEVEL BETS (FULL GAME / 1ST HALF / 1ST QUARTER)", game_picks,
+        "No game-level bets met the evidence threshold for this matchup."
+    )
+    underdog_rows = analysis.get("underdog_analysis", [])
+    underdog_start = max(16, next_pick_row + 1)
+    sheet.cell(underdog_start, 1, "UNDERDOG / UPSET WATCH")
+    sheet.cell(underdog_start, 1).font = white_bold
+    sheet.cell(underdog_start, 1).fill = navy
+    sheet.merge_cells(start_row=underdog_start, start_column=1, end_row=underdog_start, end_column=8)
+    underdog_headers = [
+        "Underdog", "Spread", "Cover Probability", "Outright Upset Probability",
+        "Assessment", "Rationale", "Risk Factors", "Evidence Quality",
+    ]
+    for col, value in enumerate(underdog_headers, 1):
+        _style_header(sheet.cell(underdog_start + 1, col, value))
+    if not underdog_rows:
+        sheet.merge_cells(start_row=underdog_start + 2, start_column=1, end_row=underdog_start + 2, end_column=8)
+        sheet.cell(underdog_start + 2, 1, "No supported underdog assessment was returned; do not infer a value bet.")
+        sheet.cell(underdog_start + 2, 1).alignment = Alignment(wrap_text=True)
+    for row_num, dog in enumerate(underdog_rows, underdog_start + 2):
         values = [
-            pick.get("rank", row_num - 13), pick.get("market_type", ""),
-            pick.get("player_or_team", ""), pick.get("bet_description", ""),
-            pick.get("market_line", "Not verified"), pick.get("play_threshold", ""),
-            f"{pick.get('estimated_hit_probability', 0):.1f}%",
-            pick.get("confidence", ""), pick.get("statistical_rationale", ""),
-            pick.get("risk_factors", ""),
+            dog.get("underdog", ""), dog.get("spread", "Not verified"),
+            f"{float(dog.get('cover_probability', 0)):.1f}%",
+            f"{float(dog.get('upset_probability', 0)):.1f}%",
+            dog.get("recommendation", "Pass"), dog.get("rationale", ""),
+            dog.get("risk_factors", ""), dog.get("evidence_quality", "Limited"),
         ]
         for col, value in enumerate(values, 1):
-            cell = sheet.cell(row=row_num, column=col, value=value)
+            cell = sheet.cell(row_num, col, value)
             cell.alignment = Alignment(wrap_text=True, vertical="top")
             cell.border = Border(bottom=thin_gray)
-            if row_num % 2 == 0:
-                cell.fill = light
-        sheet.row_dimensions[row_num].height = 82
-
-    td_start = max(16, 14 + len(picks) + 2)
+        sheet.row_dimensions[row_num].height = 62
+    td_start = underdog_start + max(len(underdog_rows), 1) + 4
     sheet.cell(td_start, 1, "ANYTIME TOUCHDOWN SCORERS")
     sheet.cell(td_start, 1).font = white_bold
     sheet.cell(td_start, 1).fill = navy
-    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=7)
-    td_headers = ["Rank", "Player", "Team", "Estimated TD Probability", "Confidence (1–10)", "Rationale", "Risk Factors"]
+    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=10)
+    td_headers = ["Rank", "Player", "Team", "Availability", "Availability Evidence",
+        "Offensive TDs/G (Season / Last 3)", "Estimated TD Probability",
+        "Confidence (1–10)", "Rationale", "Risk Factors"]
     for col, value in enumerate(td_headers, 1):
         _style_header(sheet.cell(td_start + 1, col, value))
     scorers = analysis.get("touchdown_scorers", [])
     if not scorers:
-        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=7)
+        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=10)
         sheet.cell(td_start + 2, 1, "No touchdown scorer met the evidence threshold.")
     for row_num, scorer in enumerate(scorers, td_start + 2):
         values = [
             scorer.get("rank", row_num - td_start - 1), scorer.get("player", ""),
-            scorer.get("team", ""), f"{scorer.get('estimated_td_probability', 0):.1f}%",
+            scorer.get("team", ""), scorer.get("availability", "Not verified"),
+            scorer.get("availability_evidence", "No current evidence supplied"),
+            scorer.get("average_per_game", "Not available"),
+            f"{scorer.get('estimated_td_probability', 0):.1f}%",
             scorer.get("confidence", ""), scorer.get("rationale", ""),
             scorer.get("risk_factors", ""),
         ]
@@ -262,24 +342,55 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 cell.fill = light
         sheet.row_dimensions[row_num].height = 65
 
-    injury_start = td_start + max(len(scorers), 1) + 4
-    sheet.cell(injury_start, 1, "INJURY IMPACT ANALYSIS")
+    # Keep the existing sneaky-prop section; detailed player averages appear beside the relevant picks.
+    sneaky_start = td_start + max(len(scorers), 1) + 4
+    sneaky_props = analysis.get("sneaky_props", [])
+    sneaky_props = sneaky_props if isinstance(sneaky_props, list) else []
+    sneaky_headers = ["Rank", "Player / Team", "Sneaky Prop / Ladder", "Market Line",
+        "Model Threshold", "Hit Probability", "Confidence", "Why It Has Upside",
+        "Availability / Evidence", "Risk Factors", "Data Quality"]
+    sheet.cell(sneaky_start, 1, "SNEAKY PROPS & LADDER OPPORTUNITIES")
+    sheet.cell(sneaky_start, 1).font = white_bold
+    sheet.cell(sneaky_start, 1).fill = navy
+    sheet.merge_cells(start_row=sneaky_start, start_column=1, end_row=sneaky_start, end_column=11)
+    for col, value in enumerate(sneaky_headers, 1):
+        _style_header(sheet.cell(sneaky_start + 1, col, value))
+    if not sneaky_props:
+        sheet.merge_cells(start_row=sneaky_start + 2, start_column=1, end_row=sneaky_start + 2, end_column=11)
+        sheet.cell(sneaky_start + 2, 1, "No additional sportsbook-verified high-upside player prop met the evidence threshold.")
+    for offset, pick in enumerate(sneaky_props):
+        row_num = sneaky_start + 2 + offset
+        values = [offset + 1, pick.get("player_or_team", ""), pick.get("bet_description", ""),
+            pick.get("market_line", "NOT VERIFIED — MODEL IDEA ONLY"), pick.get("play_threshold", ""),
+            f"{pick.get('estimated_hit_probability', 0):.1f}%", pick.get("confidence", ""),
+            pick.get("statistical_rationale", ""),
+            f"{pick.get('availability', 'No injury designation found')} — {pick.get('availability_evidence', '')}",
+            pick.get("risk_factors", ""), pick.get("data_quality", "")]
+        for col, value in enumerate(values, 1):
+            cell = sheet.cell(row=row_num, column=col, value=value)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            cell.border = Border(bottom=thin_gray)
+            if row_num % 2 == 0:
+                cell.fill = light
+        sheet.row_dimensions[row_num].height = 78
+
+    # Keep injury/news impacts near the bottom without a separate player-usage table.
+    injury_start = sneaky_start + max(len(sneaky_props), 1) + 4
+    impacts = analysis.get("injury_impact", [])
+    sheet.cell(injury_start, 1, "INJURY / NEWS IMPACT ANALYSIS")
     sheet.cell(injury_start, 1).font = white_bold
     sheet.cell(injury_start, 1).fill = navy
     sheet.merge_cells(
         start_row=injury_start, start_column=1,
-        end_row=injury_start, end_column=10,
+        end_row=injury_start, end_column=11,
     )
-
     injury_headers = [
-        "Injured Player", "Team", "Availability", "Affected Player",
+        "Impact Type / Subject", "Team", "Status / Development", "Affected Player",
         "Affected Team", "Impact", "Statistical Effect", "Prop Market",
         "Evidence / Confidence", "Conditions",
     ]
     for col, value in enumerate(injury_headers, 1):
         _style_header(sheet.cell(injury_start + 1, col, value))
-
-    impacts = analysis.get("injury_impact", [])
     if not impacts:
         sheet.merge_cells(
             start_row=injury_start + 2, start_column=1,
@@ -287,13 +398,12 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         )
         sheet.cell(
             injury_start + 2, 1,
-            "No meaningful, evidence-supported downstream injury impacts identified.",
+            "No key injury/news impacts met the evidence threshold.",
         )
         sheet.cell(injury_start + 2, 1).alignment = Alignment(wrap_text=True)
-
     for row_num, impact in enumerate(impacts, injury_start + 2):
         values = [
-            impact.get("injured_player", ""),
+            f"{impact.get('impact_type', 'Injury')} — {impact.get('injured_player', '')}",
             impact.get("team", ""),
             impact.get("availability", ""),
             impact.get("affected_player", ""),
@@ -301,10 +411,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             impact.get("impact_direction", ""),
             impact.get("statistical_effect", ""),
             impact.get("prop_market", ""),
-            (
-                f"{impact.get('evidence', '')} "
-                f"(Confidence: {impact.get('confidence', '')}/10)"
-            ),
+            f"{impact.get('evidence', '')} (Confidence: {impact.get('confidence', '')}/10)",
             impact.get("conditions", ""),
         ]
         for col, value in enumerate(values, 1):
@@ -319,30 +426,17 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(gap_row, 1, "DATA LIMITATIONS")
     sheet.cell(gap_row, 1).font = white_bold
     sheet.cell(gap_row, 1).fill = navy
-    sheet.merge_cells(start_row=gap_row, start_column=1, end_row=gap_row, end_column=10)
+    sheet.merge_cells(start_row=gap_row, start_column=1, end_row=gap_row, end_column=11)
     gaps = analysis.get("data_gaps", [])
-    sheet.merge_cells(start_row=gap_row + 1, start_column=1, end_row=gap_row + 2, end_column=10)
+    sheet.merge_cells(start_row=gap_row + 1, start_column=1, end_row=gap_row + 2, end_column=11)
     sheet.cell(gap_row + 1, 1, "\n".join(f"• {gap}" for gap in gaps) if gaps else "No material data gaps were reported.")
     sheet.cell(gap_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
 
-    research_row = gap_row + 4
-    sheet.cell(research_row, 1, "INDEPENDENT LIVE RESEARCH")
-    sheet.cell(research_row, 1).font = white_bold
-    sheet.cell(research_row, 1).fill = navy
-    sheet.merge_cells(start_row=research_row, start_column=1, end_row=research_row, end_column=10)
-    sheet.merge_cells(start_row=research_row + 1, start_column=1, end_row=research_row + 3, end_column=10)
-    sheet.cell(
-        research_row + 1, 1,
-        analysis.get("independent_research", "No independent research text was retained.")
-    )
-    sheet.cell(research_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
-    sheet.row_dimensions[research_row + 1].height = 180
-
-    source_row = research_row + 5
+    source_row = gap_row + 4
     sheet.cell(source_row, 1, "RESEARCH SOURCES")
     sheet.cell(source_row, 1).font = white_bold
     sheet.cell(source_row, 1).fill = navy
-    sheet.merge_cells(start_row=source_row, start_column=1, end_row=source_row, end_column=10)
+    sheet.merge_cells(start_row=source_row, start_column=1, end_row=source_row, end_column=11)
     sources = analysis.get("sources", [])
     if not sources:
         sheet.cell(source_row + 1, 1, "No source URLs were returned by the research tool.")
@@ -351,10 +445,173 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         cell.hyperlink = source.get("url")
         cell.style = "Hyperlink"
 
-    widths = [8, 15, 22, 30, 22, 28, 18, 16, 58, 42]
+    widths = [8, 15, 22, 30, 22, 28, 18, 16, 58, 42, 18, 18, 18, 18, 18]
     for col, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(col)].width = width
     sheet.freeze_panes = "A14"
+
+
+def attach_sportsbook_quotes(game: dict, research: dict) -> None:
+    """Discover and attach available full-game and player markets before AI analysis."""
+    requested_markets = tuple(dict.fromkeys((*GAME_MARKETS, *PASS1_MARKETS)))
+    pass1 = fetch_event_quotes(game, requested_markets)
+    quotes = list(pass1.get("quotes", []))
+    pass2_status = "not_eligible"
+    pass2_usage = {}
+    if research_supports_first_td(research.get("research_text", "")):
+        pass2 = fetch_event_quotes(game, PASS2_TD_MARKETS)
+        quotes.extend(pass2.get("quotes", []))
+        pass2_status = pass2.get("status", "unknown")
+        pass2_usage = pass2.get("usage", {})
+
+    player_quotes = [q for q in quotes if q.get("market_type") == "player"]
+    game_quotes = [q for q in quotes if q.get("market_type") == "game"]
+    candidate_lists = [
+        [
+            str(candidate.get("name") or "")
+            for candidate in candidates
+            if isinstance(candidate, dict) and candidate.get("name")
+        ]
+        for candidates in research.get("selected_player_candidates", {}).values()
+    ]
+    candidate_names = []
+    for index in range(max((len(items) for items in candidate_lists), default=0)):
+        for items in candidate_lists:
+            if index < len(items):
+                candidate_names.append(items[index])
+    roster_lists = list(research.get("rosters", {}).values())
+    for index in range(max((len(items) for items in roster_lists), default=0)):
+        for items in roster_lists:
+            if index < len(items):
+                candidate_names.append(str(items[index]))
+    candidate_names = list(dict.fromkeys(candidate_names))
+    research["verified_player_prop_markets"] = player_quotes
+    research["verified_sportsbook_game_markets"] = game_quotes
+    available = pass1.get("available_markets", [])
+    requested = pass1.get("requested_markets", [])
+    market_diagnostic = (
+        "ODDS API MARKET DISCOVERY: "
+        f"status={pass1.get('status', 'unknown')}; "
+        f"available event markets={', '.join(available) if available else 'none reported'}; "
+        f"requested markets={', '.join(requested) if requested else 'none'}; "
+        f"player quotes={len(player_quotes)}; game quotes={len(game_quotes)}; "
+        f"discovery error={pass1.get('market_discovery_error') or 'none'}."
+    )
+    research["research_text"] += "\n\n" + market_diagnostic
+    research["research_text"] += "\n\n" + summarize_quotes(
+        quotes, candidate_players=candidate_names
+    )
+    if pass1.get("status") != "no_api_key":
+        research.setdefault("sources", []).append({
+            "title": "The Odds API market discovery and live NFL sportsbook odds",
+            "url": "https://the-odds-api.com/sports/nfl-odds.html",
+        })
+    research["odds_api_status"] = (
+        f"Discovery: {len(available)} listed markets; "
+        f"player quotes: {len(player_quotes)}; game quotes: {len(game_quotes)}; "
+        f"Pass 1: {pass1.get('status', 'unknown')}; Pass 2 first TD: {pass2_status}"
+    )
+    research["odds_api_usage"] = pass2_usage or pass1.get("usage", {})
+
+
+def _best_overall_bets(games: list[dict], analyses: list[dict], limit: int = 10) -> list[dict]:
+    """Rank the strongest matchup recommendations across the selected slate."""
+    candidates = []
+    for game, analysis in zip(games, analyses):
+        matchup = f"{game.get('Away Team', 'Away')} at {game.get('Home Team', 'Home')}"
+        for pick in analysis.get("picks", []):
+            if not isinstance(pick, dict):
+                continue
+            confidence = int(pick.get("confidence", 0) or 0)
+            probability = float(pick.get("estimated_hit_probability", 0) or 0)
+            quality = str(pick.get("data_quality", "Limited"))
+            quality_bonus = {"Strong": 3, "Moderate": 2, "Limited": 0}.get(quality, 0)
+            market_type = str(pick.get("market_type", ""))
+            line = str(pick.get("market_line", "Not verified"))
+            if " — " in line and market_type in {"Player Prop", "Game Prop"}:
+                verification = "Sportsbook quote verified"
+            elif market_type == "Game Prop" and "NOT VERIFIED" in line:
+                verification = "Model-only period line — not sportsbook verified"
+            elif market_type == "Game Prop" and "ESPN" in line:
+                verification = "ESPN market snapshot — confirm sportsbook price"
+            elif market_type == "Game Prop":
+                verification = "Confirm current sportsbook line"
+            else:
+                verification = "Not independently verified"
+            candidates.append({
+                "matchup": matchup,
+                "game_date": game.get("Game Date (ET)", ""),
+                "market_type": market_type,
+                "player_or_team": pick.get("player_or_team", ""),
+                "bet_description": pick.get("bet_description", ""),
+                "market_line": line,
+                "play_threshold": pick.get("play_threshold", ""),
+                "probability": probability,
+                "confidence": confidence,
+                "quality": quality,
+                "verification": verification,
+                "rationale": pick.get("statistical_rationale", ""),
+                "risk_factors": pick.get("risk_factors", ""),
+                "_score": confidence * 100 + probability + quality_bonus,
+            })
+    candidates.sort(
+        key=lambda item: (item["_score"], item["confidence"], item["probability"]),
+        reverse=True,
+    )
+    result = candidates[:max(0, limit)]
+    for rank, item in enumerate(result, 1):
+        item["rank"] = rank
+        item.pop("_score", None)
+    return result
+
+
+def _write_best_overall_sheet(workbook: Workbook, games: list[dict], analyses: list[dict]) -> None:
+    sheet = workbook.create_sheet("Best Overall Bets")
+    sheet.sheet_view.showGridLines = False
+    navy = PatternFill("solid", fgColor="17365D")
+    sheet.merge_cells("A1:M1")
+    sheet["A1"] = "BEST OVERALL BETS — WEEKLY SHORTLIST"
+    sheet["A1"].font = Font(bold=True, size=15, color="FFFFFF")
+    sheet["A1"].fill = navy
+    sheet["A1"].alignment = Alignment(horizontal="center")
+    sheet.merge_cells("A2:M2")
+    sheet["A2"] = (
+        "Top recommendations across the selected games and all supported bet types. "
+        "Ranked by model confidence, estimated hit probability and data quality—not guaranteed ROI. "
+        "Confirm current prices before betting."
+    )
+    sheet["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    sheet.row_dimensions[2].height = 32
+    headers = [
+        "Rank", "Matchup", "Game Date (ET)", "Bet Type", "Player / Team",
+        "Recommended Bet", "Sportsbook Line", "Model Threshold",
+        "Estimated Hit %", "Confidence", "Verification", "Statistical Rationale",
+        "Risk Factors",
+    ]
+    for col, header in enumerate(headers, 1):
+        _style_header(sheet.cell(4, col, header))
+    picks = _best_overall_bets(games, analyses, limit=10)
+    if not picks:
+        sheet.merge_cells("A5:M5")
+        sheet["A5"] = "No qualifying recommendations were returned for the selected games."
+        sheet["A5"].alignment = Alignment(wrap_text=True)
+    for row_num, pick in enumerate(picks, 5):
+        values = [
+            pick["rank"], pick["matchup"], pick["game_date"], pick["market_type"],
+            pick["player_or_team"], pick["bet_description"], pick["market_line"],
+            pick["play_threshold"], pick["probability"], pick["confidence"],
+            pick["verification"], pick["rationale"], pick["risk_factors"],
+        ]
+        for col, value in enumerate(values, 1):
+            cell = sheet.cell(row_num, col, value)
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+        sheet.cell(row_num, 9).number_format = '0.0"%"'
+    widths = [8, 22, 30, 28, 24, 22, 18, 16, 48, 34, 16]
+    for col, width in enumerate(widths, 1):
+        sheet.column_dimensions[get_column_letter(col)].width = width
+    sheet.freeze_panes = "A5"
+    if picks:
+        sheet.auto_filter.ref = f"A4:M{4 + len(picks)}"
 
 
 def write_workbook(games: list[dict], analyses: list[dict], season: object, week: object) -> Path:
@@ -394,6 +651,7 @@ def write_workbook(games: list[dict], analyses: list[dict], season: object, week
     for game, analysis in zip(games, analyses):
         _write_matchup_sheet(workbook, game, analysis, used)
 
+    _write_best_overall_sheet(workbook, games, analyses)
     workbook.save(output)
     return output
 
@@ -472,6 +730,31 @@ def _save_cached_analysis(game: dict, analysis: dict) -> None:
     path.write_text(json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _cached_analysis_is_complete(cached: dict | None) -> bool:
+    """Only reuse versioned cache entries that contain at least one usable analysis section."""
+    if not isinstance(cached, dict):
+        return False
+    structurally_complete = (
+        isinstance(cached.get("picks"), list)
+        and isinstance(cached.get("touchdown_scorers"), list)
+        and len(cached["touchdown_scorers"]) <= 5
+        and cached.get("analysis_version") == 14
+        and isinstance(cached.get("underdog_analysis"), list)
+        and isinstance(cached.get("player_research_summary"), list)
+        and bool(cached.get("ai_provider"))
+    )
+    if not structurally_complete:
+        return False
+    usable_sections = (
+        "picks", "touchdown_scorers", "sneaky_props",
+        "injury_impact", "underdog_analysis",
+    )
+    return any(
+        isinstance(cached.get(section), list) and bool(cached[section])
+        for section in usable_sections
+    )
+
+
 def _load_cached_analysis(game: dict) -> dict:
     path = _analysis_cache_path(game)
     if not path.is_file():
@@ -490,6 +773,66 @@ def _load_cached_analysis(game: dict) -> dict:
     return analysis
 
 
+
+def filter_requested_matchup(games: list[dict], arguments: list[str]) -> list[dict]:
+    """Optionally limit an update to one named matchup for focused testing."""
+    if "--matchup" not in arguments:
+        return games
+    index = arguments.index("--matchup")
+    if index + 1 >= len(arguments) or arguments[index + 1].startswith("--"):
+        raise ValueError('Use --matchup "Away Team at Home Team" to select one game.')
+    requested = arguments[index + 1].strip().casefold()
+    requested_sides = [
+        side.strip() for side in requested.split(" at ", maxsplit=1)
+    ]
+
+    def team_matches(requested_team: str, full_team: str) -> bool:
+        """Allow a nickname or city portion as well as the full team name."""
+        normalized_team = full_team.casefold().strip()
+        return bool(requested_team) and (
+            requested_team in normalized_team or normalized_team in requested_team
+        )
+
+    matches = []
+    for game in games:
+        away = str(game.get("Away Team", "")).casefold()
+        home = str(game.get("Home Team", "")).casefold()
+        if len(requested_sides) == 2:
+            is_match = (
+                team_matches(requested_sides[0], away)
+                and team_matches(requested_sides[1], home)
+            )
+        else:
+            matchup = f"{away} at {home}"
+            is_match = requested in matchup
+        if is_match:
+            matches.append(game)
+    if not matches:
+        available = ", ".join(
+            f"{game['Away Team']} at {game['Home Team']}" for game in games
+        )
+        raise ValueError(
+            f"No matchup matched {arguments[index + 1]!r}. Available games: {available}"
+        )
+    return matches
+
+
+def requested_week(arguments: list[str]) -> int | None:
+    """Read an optional --week N selector without confusing it with --matchup."""
+    if "--week" not in arguments:
+        return None
+    index = arguments.index("--week")
+    if index + 1 >= len(arguments) or arguments[index + 1].startswith("--"):
+        raise ValueError("Use --week 1 through 18 to select an NFL regular-season week.")
+    try:
+        week = int(arguments[index + 1])
+    except ValueError as exc:
+        raise ValueError("The --week value must be an integer from 1 through 18.") from exc
+    if not 1 <= week <= 18:
+        raise ValueError("The --week value must be an integer from 1 through 18.")
+    return week
+
+
 def main() -> int:
     reset_provider_run_state()
     reset_research_cache()
@@ -497,10 +840,20 @@ def main() -> int:
     try:
         reuse_cache = "--reuse-cache" in sys.argv[1:]
         refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
-        data = fetch_scoreboard()
+        selected_week = requested_week(sys.argv[1:])
+        data = fetch_scoreboard(week=selected_week)
         games, season, week = extract_games(data)
+        games = filter_requested_matchup(games, sys.argv[1:])
+        command_args = sys.argv[1:]
+        if not any(flag in command_args for flag in ('--matchup', '--week', '--reuse-cache', '--refresh-incomplete', '--no-gui')):
+            games = select_games_gui(games)
         if not reuse_cache:
             ensure_configured()
+            cli_mode = any(
+                flag in command_args
+                for flag in ("--matchup", "--week", "--refresh-incomplete", "--no-gui")
+            )
+            ensure_api_key_configured(use_gui=not cli_mode)
         analyses = []
         failures = []
         progress_window = ProgressWindow(len(games))
@@ -527,22 +880,29 @@ def main() -> int:
                     elif refresh_incomplete:
                         cache_path = _analysis_cache_path(game)
                         cached = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.is_file() else None
-                        is_complete = (
-                            cached is not None
-                            and isinstance(cached.get("picks"), list)
-                            and len(cached["picks"]) <= 5
-                            and isinstance(cached.get("touchdown_scorers"), list)
-                            and len(cached["touchdown_scorers"]) <= 3
-                            and bool(cached.get("ai_provider"))
-                        )
+                        is_complete = _cached_analysis_is_complete(cached)
                         if is_complete:
                             analysis = _load_cached_analysis(game)
                         else:
                             research = collect_game_research(game)
+                            try:
+                                attach_sportsbook_quotes(game, research)
+                            except Exception as odds_exc:
+                                research["verified_player_prop_markets"] = []
+                                research["verified_sportsbook_game_markets"] = []
+                                research["odds_api_status"] = f"unavailable: {odds_exc}"
+                                research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
                             analysis = analyze_game(game, research)
                             _save_cached_analysis(game, analysis)
                     else:
                         research = collect_game_research(game)
+                        try:
+                            attach_sportsbook_quotes(game, research)
+                        except Exception as odds_exc:
+                            research["verified_player_prop_markets"] = []
+                            research["verified_sportsbook_game_markets"] = []
+                            research["odds_api_status"] = f"unavailable: {odds_exc}"
+                            research["research_text"] += f"\n\nTHE ODDS API UNAVAILABLE: {odds_exc}. Do not claim sportsbook quotes are verified."
                         analysis = analyze_game(game, research)
                         _save_cached_analysis(game, analysis)
                     analyses.append(analysis)
@@ -575,7 +935,7 @@ def main() -> int:
             f"AI analysis completed for {success_count} of {len(games)} games.\n"
             + ("Cached analysis reused; no AI API calls were made.\n" if reuse_cache else
                "Only missing/incomplete cache entries were refreshed; complete entries were reused.\n" if refresh_incomplete else
-               "Fresh AI research completed with provider fallback; results were saved to the local cache.\n")
+               "Fresh independent research and multi-provider analysis completed; results were saved to the local cache.\n")
             + f"\nSaved to:\n{output}"
         )
         provider_usage = get_provider_usage_stats()
@@ -592,7 +952,26 @@ def main() -> int:
                 )
             usage_lines.append(usage_line)
         usage_report = "\n".join(usage_lines) or "No AI provider requests were made."
-        message += f"\n\nProvider API usage:\n{usage_report}"
+        configured_names = sorted({
+            name for analysis in analyses
+            for name in analysis.get("ai_providers_configured", [])
+        })
+        used_names = sorted({
+            name for analysis in analyses
+            for name in analysis.get("ai_providers_used", [])
+        })
+        provider_failures = [
+            failure
+            for analysis in analyses
+            for failure in analysis.get("ai_provider_failures", [])
+        ]
+        provider_summary = (
+            f"Configured: {', '.join(configured_names) or 'none recorded'}\n"
+            f"Used: {', '.join(used_names) or 'none recorded'}"
+        )
+        if provider_failures:
+            provider_summary += "\nProvider failures: " + " | ".join(provider_failures)
+        message += f"\n\nAI provider ensemble:\n{provider_summary}\n\nProvider API usage:\n{usage_report}"
         if failures:
             message += f"\n\n{len(failures)} matchup analyses failed. See Betting_Spreads.log."
         log_path.write_text(message + ("\n\n" + "\n".join(failures) if failures else "") + "\n", encoding="utf-8")

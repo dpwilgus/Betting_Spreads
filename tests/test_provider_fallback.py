@@ -3,9 +3,13 @@ import unittest
 import urllib.error
 from unittest.mock import patch
 
-from ai_analysis import _bounded_research_text, _validate_analysis, analyze_game
+from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_text,
+                         _filter_injury_impacts, _filter_player_props_by_usage, _filter_td_scorers_by_usage,
+                         _research_player_usage, _separate_unverified_player_props,
+                         _normalize_name, _validate_analysis, analyze_game)
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
-                          get_provider_usage_stats, reset_provider_run_state)
+                          generate_json_ensemble, get_provider_usage_stats,
+                          reset_provider_run_state)
 from live_research import collect_game_research, _extract_roster_names
 
 
@@ -19,6 +23,8 @@ def valid_analysis():
     }
     scorer = {
         "rank": 1, "player": "Player A", "team": "Team A",
+        "availability": "Active",
+        "availability_evidence": "Latest team injury report lists no designation.",
         "estimated_td_probability": 20.0, "confidence": 4,
         "rationale": "Example role", "risk_factors": "Example risk",
     }
@@ -32,6 +38,41 @@ def valid_analysis():
 
 
 class ProviderFallbackTests(unittest.TestCase):
+
+    def test_provider_order_override_does_not_exclude_other_configured_models(self):
+        keys = {"groq": "groq-key", "gemini": "gemini-key", "nvidia": "nvidia-key"}
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "groq"}), patch(
+            "ai_providers._saved_key",
+            side_effect=lambda provider: keys.get(provider.name, ""),
+        ):
+            configured = [provider.name for provider, _key in __import__(
+                "ai_providers"
+            )._configured_providers()]
+        self.assertEqual(configured, ["groq", "gemini", "nvidia"])
+
+    def test_ensemble_calls_every_configured_provider_after_success(self):
+        gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+        nvidia = Provider("nvidia", "NVIDIA_API_KEY", "nvidia", "url", "model", "openai")
+        with patch(
+            "ai_providers.ensure_configured",
+            return_value=[(gemini, "key-one"), (nvidia, "key-two")],
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers._call_provider",
+            side_effect=[
+                {"candidates": [{"content": {"parts": [{"text": '{"summary":"Gemini"}'}]}}]},
+                {"choices": [{"message": {"content": '{"summary":"NVIDIA"}'}}]},
+            ],
+        ) as call:
+            results, failures, configured = generate_json_ensemble("system", "user")
+
+        self.assertEqual(configured, ["gemini", "nvidia"])
+        self.assertEqual([name for _result, name in results], ["gemini", "nvidia"])
+        self.assertEqual(len(results), 2)
+        self.assertEqual(failures, [])
+        self.assertEqual(call.call_count, 2)
+
     def test_provider_skip_list_resets_for_new_run(self):
         skipped = {"gemini", "groq"}
 
@@ -140,6 +181,31 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertNotIn("groq", skipped)
         self.assertEqual(call.call_count, 2)
 
+    def test_groq_tpm_retry_adds_rolling_window_refill_margin(self):
+        first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        rate_error = urllib.error.HTTPError(
+            "https://example.test", 429, "rate limit", {},
+            io.BytesIO(
+                b"Rate limit reached for model; tokens per minute (TPM): "
+                b"Limit 8000, Used 4110, Requested 4465. Please try again in 4.3125s."
+            )
+        )
+        with patch(
+            "ai_providers.ensure_configured", return_value=[(first, "key-one")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[rate_error, {"summary": "recovered"}],
+        ) as call:
+            result, provider = generate_json("system", "user")
+        self.assertEqual(result["summary"], "recovered")
+        self.assertEqual(provider, "groq")
+        sleep.assert_called_once_with(14.3125)
+        self.assertEqual(call.call_count, 2)
+
     def test_temporary_tpm_failure_does_not_disable_provider_for_next_game(self):
         first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         rate_error = urllib.error.HTTPError(
@@ -165,6 +231,27 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(provider, "groq")
         self.assertEqual(call.call_count, 4)
 
+    def test_groq_tpm_preflight_skips_oversized_request_and_uses_fallback(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+
+        with patch.dict("os.environ", {"GROQ_MAX_COMPLETION_TOKENS": "1600"}), patch(
+            "ai_providers.ensure_configured",
+            return_value=[(groq, "groq-key"), (gemini, "gemini-key")],
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers._estimate_prompt_tokens", return_value=5000
+        ), patch(
+            "ai_providers._call_provider", return_value={"summary": "fallback"}
+        ) as call:
+            result, selected = generate_json("system", "user")
+
+        self.assertEqual(selected, "gemini")
+        self.assertEqual(result["summary"], "fallback")
+        self.assertEqual(call.call_count, 1)
+        self.assertEqual(call.call_args.args[0].name, "gemini")
+
     def test_openai_compatible_response_extracts_json(self):
         provider = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         result = _response_text(provider, {
@@ -172,23 +259,39 @@ class ProviderFallbackTests(unittest.TestCase):
         })
         self.assertEqual(result, '{"ok": true}')
 
-    def test_nvidia_is_not_in_default_provider_order(self):
+    def test_nvidia_is_last_in_default_provider_order(self):
         from ai_providers import PROVIDER_ORDER
-        self.assertNotIn("nvidia", PROVIDER_ORDER)
+        self.assertEqual(PROVIDER_ORDER, ("gemini", "groq", "openrouter", "nvidia"))
 
-    def test_nvidia_is_only_configured_when_explicitly_selected(self):
+    def test_nvidia_is_optional_and_configured_only_with_a_saved_key(self):
         from ai_providers import _configured_providers
-        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "gemini,groq,openrouter"}, clear=False), patch(
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "gemini,groq,openrouter,nvidia"}, clear=False), patch(
+            "ai_providers._saved_key",
+            side_effect=lambda provider: "test-key" if provider.name != "nvidia" else "",
+        ):
+            providers = _configured_providers()
+        self.assertEqual(
+            [provider.name for provider, _ in providers],
+            ["gemini", "groq", "openrouter"],
+        )
+
+        with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "gemini,groq,openrouter,nvidia"}, clear=False), patch(
             "ai_providers._saved_key", return_value="test-key"
         ):
             providers = _configured_providers()
-        self.assertNotIn("nvidia", [provider.name for provider, _ in providers])
+        self.assertEqual(
+            [provider.name for provider, _ in providers],
+            ["gemini", "groq", "openrouter", "nvidia"],
+        )
 
         with patch.dict("os.environ", {"AI_PROVIDER_ORDER": "nvidia"}, clear=False), patch(
             "ai_providers._saved_key", return_value="test-key"
         ):
             providers = _configured_providers()
-        self.assertEqual([provider.name for provider, _ in providers], ["nvidia"])
+        self.assertEqual(
+            [provider.name for provider, _ in providers],
+            ["nvidia", "gemini", "groq", "openrouter"],
+        )
 
     def test_nvidia_request_uses_hosted_nim_compatible_payload(self):
         provider = Provider(
@@ -220,11 +323,13 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_analysis_schema_validation(self):
         _validate_analysis(valid_analysis())
 
-    def test_analysis_rejects_more_than_five_recommendations(self):
+    def test_analysis_allows_more_than_five_recommendations(self):
         data = valid_analysis()
-        data["picks"].append(dict(data["picks"][0], rank=6))
-        with self.assertRaises(RuntimeError):
-            _validate_analysis(data)
+        data["picks"].extend(
+            dict(data["picks"][0], rank=rank)
+            for rank in range(6, 9)
+        )
+        _validate_analysis(data)
 
     def test_analysis_allows_fewer_evidence_supported_recommendations(self):
         data = valid_analysis()
@@ -340,6 +445,35 @@ class ProviderFallbackTests(unittest.TestCase):
             ["gemini", "groq", "groq"],
         )
 
+    def test_validation_retry_includes_actionable_feedback(self):
+        provider = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+
+        def validator(result):
+            if result.get("valid") is not True:
+                raise RuntimeError("AI response omitted the required underdog assessment.")
+
+        with patch(
+            "ai_providers.ensure_configured", return_value=[(provider, "key-one")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers.time.sleep"
+        ), patch(
+            "ai_providers._call_provider",
+            side_effect=[{"valid": False}, {"valid": True, "summary": "repaired"}],
+        ) as call:
+            result, selected = generate_json(
+                "system", "original user prompt", validator=validator
+            )
+
+        self.assertEqual(selected, "gemini")
+        self.assertEqual(result["summary"], "repaired")
+        self.assertEqual(call.call_count, 2)
+        self.assertEqual(call.call_args_list[0].args[3], "original user prompt")
+        retry_prompt = call.call_args_list[1].args[3]
+        self.assertIn("VALIDATION CORRECTION REQUIRED", retry_prompt)
+        self.assertIn("omitted the required underdog assessment", retry_prompt)
+
     def test_falls_back_when_provider_response_fails_validation(self):
         first = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
         second = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
@@ -375,7 +509,7 @@ class ProviderFallbackTests(unittest.TestCase):
             "openai/gpt-oss-20b", "openai",
         )
 
-        with patch(
+        with patch.dict("os.environ", {"GROQ_MAX_COMPLETION_TOKENS": "2400"}), patch(
             "ai_providers._request_json", return_value={}
         ) as request, patch(
             "ai_providers._response_text", return_value='{"ok": true}'
@@ -404,6 +538,22 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertIn("[Research truncated.]", result)
         self.assertLessEqual(len(result), 100)
 
+    def test_research_truncation_skips_oversized_section_and_keeps_later_evidence(self):
+        research = (
+            "HEADER"
+            + "\n\nINJURIES: " + ("x" * 120)
+            + "\n\nPLAYER LOGS: compact evidence"
+        )
+        with patch("ai_analysis.MAX_RESEARCH_PROMPT_CHARS", 100):
+            result, truncated = _bounded_research_text(research)
+
+        self.assertTrue(truncated)
+        self.assertIn("HEADER", result)
+        self.assertNotIn("INJURIES:", result)
+        self.assertIn("PLAYER LOGS: compact evidence", result)
+        self.assertIn("[Research truncated.]", result)
+        self.assertLessEqual(len(result), 100)
+
     def test_short_research_prompt_is_not_changed(self):
         research = "HEADER\n\nINJURIES: complete"
         result, truncated = _bounded_research_text(research)
@@ -412,28 +562,49 @@ class ProviderFallbackTests(unittest.TestCase):
 
     def test_analysis_prompt_uses_compact_contract_and_keeps_research(self):
         game = {
-            "Away Team": "Away", "Home Team": "Home",
-            "Game Date (ET)": "Sunday", "Betting Line": "Unavailable",
+            "Away Team": "Los Angeles Chargers", "Home Team": "Baltimore Ravens",
+            "Game Date (ET)": "Monday", "Betting Line": "BAL -4.5",
         }
         research = {
-            "research_text": "CURRENT INJURY EVIDENCE: Example player is questionable.",
+            "research_text": (
+                "CURRENT INJURY EVIDENCE: Example player is questionable.\\n\\n"
+                "THE ODDS API VERIFIED PLAYER-PROP QUOTES: Player A | receiving yards | "
+                "Over 50.5 | -110 | DraftKings | retrieved 2026-11-16T17:00:00Z"
+            ),
             "sources": [{"title": "ESPN", "url": "https://example.test"}],
         }
 
         with patch(
-            "ai_analysis.generate_json",
-            return_value=(valid_analysis(), "gemini"),
+            "ai_analysis.generate_json_ensemble",
+            return_value=([(valid_analysis(), "gemini")], [], ["gemini"]),
         ) as generate:
             result = analyze_game(game, research=research)
 
-        system_prompt, user_prompt = generate.call_args.args[:2]
-        self.assertIn("up to five ranked betting opportunities", system_prompt)
+        system_prompt, base_user_prompt = generate.call_args.args[:2]
+        prompt_factory = generate.call_args.kwargs["prompt_factory"]
+        system_prompt, user_prompt = prompt_factory("gemini")
+        self.assertIn("exactly five ranked bets", system_prompt)
+        self.assertIn("The primary objective is to identify the strongest VERIFIED PLAYER PROPS", user_prompt)
+        self.assertIn("Model-only leans remain separate", user_prompt)
         self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
+        self.assertIn("THE ODDS API VERIFIED PLAYER-PROP QUOTES", user_prompt)
+        self.assertIn("Evaluate the full quoted candidate pool", user_prompt)
+        self.assertIn("Analyze this upcoming NFL matchup", base_user_prompt)
         self.assertIn("statistical_rationale", user_prompt)
         self.assertIn("touchdown_scorers", user_prompt)
+        self.assertIn("underdog_analysis", user_prompt)
+        self.assertIn('"underdog":"Los Angeles Chargers"', user_prompt)
+        self.assertIn('"spread":"+4.5"', user_prompt)
+        self.assertIn('"cover_probability":NUMBER', user_prompt)
+        self.assertIn("Never default to the favorite", user_prompt)
+        self.assertIn("elite defensive absence", user_prompt)
+        self.assertIn("summary <= 90 words", user_prompt)
+        self.assertIn("statistical_rationale <= 24 words", user_prompt)
+        self.assertIn("return no more than five material injury/news impacts", user_prompt)
+        self.assertIn("Questionable TD risk_factors must start 'Questionable:'", user_prompt)
         self.assertNotIn('"additionalProperties"', user_prompt)
-        self.assertLess(len(system_prompt) + len(user_prompt), 10000)
-        self.assertEqual(result["ai_provider"], "gemini")
+        self.assertLess(len(system_prompt) + len(user_prompt), 15000)
+        self.assertEqual(result["ai_provider"], "ensemble: gemini")
         self.assertEqual(result["sources"], research["sources"])
 
     def test_provider_usage_tracks_requests_and_reported_tokens(self):
@@ -483,6 +654,192 @@ class ProviderFallbackTests(unittest.TestCase):
 
         self.assertEqual(load.call_count, 2)
 
+
+    def test_player_props_are_rejected_when_threshold_conflicts_with_espn_stats(self):
+        research = """ESPN CURRENT-SEASON PLAYER GAME LOGS — Team (selected by ESPN depth chart; retrieved 2026-11-13): [{"player":"Josh Jacobs","position":"RB","season_game_log":{"games_available":9,"season_totals":{"Regular Season Stats":{"rushingYards":"80","rushingAttempts":"36"}},"recent_games":[{"stats":{"rushingYards":"3"}},{"stats":{"rushingYards":"-1"}}]}}]"""
+        usage = _research_player_usage(research)
+        data = {"picks":[{
+            "market_type":"Player Prop","player_or_team":"Josh Jacobs",
+            "bet_description":"Rushing Yards Over 65.5",
+            "play_threshold":"65.5 yards",
+        }]}
+        gaps = _filter_player_props_by_usage(data, usage)
+        self.assertEqual(data["picks"], [])
+        self.assertTrue(any("materially conflicts" in gap for gap in gaps))
+
+    def test_td_filter_rejects_quarterback_without_rushing_td_profile(self):
+        usage = {
+            "jordanlove": {
+                "player":"Jordan Love","position":"QB","games_available":9,
+                "season":{"rushingAttempts":12,"rushingTouchdowns":2},
+                "recent":[]
+            },
+            "justinjefferson": {
+                "player":"Justin Jefferson","position":"WR","games_available":9,
+                "season":{"receivingTargets":65,"receivingTouchdowns":1},
+                "recent":[]
+            },
+        }
+        data = {"touchdown_scorers":[
+            {"player":"Jordan Love","estimated_td_probability":30},
+            {"player":"Justin Jefferson","estimated_td_probability":25},
+        ]}
+        gaps = _filter_td_scorers_by_usage(data, usage)
+        self.assertEqual([p["player"] for p in data["touchdown_scorers"]], ["Justin Jefferson"])
+        self.assertEqual(data["touchdown_scorers"][0]["rank"], 1)
+        self.assertTrue(any("Jordan Love" in gap for gap in gaps))
+
+    def test_missing_injury_record_never_gets_reported_as_active(self):
+        data = {
+            "picks":[{
+                "market_type":"Player Prop","player_or_team":"Player A",
+                "risk_factors":"No current risks",
+            }],
+            "touchdown_scorers":[{
+                "player":"Player A","availability":"Active",
+                "availability_evidence":"No injury report today",
+                "confidence":7,"risk_factors":"",
+            }],
+        }
+        _apply_independent_injury_statuses(data, [])
+        self.assertEqual(data["touchdown_scorers"][0]["availability"], "No injury designation found")
+        self.assertEqual(data["picks"][0]["availability"], "No injury designation found")
+        self.assertIn("active status is not confirmed", data["touchdown_scorers"][0]["availability_evidence"])
+
+
+    def test_model_only_player_props_are_not_actionable_sportsbook_picks(self):
+        data = {"picks":[{
+            "market_type":"Player Prop","player_or_team":"Jordan Love",
+            "bet_description":"Passing Yards Over","market_line":"Not verified",
+            "play_threshold":"255.5",
+        }]}
+        gaps = _separate_unverified_player_props(data, {"verified_player_prop_markets":[]})
+        self.assertEqual(data["picks"], [])
+        self.assertEqual(len(data["model_only_picks"]), 1)
+        self.assertIn("NOT VERIFIED", data["model_only_picks"][0]["market_line"])
+        self.assertTrue(any("exact player market" in gap for gap in gaps))
+
+    def test_player_prop_with_independent_sportsbook_quote_remains_actionable(self):
+        data = {"picks":[{
+            "market_type":"Player Prop","player_or_team":"Jordan Love",
+            "bet_description":"Passing Yards Over 250.5","market_line":"Not verified",
+            "play_threshold":"250.5 yards",
+        }]}
+        quote = {
+            "player":"Jordan Love","market":"Passing Yards","market_key":"player_pass_yds",
+            "side":"over","point":250.5,"line":"250.5",
+            "price":"-110","sportsbook":"ExampleBook",
+            "source_url":"https://sportsbook.example/market",
+            "retrieved_at":"2026-11-14T00:00:00Z",
+        }
+        _separate_unverified_player_props(data, {"verified_player_prop_markets":[quote]})
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["picks"][0]["market_line"], "250.5 (-110) — ExampleBook")
+        self.assertEqual(data["model_only_picks"], [])
+
+    def test_injury_impact_drops_affected_player_who_is_out(self):
+        data = {"injury_impact":[{
+            "injured_player":"Blake Cashman","team":"Minnesota Vikings",
+            "affected_player":"Josh Jacobs","affected_team":"Green Bay Packers",
+            "impact_direction":"Positive",
+        }]}
+        statuses = [
+            {"player":"Blake Cashman","team":"Minnesota Vikings","status":"Out","position":"LB"},
+            {"player":"Josh Jacobs","team":"Green Bay Packers","status":"Out","position":"RB"},
+        ]
+        rosters = {
+            "Minnesota Vikings":["Blake Cashman"],
+            "Green Bay Packers":["Josh Jacobs"],
+        }
+        gaps = _filter_injury_impacts(
+            data,statuses,rosters,("Minnesota Vikings","Green Bay Packers")
+        )
+        self.assertEqual(data["injury_impact"], [])
+        self.assertTrue(any("Josh Jacobs" in gap and "Out" in gap for gap in gaps))
+
+    def test_injury_impact_keeps_cross_team_matchup_effect_for_available_player(self):
+        data = {"injury_impact":[{
+            "injured_player":"Blake Cashman","team":"Minnesota Vikings",
+            "affected_player":"Matthew Golden","affected_team":"Green Bay Packers",
+            "impact_direction":"Positive",
+        }]}
+        statuses = [
+            {"player":"Blake Cashman","team":"Minnesota Vikings","status":"Out","position":"LB"},
+        ]
+        rosters = {
+            "Minnesota Vikings":["Blake Cashman"],
+            "Green Bay Packers":["Matthew Golden"],
+        }
+        _filter_injury_impacts(
+            data,statuses,rosters,("Minnesota Vikings","Green Bay Packers")
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+
+
+    def test_td_filter_keeps_only_three_highest_scoring_skill_candidates(self):
+        usage = {}
+        scorers = []
+        for index, (player, touchdowns, targets) in enumerate([
+            ("Receiver One", 5, 80),
+            ("Receiver Two", 4, 75),
+            ("Receiver Three", 3, 70),
+            ("Receiver Four", 1, 50),
+        ]):
+            key = _normalize_name(player)
+            usage[key] = {
+                "player":player,"position":"WR","games_available":9,
+                "season":{"receivingTouchdowns":touchdowns,"receivingTargets":targets},
+                "recent":[]
+            }
+            scorers.append({"player":player,"estimated_td_probability":20+index})
+        data = {"touchdown_scorers":scorers}
+        _filter_td_scorers_by_usage(data, usage)
+        self.assertEqual(len(data["touchdown_scorers"]), 3)
+        self.assertEqual(
+            [item["player"] for item in data["touchdown_scorers"]],
+            ["Receiver One","Receiver Two","Receiver Three"],
+        )
+
+
+    def test_high_volume_receiver_can_qualify_as_td_candidate_without_prior_td(self):
+        data = {"touchdown_scorers":[{"player":"Justin Jefferson","estimated_td_probability":24}]}
+        usage = {
+            "justinjefferson":{
+                "player":"Justin Jefferson","position":"WR","games_available":9,
+                "season":{"receivingTargets":90,"receivingTouchdowns":0},
+                "recent":[{"stats":{"receivingTargets":10,"receivingTouchdowns":0}}]
+            }
+        }
+        _filter_td_scorers_by_usage(data,usage)
+        self.assertEqual([item["player"] for item in data["touchdown_scorers"]],["Justin Jefferson"])
+
+
+    def test_touchdown_scorer_accepts_espn_team_abbreviation(self):
+        data = valid_analysis()
+        for scorer in data["touchdown_scorers"]:
+            scorer["team"] = "SF"
+        _validate_analysis(
+            data,
+            rosters={"San Francisco 49ers": ["Player A"], "Dallas Cowboys": ["Player B"]},
+            team_names=("San Francisco 49ers", "Dallas Cowboys"),
+        )
+
+    def test_injury_impact_accepts_team_abbreviations(self):
+        data = {"injury_impact": [{
+            "impact_type": "Injury", "injured_player": "Defender A", "team": "SF",
+            "availability": "Out", "affected_player": "Player B", "affected_team": "DAL",
+            "impact_direction": "Positive", "statistical_effect": "More targets",
+            "prop_market": "Receiving yards", "evidence": "Verified injury report",
+            "confidence": 6, "conditions": "If role expands",
+        }]}
+        gaps = _filter_injury_impacts(
+            data,
+            [{"team": "San Francisco 49ers", "player": "Defender A", "status": "Out"}],
+            {"San Francisco 49ers": ["Defender A"], "Dallas Cowboys": ["Player B"]},
+            ("San Francisco 49ers", "Dallas Cowboys"),
+        )
+        self.assertEqual(len(data["injury_impact"]), 1)
+        self.assertEqual(gaps, [])
 
 if __name__ == "__main__":
     unittest.main()
