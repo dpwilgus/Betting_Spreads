@@ -580,7 +580,7 @@ class ProviderFallbackTests(unittest.TestCase):
         system_prompt, base_user_prompt = generate.call_args.args[:2]
         prompt_factory = generate.call_args.kwargs["prompt_factory"]
         system_prompt, user_prompt = prompt_factory("gemini")
-        self.assertIn("Return exactly five ranked betting opportunities", system_prompt)
+        self.assertIn("exactly five ranked bets", system_prompt)
         self.assertIn("The primary objective is to identify the strongest VERIFIED PLAYER PROPS", user_prompt)
         self.assertIn("Model-only leans remain separate", user_prompt)
         self.assertIn("CURRENT INJURY EVIDENCE", user_prompt)
