@@ -17,7 +17,7 @@ import certifi
 import keyring
 
 SERVICE_NAME = "Betting Spreads"
-PROVIDER_ORDER = ("gemini", "groq", "openrouter", "nvidia")  # NVIDIA is the final free fallback.
+PROVIDER_ORDER = ("gemini", "groq", "openrouter", "nvidia")  # Every configured provider participates in the ensemble.
 _SKIP_PROVIDER_FOR_RUN: set[str] = set()
 _CONFIGURED_PROVIDERS_CACHE: list[tuple["Provider", str]] | None = None
 _PROVIDER_USAGE: dict[str, dict[str, int]] = {}
@@ -66,7 +66,7 @@ PROVIDERS = {
         "https://openrouter.ai/api/v1/chat/completions",
         "openrouter/free", "openai",
     ),
-    # Experimental NVIDIA-hosted NIM endpoint. Never included in the default order.
+    # NVIDIA-hosted NIM endpoint; included whenever a key is configured.
     "nvidia": Provider(
         "nvidia", "NVIDIA_API_KEY", "nvidia_api_key",
         "https://integrate.api.nvidia.com/v1/chat/completions",
