@@ -116,8 +116,8 @@ def _configure_keys() -> None:
         root,
         text=("Add one or more API keys. Gemini, Groq and OpenRouter offer free usage "
               "with limits. NVIDIA NIM is an additional fallback; its limits may vary. "
-              "OpenAI is optional and usage is paid. Keys are stored in your computer's "
-              "secure credential store."),
+              "OpenAI is optional and usage is paid. Leave blank fields unchanged to keep "
+              "previously saved keys. Keys are stored in your computer's secure credential store."),
         wraplength=580, justify="left",
     ).pack(padx=18, pady=(16, 10), anchor="w")
 
@@ -186,6 +186,15 @@ def ensure_configured() -> list[tuple[Provider, str]]:
         )
     _CONFIGURED_PROVIDERS_CACHE = list(configured)
     return list(_CONFIGURED_PROVIDERS_CACHE)
+
+
+def configure_providers() -> list[str]:
+    """Reopen the credential editor even when one or more providers are configured."""
+    global _CONFIGURED_PROVIDERS_CACHE
+    _configure_keys()
+    _CONFIGURED_PROVIDERS_CACHE = None
+    return [provider.name for provider, _key in ensure_configured()]
+
 
 def _configured_providers() -> list[tuple[Provider, str]]:
     configured = []
