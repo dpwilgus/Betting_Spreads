@@ -425,10 +425,11 @@ def generate_json(
                     delay = 1.0
                 # Groq's TPM response reports the exact refill time, but retrying
                 # at that exact boundary can race the rolling-window counter.
-                # Add a small cushion only for explicit TPM errors; preserve
-                # Retry-After semantics for other providers and rate limits.
+                # Groq's reported refill estimate can still race its rolling
+                # 60-second TPM window. Wait an additional 10 seconds for explicit
+                # TPM errors; leave all other provider retry behavior unchanged.
                 if exc.code == 429 and "tokens per minute" in body.lower() and wait_match:
-                    delay += 2.0
+                    delay += 10.0
                 quota_exhausted = exc.code == 429 and any(
                     marker in body.lower()
                     for marker in ("quota", "insufficient_quota", "resource_exhausted",
