@@ -25,7 +25,7 @@ class MatchupFilterTests(unittest.TestCase):
             "injury_impact": [],
             "underdog_analysis": [],
             "player_research_summary": [],
-            "analysis_version": 13,
+            "analysis_version": 14,
             "ai_provider": "groq",
         }
         self.assertFalse(_cached_analysis_is_complete(cached))
@@ -38,7 +38,7 @@ class MatchupFilterTests(unittest.TestCase):
             "injury_impact": [],
             "underdog_analysis": [],
             "player_research_summary": [],
-            "analysis_version": 13,
+            "analysis_version": 14,
             "ai_provider": "groq",
         }
         for section in (
