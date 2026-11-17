@@ -1908,6 +1908,10 @@ def _merge_provider_analyses(
         ]))))
         scorer["model_votes"] = len({entry[1] for entry in entries})
         scorer["model_consensus"] = f"{scorer['model_votes']}/{len(provider_results)}"
+        scorer["rationale"] = (
+            str(scorer.get("rationale") or "").strip()
+            + f" Model agreement: {scorer['model_consensus']}."
+        ).strip()
         scorers.append(scorer)
     scorers.sort(key=lambda item: (
         int(item.get("model_votes", 0)), int(item.get("confidence", 0)),
