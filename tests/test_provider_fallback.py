@@ -145,7 +145,7 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertNotIn("groq", skipped)
         self.assertEqual(call.call_count, 2)
 
-    def test_groq_tpm_retry_adds_small_refill_margin(self):
+    def test_groq_tpm_retry_adds_rolling_window_refill_margin(self):
         first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         rate_error = urllib.error.HTTPError(
             "https://example.test", 429, "rate limit", {},
@@ -167,7 +167,7 @@ class ProviderFallbackTests(unittest.TestCase):
             result, provider = generate_json("system", "user")
         self.assertEqual(result["summary"], "recovered")
         self.assertEqual(provider, "groq")
-        sleep.assert_called_once_with(6.3125)
+        sleep.assert_called_once_with(14.3125)
         self.assertEqual(call.call_count, 2)
 
     def test_temporary_tpm_failure_does_not_disable_provider_for_next_game(self):
