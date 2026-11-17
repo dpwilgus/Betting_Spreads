@@ -1264,5 +1264,60 @@ class LiveResearchTests(unittest.TestCase):
             team_names=("San Francisco 49ers", "Dallas Cowboys"),
         )
 
+    def test_depth_chart_ids_are_deduplicated_across_formation_charts(self):
+        from live_research import _extract_depth_chart_ids
+
+        payload = {"depthCharts": [
+            {"positions": {"quarterback": {
+                "position": {"abbreviation": "QB"},
+                "athletes": [
+                    {"rank": 1, "athlete": {"id": "qb1"}},
+                    {"rank": 2, "athlete": {"id": "qb2"}},
+                ],
+            }}},
+            {"positions": {"quarterback": {
+                "position": {"abbreviation": "QB"},
+                "athletes": [
+                    {"rank": 1, "athlete": {"id": "qb1"}},
+                    {"rank": 2, "athlete": {"id": "qb3"}},
+                    {"rank": 3, "athlete": {"id": "qb2"}},
+                ],
+            }}},
+        ]}
+
+        self.assertEqual(_extract_depth_chart_ids(payload)["QB"], ["qb1", "qb2", "qb3"])
+
+    def test_unavailable_depth_chart_player_does_not_consume_position_limit(self):
+        roster = [
+            {"id": "qb", "name": "Quarterback One", "position": "QB"},
+            {"id": "rb1", "name": "RB One", "position": "RB"},
+            {"id": "rb2", "name": "RB Two", "position": "RB"},
+            {"id": "rb3", "name": "RB Three", "position": "RB"},
+            {"id": "rb4", "name": "RB Four", "position": "RB"},
+        ]
+        depth = {"depthCharts": [{"positions": {
+            "quarterback": {
+                "position": {"abbreviation": "QB"},
+                "athletes": [{"rank": 1, "athlete": {"id": "qb"}}],
+            },
+            "runningBack": {
+                "position": {"abbreviation": "RB"},
+                "athletes": [
+                    {"rank": rank, "athlete": {"id": f"rb{rank}"}}
+                    for rank in range(1, 5)
+                ],
+            },
+        }}]}
+        injuries = [{
+            "player": "RB One", "position": "K", "status": "Out",
+        }]
+
+        selected = _select_research_players(roster, depth, injuries, "Test Team")
+        running_backs = [
+            player["name"] for player in selected if player["position"] == "RB"
+        ]
+
+        self.assertEqual(running_backs, ["RB Two", "RB Three", "RB Four"])
+
 if __name__ == "__main__":
     unittest.main()
