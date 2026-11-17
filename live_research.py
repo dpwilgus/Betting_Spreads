@@ -521,10 +521,16 @@ def _extract_depth_chart_ids(payload: Any) -> dict[str, list[str]]:
                 continue
             position = position_data.get("position") or {}
             abbreviation = (
-                position.get("abbreviation", "")
-                if isinstance(position, dict) else ""
+                position.get("abbreviation") or position.get("name") or ""
+                if isinstance(position, dict) else str(position)
             )
-            abbreviation = str(abbreviation).upper()
+            abbreviation = str(abbreviation).strip().upper()
+            abbreviation = {
+                "QUARTERBACK": "QB",
+                "RUNNING BACK": "RB",
+                "WIDE RECEIVER": "WR",
+                "TIGHT END": "TE",
+            }.get(abbreviation, abbreviation)
             if abbreviation not in {"QB", "RB", "WR", "TE"}:
                 continue
             for item in position_data.get("athletes", []):
