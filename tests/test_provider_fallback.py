@@ -9,7 +9,7 @@ from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_t
                          _normalize_name, _validate_analysis, analyze_game)
 from ai_providers import (Provider, _call_provider, _response_text, generate_json,
                           generate_json_ensemble, get_provider_usage_stats,
-                          reset_provider_run_state)
+                          reset_provider_run_state, configure_providers)
 from live_research import collect_game_research, _extract_roster_names
 
 
@@ -38,6 +38,18 @@ def valid_analysis():
 
 
 class ProviderFallbackTests(unittest.TestCase):
+
+    def test_configure_providers_reopens_editor_when_a_provider_is_already_saved(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+        configured = [(groq, "groq-key"), (gemini, "gemini-key")]
+        with patch("ai_providers._configure_keys") as configure, patch(
+            "ai_providers._CONFIGURED_PROVIDERS_CACHE", None
+        ), patch("ai_providers._configured_providers", return_value=configured):
+            names = configure_providers()
+
+        configure.assert_called_once_with()
+        self.assertEqual(names, ["groq", "gemini"])
 
     def test_provider_order_override_does_not_exclude_other_configured_models(self):
         keys = {"groq": "groq-key", "gemini": "gemini-key", "nvidia": "nvidia-key"}
