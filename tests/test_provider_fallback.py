@@ -218,6 +218,29 @@ class ProviderFallbackTests(unittest.TestCase):
         sleep.assert_called_once_with(14.3125)
         self.assertEqual(call.call_count, 2)
 
+    def test_groq_tpm_millisecond_retry_hint_uses_safety_window(self):
+        first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        rate_error = urllib.error.HTTPError(
+            "https://example.test", 429, "rate limit", {},
+            io.BytesIO(
+                b"Rate limit reached: tokens per minute (TPM): "
+                b"Limit 8000, Used 3795, Requested 4293. "
+                b"Please try again in 659.999999ms."
+            )
+        )
+        with patch(
+            "ai_providers.ensure_configured", return_value=[(first, "key-one")]
+        ), patch("ai_providers._SKIP_PROVIDER_FOR_RUN", set()), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[rate_error, {"summary": "recovered"}],
+        ):
+            result, provider = generate_json("system", "user")
+        self.assertEqual(provider, "groq")
+        self.assertEqual(result["summary"], "recovered")
+        sleep.assert_called_once_with(15.0)
+
     def test_temporary_tpm_failure_does_not_disable_provider_for_next_game(self):
         first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         rate_error = urllib.error.HTTPError(
