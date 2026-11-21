@@ -215,7 +215,7 @@ class ProviderFallbackTests(unittest.TestCase):
             result, provider = generate_json("system", "user")
         self.assertEqual(result["summary"], "recovered")
         self.assertEqual(provider, "groq")
-        sleep.assert_called_once_with(15.0)
+        sleep.assert_called_once_with(60.0)
         self.assertEqual(call.call_count, 2)
 
     def test_groq_tpm_millisecond_retry_hint_uses_safety_window(self):
@@ -239,7 +239,7 @@ class ProviderFallbackTests(unittest.TestCase):
             result, provider = generate_json("system", "user")
         self.assertEqual(provider, "groq")
         self.assertEqual(result["summary"], "recovered")
-        sleep.assert_called_once_with(15.0)
+        sleep.assert_called_once_with(60.0)
 
     def test_temporary_tpm_failure_does_not_disable_provider_for_next_game(self):
         first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
