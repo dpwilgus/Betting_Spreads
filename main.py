@@ -256,8 +256,11 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 offset + 1, pick.get("player_or_team", ""),
                 pick.get("bet_description", ""), pick.get("average_per_game", ""),
                 pick.get("market_line", "Not verified"), pick.get("play_threshold", ""),
-                f"{pick.get('estimated_hit_probability', 0):.1f}%",
-                pick.get("confidence", ""), pick.get("statistical_rationale", ""),
+                (f"{float(pick['estimated_hit_probability']):.1f}%"
+                 if isinstance(pick.get("estimated_hit_probability"), (int, float))
+                 else "Not estimated"),
+                (pick.get("confidence") if pick.get("confidence") is not None else "Not estimated"),
+                pick.get("statistical_rationale", ""),
                 pick.get("risk_factors", ""), pick.get("data_quality", ""),
             ]
             for col, value in enumerate(values, 1):
@@ -276,9 +279,9 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     model_only_props = analysis.get("model_only_picks", [])
     next_pick_row = write_pick_section(
         next_pick_row,
-        "MODEL-ONLY PROP LEANS (NOT VERIFIED SPORTSBOOK BETS)",
+        "UNVERIFIED PLAYER MARKETS / MODEL LEANS (NOT BETTING PICKS)",
         model_only_props,
-        "No model-only player-prop leans met the evidence threshold."
+        "No supported player market watchlist or model-only leans were available."
     )
     next_pick_row = write_pick_section(
         next_pick_row, "GAME-LEVEL BETS (FULL GAME / 1ST HALF / 1ST QUARTER)", game_picks,
