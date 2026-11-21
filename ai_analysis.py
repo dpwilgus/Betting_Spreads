@@ -2144,8 +2144,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         player_usage, rosters, team_names,
     )
     quote_focus = (
-        "\\nEXACT VERIFIED SPORTSBOOK PROP CANDIDATES (prioritize these; "
-        "evaluate, do not assume they are profitable):\\n"
+        "\nEXACT VERIFIED SPORTSBOOK PROP CANDIDATES (prioritize these; "
+        "evaluate, do not assume they are profitable):\n"
         + json.dumps(quoted_shortlist, ensure_ascii=False, separators=(",", ":"))
         if quoted_shortlist else ""
     )
