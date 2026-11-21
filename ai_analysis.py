@@ -1648,6 +1648,37 @@ def _separate_unverified_player_props(
     return gaps
 
 
+
+def _verify_anytime_td_quotes(
+    data: dict[str, Any], research: dict[str, Any]
+) -> list[str]:
+    """Never display a touchdown scorer as a bet without an exact sportsbook price."""
+    quotes = research.get("verified_player_prop_markets", [])
+    if not isinstance(quotes, list):
+        quotes = []
+    retained = []
+    gaps = []
+    for scorer in data.get("touchdown_scorers", []):
+        player = str(scorer.get("player") or "")
+        quote = _best_matching_quote(
+            {"player_or_team": player, "bet_description": "Anytime touchdown scorer"},
+            quotes,
+        )
+        if not quote:
+            gaps.append(
+                f"Removed unquoted anytime touchdown candidate {player}: no exact sportsbook offer and price."
+            )
+            continue
+        scorer["market_line"] = (
+            f"{quote['line']} ({quote['price']}) — {quote['sportsbook']}"
+        )
+        scorer["market_source"] = quote["source_url"]
+        scorer["market_retrieved_at"] = quote["retrieved_at"]
+        retained.append(scorer)
+    data["touchdown_scorers"] = retained
+    return gaps
+
+
 def _move_sneaky_game_picks(data: dict[str, Any]) -> bool:
     """Move 1Q/1H and other game-line ideas out of Sneaky Props into game-level bets."""
     sneaky = data.get("sneaky_props", [])
@@ -2655,6 +2686,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     sneaky_usage_gaps = _filter_player_props_by_usage(sneaky_usage_data, player_usage)
     data["sneaky_props"] = sneaky_usage_data.get("picks", [])
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
+    td_market_gaps = _verify_anytime_td_quotes(data, research)
     news_evidence_text = "\n".join(
         line for line in str(research.get("research_text", "")).splitlines()
         if "ESPN RECENT TEAM NEWS" in line or "ADAM SCHEFTER PRIORITY NEWS" in line
@@ -2669,7 +2701,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     contradiction_gaps = _remove_contradictory_period_game_picks(data, team_names)
     quality_gaps = (
         injury_gaps + sneaky_status_gaps + prop_gaps + sneaky_usage_gaps
-        + td_gaps + impact_gaps + market_gaps + game_market_gaps + contradiction_gaps
+        + td_gaps + td_market_gaps + impact_gaps + market_gaps + game_market_gaps + contradiction_gaps
     )
     if moved_sneaky_games:
         quality_gaps.append("Moved 1Q/1H game-line ideas from Sneaky Props into the game-level bets section.")
