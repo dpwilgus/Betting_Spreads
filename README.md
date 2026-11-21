@@ -1,32 +1,121 @@
 # Betting Spreads
 
-A simple double-click desktop app that retrieves the current NFL scoreboard week from ESPN and exports matchups and available betting spreads to an Excel workbook.
+A one-click desktop app for Windows and macOS that retrieves the current NFL scoreboard week, independently collects ESPN game and injury information, then uses a configurable AI provider with automatic retries and fallback to analyze each matchup and export an Excel workbook.
 
 ## Downloads
 
-Download the latest version from the repository's **Releases** page:
+Download the latest stable version from the repository's **Releases** page:
 
 - **Windows:** `Betting_Spreads.exe`
 - **macOS:** `Betting_Spreads-macOS.zip` (contains `Betting_Spreads.app`)
 
 No Python installation or package setup is required for end users.
 
+## AI providers and first-time setup
+
+AI analysis is provider-independent. The app can use one or more API keys, tries providers in the configured order, retries transient failures, and falls back when a provider is unavailable, rate-limited, or out of quota.
+
+### Free providers (recommended)
+
+1. **Google Gemini API** — default model: `gemini-3.8-flash`. Free-tier token pricing is currently $0 for this model, subject to project/model rate limits. Google says free-tier content may be used to improve its products; do not submit private or sensitive information. See [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing) and [rate limits](https://ai.google.dev/gemini-api/docs/rate-limits).
+2. **GroqCloud** — default model: `openai/gpt-oss-20b`. The Free plan currently includes hosted models with per-model RPM, RPD, and token limits. Check your organization's live [rate limits](https://console.groq.com/docs/rate-limits).
+3. **OpenRouter** — default route: `openrouter/free`, which selects an available free model. Free-model requests currently have a 20 RPM / 50 RPD limit for accounts below the $10 lifetime-credit threshold. See [free models](https://openrouter.ai/collections/free-models) and [pricing/limits](https://openrouter.ai/pricing).
+
+Free tiers, model availability, rate limits, and provider terms can change. The app cannot guarantee that a provider's free quota will cover an entire NFL slate. Users should review each provider's terms and dashboard before use.
+
+### Optional paid provider
+
+**OpenAI API** is supported as an optional fallback. ChatGPT subscriptions do not include API usage; OpenAI API usage is billed separately. See [OpenAI API pricing](https://developers.openai.com/api/docs/pricing).
+
+### Create your keys
+
+- Gemini: [Google AI Studio API keys](https://aistudio.google.com/app/apikey)
+- Groq: [GroqCloud API keys](https://console.groq.com/keys)
+- OpenRouter: [OpenRouter API keys](https://openrouter.ai/settings/keys)
+- NVIDIA NIM: [NVIDIA API keys](https://build.nvidia.com/)
+- OpenAI (optional): [OpenAI API keys](https://platform.openai.com/api-keys)
+
+On first run, the app prompts for any combination of these keys. Leave providers you do not want to use blank. Keys are saved in the computer's secure credential store (macOS Keychain or Windows Credential Manager), not in the workbook or repository.
+
+You can also configure environment variables before launching:
+- `GEMINI_API_KEY`
+- `GROQ_API_KEY`
+- `OPENROUTER_API_KEY`
+- `NVIDIA_API_KEY` (optional; final free-provider fallback)
+- `OPENAI_API_KEY` (optional; paid)
+
+If you initially saved only one provider key, add or update credentials later without removing the existing keys:
+
+```bash
+python main.py --configure-ai
+```
+
+The credential editor can be reopened after initial setup. Leave fields blank to retain their previously saved keys. Normal analysis attempts every configured free provider; OpenAI remains excluded unless paid usage is explicitly enabled with `AI_ALLOW_PAID=1` and `OPENAI` is included in `AI_PROVIDER_ORDER`.
+
+The default free-provider order is Gemini → Groq → OpenRouter → NVIDIA. Providers without a saved key are skipped. OpenAI is excluded from normal rotation so a free run cannot unexpectedly incur OpenAI API charges. To deliberately enable the optional paid provider, set `AI_ALLOW_PAID=1` and include `openai` in `AI_PROVIDER_ORDER`, for example `AI_ALLOW_PAID=1` and `AI_PROVIDER_ORDER=GEMINI,GROQ,OPENROUTER,NVIDIA,OPENAI`. You can override the free-provider order with `AI_PROVIDER_ORDER`, for example `GROQ,OPENROUTER,GEMINI,NVIDIA`. Optional model overrides are `GEMINI_MODEL`, `GROQ_MODEL`, `OPENROUTER_MODEL`, `NVIDIA_MODEL`, and `OPENAI_MODEL`.
+
+### NVIDIA NIM (experimental fallback)
+
+NVIDIA NIM is included as the **fourth optional free-provider fallback** for personal analysis and testing. It is only contacted when its API key is configured and the first three providers cannot complete the analysis.
+
+- Default model: `nvidia/nemotron-3-ultra-550b-a55b`
+- Alternative model: `nvidia/nemotron-3.5-lightning-30b-a3b`
+- API endpoint: `https://integrate.api.nvidia.com/v1/chat/completions`
+- Credential: `NVIDIA_API_KEY` (stored in macOS Keychain / Windows Credential Manager as `nvidia_api_key`)
+- Optional settings: `NVIDIA_MODEL` and `NVIDIA_MAX_TOKENS` (default 5000)
+
+To run a local development test using NVIDIA only, set the provider order in the same Terminal session before launching:
+
+```bash
+AI_PROVIDER_ORDER=nvidia python main.py
+```
+
+To compare NVIDIA first and then fall back to the existing free providers:
+
+```bash
+AI_PROVIDER_ORDER=nvidia,gemini,groq,openrouter python main.py
+```
+
+The NVIDIA endpoint is OpenAI Chat Completions-compatible, but the Nemotron endpoint does not guarantee JSON-mode enforcement. The app therefore asks for strict JSON in its prompt and still validates the returned analysis. Explicitly truncated responses are detected and sent to fallback without repeating the same token-expensive request; other invalid responses may receive one retry. Check the NVIDIA account dashboard for current per-model limits and availability.
+
+**Development/testing only:** NVIDIA says hosted Developer Program endpoints are for prototyping, research, development, and testing—not serving real end users. NVIDIA's free endpoint rate limits vary by model and current traffic, and are not an unlimited token allocation. See [NVIDIA NIM FAQ](https://docs.api.nvidia.com/nim/docs/product), [LLM API reference](https://docs.api.nvidia.com/nim/reference/llm-apis), and [Nemotron 3 Ultra model card](https://build.nvidia.com/nvidia/nemotron-3-ultra-550b-a55b/modelcard).
+
+## Sportsbook odds (The Odds API)
+
+The app uses the documented **The Odds API** service at [the-odds-api.com](https://the-odds-api.com/) (note the hyphens in the domain). Choose the free **Starter** plan, which currently includes 500 credits per month, all sports, most bookmakers, and all betting markets. Historical odds are not included on the free tier. The API key is issued through the provider's signup process.
+
+On first launch, paste the API key into the app's Odds API setup window. The key is stored in macOS Keychain or Windows Credential Manager through the existing `keyring` dependency; it is not written to the repository or workbook. Do not commit the key or paste it into source code.
+
+The app uses the official API endpoints only; it does not scrape sportsbook websites. It requests US-region odds one event at a time for player props. Event discovery is a free endpoint. Player-prop request cost is based on the number of unique markets actually returned multiplied by the number of regions requested. The app requests one region (US) and keeps Pass 1 to nine core markets, including anytime touchdown scorer. Pass 2 requests first-touchdown scorer quotes only when collected player logs show credible scoring roles; first-half TD opportunities are analyzed but remain unverified/model-only unless a supported feed supplies a real quote. A 13-game Sunday slate across four weeks has a conservative upper bound of 468 credits if all nine markets are returned for every game; actual usage is generally lower when markets are unavailable. A 25-credit reserve is kept when the API has reported remaining-credit information. Recent quotes are cached locally for five minutes.
+
+The GUI lets you choose Sunday, non-Sunday, or the entire week, then select individual matchups. Every game in the selected slate is checked by default. The workbook includes a final `Best Overall Bets` tab ranking up to 10 recommendations across the games you selected. Use `--no-gui` to process the full ESPN scoreboard without the selection window. For a specific regular-season week, add `--week N`; combine it with `--matchup` to focus on one future or current-week game, for example `python main.py --week 11 --matchup "Indianapolis Colts at Houston Texans"`.
+
+Provider plan limits and market coverage can change. Check the provider's usage dashboard and the API response's remaining-credit header before expanding market requests.
+
 ## How to use
 
 1. Download the file for your operating system from [Releases](../../releases).
-2. Windows: double-click `Betting_Spreads.exe`. A small console window displays the result.
+2. Windows: double-click `Betting_Spreads.exe`.
 3. macOS: unzip the download, then open `Betting_Spreads.app`. On first launch, macOS may require right-clicking the app and choosing **Open** because this app is not signed or notarized.
-4. The app retrieves the current NFL scoreboard week and creates or replaces `NFL_Weekly_Matchups.xlsx` in the same folder as the executable (Windows) or beside the app bundle (macOS).
+4. Enter one or more provider API keys on first run (Gemini, Groq, or OpenRouter are the recommended default free options; NVIDIA is optional and must be explicitly enabled for local development).
+5. Choose Sunday or non-Sunday, uncheck any games to omit, then enter the Odds API key on first run if you want verified sportsbook quotes. The app researches selected matchups and creates or replaces `NFL_Weekly_Matchups.xlsx` beside the executable/app bundle.
 
-The workbook includes kickoff time in Eastern Time, away and home teams, the available betting line and spread, sportsbook/provider when supplied, and game status.
+## Workbook contents
 
-## Data and odds limitations
+- **Weekly Matchups:** kickoff in Eastern Time, away team, home team, ESPN betting line, and game status.
+- **One tab per matchup:** matchup summary, expected game script, verified sportsbook player props when lines/prices are available, a separate model-only prop-lean section when they are not, separate game-level bets, up to three touchdown scorer candidates, injury impacts, a researched player pool with season/recent evidence and reasons for selection (including injury replacements), confidence ratings, model-estimated probabilities, data limitations, and source links.
+- The redundant Spread and Sportsbook columns are intentionally omitted from the main schedule sheet.
 
-- Schedule and odds are retrieved at run time from ESPN's public scoreboard endpoint. This is an unofficial endpoint and may change without notice.
-- Betting odds are included only when ESPN returns them. Some games may show **Odds unavailable**.
-- The first odds entry returned by ESPN is used; it is not necessarily the best price or a particular sportsbook's latest line.
-- An internet connection is required.
-- This tool is for informational purposes and does not provide betting advice.
+## Research and probability limitations
+
+- ESPN's public scoreboard endpoint supplies the schedule and available game line. It is unofficial and may change without notice.
+- ESPN game summaries, rosters, depth charts, player game logs, team statistics, team-news headlines, and available team injury endpoints are fetched independently of the AI provider. The collector researches a broader core player pool and adds next-man-up candidates for relevant injuries before AI analysis. Candidate evidence is retained in the workbook even when the AI does not recommend that player. The selected AI provider analyzes this evidence; it does not automatically have web search. Current player-prop prices must be independently present in the evidence to be labeled verified.
+- A market line is labeled **Not verified** when the research cannot confirm a live sportsbook offer. A model play threshold is an analytical target, not a claim that a sportsbook currently offers that number.
+- Estimated hit probabilities and 1–10 confidence ratings are research estimates, not guarantees or independently audited forecasts. Confidence reflects the reliability of available data and the stability of the estimate; it is not the same as probability.
+- Player props target five per matchup, with a preferred minimum of three when the evidence supports them; fewer than three are allowed only when fewer than three worthwhile picks qualify, and more than five are allowed when additional picks meet the quality standard. Game-level bets appear in a separate section. ESPN Core injury statuses are applied as a deterministic safety check so players listed Out, Doubtful, or on injured reserve are removed from player-prop and touchdown recommendations. The analyst is instructed not to invent stats or lines or pad recommendations. Sources and material data gaps are included in each game tab.
+- API use is subject to each selected provider's free-tier limits or paid pricing. An internet connection is required. Provider fallback does not combine quotas and cannot guarantee uninterrupted free access.
+
+This tool is for research and informational purposes only. It does not guarantee outcomes or constitute financial advice.
 
 ## Build locally (developers)
 
@@ -37,23 +126,47 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-To create a standalone executable on your own operating system:
+To create a standalone executable, include the agent instruction resources and certificate/keyring dependencies:
 
+Windows:
 ```bash
-pyinstaller --noconfirm --clean --onefile --console --name Betting_Spreads main.py
+pyinstaller --noconfirm --clean --onefile --console --collect-all tzdata --collect-data certifi --collect-all keyring --collect-data agents --name Betting_Spreads main.py
 ```
 
-For macOS, use `--windowed` instead to build a double-clickable app bundle:
+macOS:
+```bash
+pyinstaller --noconfirm --clean --windowed --collect-data certifi --collect-all keyring --collect-data agents --name Betting_Spreads main.py
+```
+
+## Local development: reuse saved AI analysis
+
+For local testing only, the Python script supports a cache-only workbook refresh:
+
+1. Run a normal update once. Each successful matchup analysis is saved as JSON in the local `analysis_cache/` folder.
+2. Later, run `python main.py --reuse-cache` to fetch the current ESPN scoreboard and rebuild the workbook from those saved analyses without calling any AI API.
+3. Cached analyses are clearly marked in the workbook because injuries, player availability, weather, usage, and sportsbook markets are not refreshed.
+
+Use `python main.py --refresh-incomplete` to reuse analyses created with the current output format, while making API calls only for missing or outdated cache entries. This is useful when importing older analyses or after changing the required output structure. Games that are already live or completed are still skipped.
+
+Run a focused analysis for one game without spending AI calls on the rest of the slate:
 
 ```bash
-pyinstaller --noconfirm --clean --windowed --name Betting_Spreads main.py
+AI_PROVIDER_ORDER=nvidia python main.py --matchup "Patriots at Lions"
+```
+
+
+The first run for a new slate may require API usage for games that have no cache entry. Existing workbooks created before caching do not automatically contain the structured cache. These options are intended for developers and are not exposed in the packaged end-user app.
+
+```bash
+python main.py --reuse-cache
+python main.py --refresh-incomplete
 ```
 
 ## Publishing a release
 
-Push a version tag (for example, `v1.0.0`) to trigger GitHub Actions. It builds the Windows and macOS downloads and attaches both to a GitHub Release. You can also run the workflow manually from the Actions tab to test builds; manual runs create build artifacts but do not publish a release.
+Push a version tag (for example, `v2.0.0`) to trigger GitHub Actions. It builds the Windows and macOS downloads and attaches both to a GitHub Release. You can also run the workflow manually from the Actions tab to test builds; manual runs create build artifacts but do not publish a release.
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
