@@ -266,6 +266,30 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(provider, "groq")
         self.assertEqual(call.call_count, 4)
 
+    def test_groq_429_immediately_falls_back_without_second_rate_limited_request(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        nvidia = Provider("nvidia", "NVIDIA_API_KEY", "nvidia", "url", "model", "openai")
+        error = urllib.error.HTTPError(
+            "https://example.test", 429, "rate limit", {},
+            io.BytesIO(b"tokens per minute (TPM): Limit 8000, Used 4306, Requested 4947.")
+        )
+        with patch(
+            "ai_providers.ensure_configured",
+            return_value=[(groq, "groq-key"), (nvidia, "nvidia-key")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[error, {"summary": "NVIDIA result"}]
+        ) as call:
+            result, selected = generate_json("system", "user")
+        self.assertEqual(selected, "nvidia")
+        self.assertEqual(result["summary"], "NVIDIA result")
+        self.assertEqual(call.call_count, 2)
+        sleep.assert_not_called()
+
     def test_groq_tpm_preflight_skips_oversized_request_and_uses_fallback(self):
         groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
         gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
