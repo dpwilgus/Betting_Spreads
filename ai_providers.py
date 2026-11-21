@@ -447,8 +447,14 @@ def generate_json(
                     delay = 1.0
                 # Groq's rolling TPM window can reject the next full request
                 # despite a subsecond refill hint. Keep a meaningful cushion.
-                if exc.code == 429 and "tokens per minute" in body.lower():
-                    delay = max(delay + 10.0, 15.0)
+                if exc.code == 429 and (
+                    "tokens per minute" in body.lower()
+                    or "tpm" in body.lower()
+                ):
+                    # Groq's subsecond hint describes the instant a few tokens
+                    # refill, not the time until a full new request fits.
+                    # Wait one complete rolling minute before retrying.
+                    delay = max(delay, 60.0)
                 quota_exhausted = exc.code == 429 and any(
                     marker in body.lower()
                     for marker in ("quota", "insufficient_quota", "resource_exhausted",
