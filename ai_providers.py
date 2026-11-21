@@ -430,23 +430,25 @@ def generate_json(
                 # 429 may be a short per-minute throttle or a depleted daily quota.
                 retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
                 wait_match = re.search(
-                    r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*s",
+                    r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s)\b",
                     body,
                     flags=re.I,
                 )
                 try:
-                    delay = float(retry_after) if retry_after else (
-                        float(wait_match.group(1)) if wait_match else 1.0
-                    )
+                    if retry_after:
+                        delay = float(retry_after)
+                    elif wait_match:
+                        delay = float(wait_match.group(1))
+                        if wait_match.group(2).lower() == "ms":
+                            delay /= 1000.0
+                    else:
+                        delay = 1.0
                 except ValueError:
                     delay = 1.0
-                # Groq's TPM response reports the exact refill time, but retrying
-                # at that exact boundary can race the rolling-window counter.
-                # Groq's reported refill estimate can still race its rolling
-                # 60-second TPM window. Wait an additional 10 seconds for explicit
-                # TPM errors; leave all other provider retry behavior unchanged.
-                if exc.code == 429 and "tokens per minute" in body.lower() and wait_match:
-                    delay += 10.0
+                # Groq's rolling TPM window can reject the next full request
+                # despite a subsecond refill hint. Keep a meaningful cushion.
+                if exc.code == 429 and "tokens per minute" in body.lower():
+                    delay = max(delay + 10.0, 15.0)
                 quota_exhausted = exc.code == 429 and any(
                     marker in body.lower()
                     for marker in ("quota", "insufficient_quota", "resource_exhausted",
