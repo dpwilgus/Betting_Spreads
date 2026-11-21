@@ -172,6 +172,41 @@ class AnalysisQualityTests(unittest.TestCase):
                 team_names=("San Francisco 49ers", "Dallas Cowboys"),
             )
 
+    def test_invalid_pick_probability_does_not_discard_valid_verified_candidate(self):
+        valid = {
+            "rank": 1, "market_type": "Player Prop",
+            "player_or_team": "Jahmyr Gibbs",
+            "bet_description": "Over 89.5 rushing yards",
+            "market_line": "Over 89.5 (-110) — DraftKings",
+            "play_threshold": "Over 89.5", "estimated_hit_probability": 58,
+            "confidence": 6, "statistical_rationale": "Usage supports the line",
+            "risk_factors": "Game script", "data_quality": "Moderate",
+        }
+        invalid = dict(valid, player_or_team="Other Player",
+                       estimated_hit_probability="not a number")
+        analysis = {
+            "summary": "Test", "game_script": "Test",
+            "picks": [invalid, valid], "sneaky_props": [],
+            "touchdown_scorers": [], "injury_impact": [], "data_gaps": [],
+        }
+        _validate_analysis(analysis)
+        self.assertEqual(analysis["picks"], [valid])
+        self.assertTrue(any("Removed model pick" in gap for gap in analysis["data_gaps"]))
+
+    def test_all_invalid_picks_still_fail_validation(self):
+        analysis = {
+            "summary": "Test", "game_script": "Test",
+            "picks": [{
+                "market_type": "Player Prop", "player_or_team": "Unknown",
+                "estimated_hit_probability": "not a number",
+            }],
+            "sneaky_props": [], "touchdown_scorers": [],
+            "injury_impact": [], "data_gaps": [],
+        }
+        with self.assertRaisesRegex(RuntimeError, "no usable matchup analysis"):
+            _validate_analysis(analysis)
+        self.assertEqual(analysis["picks"], [])
+
     def test_missing_underdog_assessment_does_not_discard_otherwise_valid_picks(self):
         pick = {
             "rank": 1, "market_type": "Game Prop",
