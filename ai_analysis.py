@@ -2341,6 +2341,44 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             data.setdefault("data_gaps", []).append(
                 "Sportsbook player props are not posted; the watchlist has no betting line, odds, side or estimated edge."
             )
+    # Quotes are source facts, independent of whether a model can produce picks.
+    # Keep these visible when a provider emits an empty or unusable slate.
+    data["verified_market_candidates"] = [
+        {
+            "player_or_team": item["player"],
+            "bet_description": f"{item['side']} {item['point']:g} "
+                + {
+                    "player_pass_yds": "passing yards",
+                    "player_rush_yds": "rushing yards",
+                    "player_reception_yds": "receiving yards",
+                    "player_receptions": "receptions",
+                    "player_pass_attempts": "passing attempts",
+                    "player_pass_completions": "pass completions",
+                    "player_rush_attempts": "rushing attempts",
+                }.get(item["market_key"], item["market_key"]),
+            "market_line": f"{item['line']} ({item['price']}) — {item['sportsbook']}",
+            "market_retrieved_at": item.get("retrieved_at"),
+            "market_source": next(
+                (
+                    quote.get("source_url")
+                    for quote in research.get("verified_player_prop_markets", [])
+                    if _normalize_name(str(quote.get("player") or "")) ==
+                        _normalize_name(item["player"])
+                    and quote.get("market_key") == item["market_key"]
+                    and str(quote.get("side") or "").casefold() == item["side"].casefold()
+                    and str(quote.get("point")) == str(item["point"])
+                ), None
+            ),
+            "average_per_game": f"{item['season_average']:.1f} over {item['games']} games",
+            "play_threshold": "Research candidate — not a betting recommendation",
+            "estimated_hit_probability": None,
+            "confidence": None,
+            "statistical_rationale": "Exact sportsbook quote; season average is context, not an estimated edge.",
+            "risk_factors": "AI has not validated an edge; do not treat as a recommended bet",
+            "data_quality": "Limited",
+        }
+        for item in quoted_shortlist
+    ]
     data["player_research_summary"] = player_research_summary
     data["analysis_version"] = 14
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
