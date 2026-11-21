@@ -527,8 +527,8 @@ def generate_json_ensemble(
         except Exception as exc:
             failures.append(f"{provider.name}: {exc}")
     if not results:
-        details = "\\n".join(failures)
+        details = "\n".join(failures)
         raise RuntimeError(
-            "No configured AI provider returned a valid matchup analysis.\\n" + details
+            "No configured AI provider returned a valid matchup analysis.\n" + details
         )
     return results, failures, configured_names
