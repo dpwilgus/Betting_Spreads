@@ -976,6 +976,27 @@ def main() -> int:
                "Fresh independent research and multi-provider analysis completed; results were saved to the local cache.\n")
             + f"\nSaved to:\n{output}"
         )
+        verified_player_prop_count = sum(
+            1 for analysis in analyses for pick in analysis.get("picks", [])
+            if isinstance(pick, dict) and pick.get("market_type") == "Player Prop"
+        )
+        verified_touchdown_count = sum(
+            len(analysis.get("touchdown_scorers", [])) for analysis in analyses
+        )
+        quote_candidates_count = sum(
+            len(analysis.get("verified_market_candidates", []))
+            for analysis in analyses
+        )
+        message += (
+            f"\\n\\nVerified betting output: {verified_player_prop_count} player props, "
+            f"{verified_touchdown_count} anytime-TD props; "
+            f"{quote_candidates_count} research-only sportsbook candidates."
+        )
+        if not verified_player_prop_count and not verified_touchdown_count and quote_candidates_count:
+            message += (
+                "\\nWARNING: Models found no qualifying verified player/TD recommendations. "
+                "Research-only sportsbook quotes are NOT betting recommendations."
+            )
         provider_usage = get_provider_usage_stats()
         usage_lines = []
         for provider_name, stats in sorted(provider_usage.items()):
