@@ -2048,8 +2048,29 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     # Compute and feed the same per-game averages that will be displayed in the
     # workbook, so they are part of prop selection rather than post-hoc decoration.
     player_usage = _research_player_usage(original_research)
+    # The candidate selector can include stale ESPN associations. Only
+    # research players explicitly present on the current matchup team roster.
+    rosters = research.get("rosters") or {}
+    eligible_names = {
+        _normalize_name(str(name))
+        for team in team_names
+        for name in (rosters.get(team) or [])
+        if isinstance(name, str)
+    }
+    raw_candidates = research.get("selected_player_candidates", {})
+    vetted_candidates = {
+        team: [
+            candidate for candidate in candidates
+            if isinstance(candidate, dict)
+            and _normalize_name(str(candidate.get("name") or "")) in {
+                _normalize_name(str(name)) for name in (rosters.get(team) or [])
+            }
+        ]
+        for team, candidates in raw_candidates.items()
+        if team in team_names and isinstance(candidates, list)
+    } if isinstance(raw_candidates, dict) else {}
     player_research_summary = _build_player_research_summary(
-        player_usage, research.get("selected_player_candidates", {})
+        player_usage, vetted_candidates
     )
     if player_research_summary:
         original_research += (
