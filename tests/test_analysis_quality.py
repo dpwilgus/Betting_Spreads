@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from prop_averages import attach_per_game_averages
 
@@ -7,6 +8,9 @@ from ai_analysis import (
     _bounded_research_text,
     _build_unquoted_market_watchlist,
     _rank_quoted_player_markets,
+    _rank_quoted_touchdown_markets,
+    _recover_verified_props_from_focused_review,
+    _verify_anytime_td_quotes,
     _apply_independent_injury_statuses,
     _deduplicate_correlated_game_picks,
     _separate_unverified_player_props,
@@ -179,13 +183,15 @@ class AnalysisQualityTests(unittest.TestCase):
             {"player": "Player A", "market_key": "player_rush_yds",
              "side": "Over", "point": 50.5, "price": "-110",
              "sportsbook": "DraftKings", "line": "Over 50.5",
-             "retrieved_at": "2026-11-21T12:00:00Z"},
+             "retrieved_at": "2026-11-21T12:00:00Z",
+             "source_url": "https://the-odds-api.com/"},
             {"player": "Wrong Team", "market_key": "player_rush_yds",
              "side": "Over", "point": 40.5, "price": "-110",
              "sportsbook": "DraftKings"},
         ]
         usage = {
-            "playera": {"games_available": 5, "season": {"rushingYards": 350}},
+            "playera": {"position": "RB", "games_available": 5,
+                        "season": {"rushingYards": 350, "rushingAttempts": 75}},
             "wrongteam": {"games_available": 5, "season": {"rushingYards": 400}},
         }
         result = _rank_quoted_player_markets(
@@ -196,6 +202,121 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertEqual(result[0]["player"], "Player A")
         self.assertEqual(result[0]["point"], 50.5)
         self.assertEqual(result[0]["season_average"], 70)
+
+    def test_key_offensive_players_beat_obscure_alt_lines_and_no_duplicate_players(self):
+        def quote(player, market, side, point, price="-110"):
+            return {
+                "player": player, "market_key": market, "side": side,
+                "point": point, "price": price,
+                "sportsbook": "DraftKings", "line": f"{side} {point}",
+                "source_url": "https://the-odds-api.com/",
+                "retrieved_at": "2026-11-21T12:00:00Z",
+            }
+        quotes = [
+            quote("Backup Receiver", "player_reception_yds", "Over", 10.5),
+            quote("Backup Receiver", "player_reception_yds", "Over", 11.5),
+            quote("Alpha Receiver", "player_reception_yds", "Over", 51.5),
+            quote("Alpha Receiver", "player_reception_yds", "Over", 52.5),
+            quote("Lead Runner", "player_rush_yds", "Over", 72.5),
+            quote("Backup Runner", "player_rush_yds", "Over", 10.5),
+            quote("Inactive WR", "player_reception_yds", "Over", 49.5),
+        ]
+        usage = {
+            "backupreceiver": {"position": "WR", "games_available": 9,
+                               "season": {"receivingYards": 190, "receivingTargets": 18}},
+            "alphareceiver": {"position": "WR", "games_available": 9,
+                              "season": {"receivingYards": 630, "receivingTargets": 72,
+                                         "receptions": 54}},
+            "leadrunner": {"position": "RB", "games_available": 9,
+                           "season": {"rushingYards": 720, "rushingAttempts": 144,
+                                      "receivingTargets": 18}},
+            "backuprunner": {"position": "RB", "games_available": 6,
+                             "season": {"rushingYards": 114, "rushingAttempts": 24}},
+            "inactivewr": {"position": "WR", "games_available": 9,
+                           "season": {"receivingYards": 620, "receivingTargets": 72}},
+        }
+        shortlist = _rank_quoted_player_markets(
+            quotes, usage,
+            {"Team A": ["Backup Receiver", "Alpha Receiver", "Inactive WR"],
+             "Team B": ["Lead Runner", "Backup Runner"]},
+            ("Team A", "Team B"),
+            injury_statuses=[{"player": "Inactive WR", "status": "Out"}],
+        )
+        self.assertEqual({entry["player"] for entry in shortlist}, {"Alpha Receiver", "Lead Runner"})
+        self.assertEqual(len(shortlist), 2)
+        self.assertTrue(all(entry["source_url"] for entry in shortlist))
+
+    def test_focused_prop_review_only_accepts_exact_quotes_and_verified_td(self):
+        def quote(player, market, side, point, price):
+            return {
+                "player": player, "market_key": market, "side": side,
+                "point": point, "line": f"{side} {point}" if point is not None else side,
+                "price": price, "sportsbook": "FanDuel",
+                "source_url": "https://the-odds-api.com/",
+                "retrieved_at": "2026-11-21T12:00:00Z",
+            }
+        receiving = quote("Alpha Receiver", "player_reception_yds", "Over", 50.5, "-110")
+        td_quote = quote("Alpha Receiver", "player_anytime_td", "Yes", None, "+140")
+        usage = {"alphareceiver": {
+            "player": "Alpha Receiver", "position": "WR", "games_available": 9,
+            "season": {"receivingYards": 630, "receivingTargets": 81,
+                       "receivingTouchdowns": 5, "receptions": 55},
+            "recent": [
+                {"stats": {"receivingYards": 71}},
+                {"stats": {"receivingYards": 83}},
+                {"stats": {"receivingYards": 55}},
+            ],
+        }}
+        research = {
+            "verified_player_prop_markets": [receiving, td_quote],
+            "rosters": {"Team A": ["Alpha Receiver"], "Team B": []},
+            "injury_statuses": [],
+        }
+        shortlist = _rank_quoted_player_markets(
+            [receiving], usage, research["rosters"], ("Team A", "Team B")
+        )
+        model_result = {
+            "picks": [{
+                "rank": 1, "market_type": "Player Prop",
+                "player_or_team": "Alpha Receiver",
+                "bet_description": "Over 50.5 receiving yards",
+                "market_line": "Over 50.5 (-110) — FanDuel",
+                "play_threshold": "Over 50.5",
+                "estimated_hit_probability": 62, "confidence": 7,
+                "statistical_rationale": "Nine games, 70 yards per game and recent usage.",
+                "risk_factors": "Opponent coverage and injury uncertainty.",
+                "data_quality": "Moderate",
+            }],
+            "touchdown_scorers": [{
+                "rank": 1, "player": "Alpha Receiver", "team": "Team A",
+                "availability": "Active", "availability_evidence": "Model guess",
+                "estimated_td_probability": 34, "confidence": 5,
+                "rationale": "Five receiving TDs over nine games and 9 targets per game.",
+                "risk_factors": "Scoring varies by opponent.",
+            }],
+        }
+        data = {"picks": [], "touchdown_scorers": [], "data_gaps": []}
+        with patch("ai_analysis.generate_json", return_value=(model_result, "nvidia")) as mocked:
+            _recover_verified_props_from_focused_review(
+                data, shortlist, research, usage, ("Team A", "Team B"), "nvidia"
+            )
+        self.assertEqual(mocked.call_args.kwargs["provider_filter"], "nvidia")
+        self.assertEqual(len(data["picks"]), 1)
+        self.assertEqual(data["picks"][0]["market_source"], receiving["source_url"])
+        self.assertEqual(len(data["touchdown_scorers"]), 1)
+        self.assertIn("+140", data["touchdown_scorers"][0]["market_line"])
+        self.assertNotEqual(data["touchdown_scorers"][0]["availability"], "Active")
+        self.assertEqual(_verify_anytime_td_quotes(data, research), [])
+
+    def test_anytime_td_candidate_without_sportsbook_quote_is_not_a_verified_prop(self):
+        data = {"touchdown_scorers": [{
+            "player": "Unquoted Player", "team": "Team A",
+        }]}
+        gaps = _verify_anytime_td_quotes(
+            data, {"verified_player_prop_markets": []}
+        )
+        self.assertEqual(data["touchdown_scorers"], [])
+        self.assertIn("no exact sportsbook", gaps[0])
 
     def test_invalid_sneaky_probability_does_not_erase_valid_main_pick(self):
         analysis = {
