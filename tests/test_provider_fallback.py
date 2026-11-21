@@ -215,7 +215,7 @@ class ProviderFallbackTests(unittest.TestCase):
             result, provider = generate_json("system", "user")
         self.assertEqual(result["summary"], "recovered")
         self.assertEqual(provider, "groq")
-        sleep.assert_called_once_with(14.3125)
+        sleep.assert_called_once_with(15.0)
         self.assertEqual(call.call_count, 2)
 
     def test_groq_tpm_millisecond_retry_hint_uses_safety_window(self):
@@ -397,12 +397,19 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_player_prop_must_name_a_current_roster_player(self):
         data = valid_analysis()
         data["picks"][0]["player_or_team"] = "Eli Manning"
-        with self.assertRaisesRegex(RuntimeError, "not found on either current ESPN roster"):
-            _validate_analysis(
-                data,
-                rosters={"Team A": ["Player A"], "Team B": ["Player B"]},
-                team_names=("Team A", "Team B"),
-            )
+        _validate_analysis(
+            data,
+            rosters={"Team A": ["Player A"], "Team B": ["Player B"]},
+            team_names=("Team A", "Team B"),
+        )
+        self.assertFalse(any(
+            pick.get("player_or_team") == "Eli Manning" for pick in data["picks"]
+        ))
+        self.assertEqual(len(data["picks"]), 4)
+        self.assertTrue(any(
+            "player not found on either current ESPN roster" in gap
+            for gap in data["data_gaps"]
+        ))
 
     def test_roster_extractor_reads_nested_espn_athletes(self):
         names = _extract_roster_names({
