@@ -290,7 +290,7 @@ class AnalysisQualityTests(unittest.TestCase):
             "touchdown_scorers": [{
                 "rank": 1, "player": "Alpha Receiver", "team": "Team A",
                 "availability": "Active", "availability_evidence": "Model guess",
-                "estimated_td_probability": 34, "confidence": 5,
+                "estimated_td_probability": 48, "confidence": 5,
                 "rationale": "Five receiving TDs over nine games and 9 targets per game.",
                 "risk_factors": "Scoring varies by opponent.",
             }],
