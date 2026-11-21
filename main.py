@@ -23,7 +23,10 @@ from openpyxl.utils import get_column_letter
 
 from ai_analysis import analyze_game
 from live_research import collect_game_research, reset_research_cache
-from ai_providers import ensure_configured, get_provider_usage_stats, reset_provider_run_state
+from ai_providers import (
+    configure_providers, ensure_configured, get_provider_usage_stats,
+    reset_provider_run_state,
+)
 from sportsbook_odds import (
     fetch_event_quotes, PASS1_MARKETS, PASS2_TD_MARKETS, GAME_MARKETS,
     summarize_quotes, ensure_api_key_configured, research_supports_first_td,
@@ -253,8 +256,11 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
                 offset + 1, pick.get("player_or_team", ""),
                 pick.get("bet_description", ""), pick.get("average_per_game", ""),
                 pick.get("market_line", "Not verified"), pick.get("play_threshold", ""),
-                f"{pick.get('estimated_hit_probability', 0):.1f}%",
-                pick.get("confidence", ""), pick.get("statistical_rationale", ""),
+                (f"{float(pick['estimated_hit_probability']):.1f}%"
+                 if isinstance(pick.get("estimated_hit_probability"), (int, float))
+                 else "Not estimated"),
+                (pick.get("confidence") if pick.get("confidence") is not None else "Not estimated"),
+                pick.get("statistical_rationale", ""),
                 pick.get("risk_factors", ""), pick.get("data_quality", ""),
             ]
             for col, value in enumerate(values, 1):
@@ -270,12 +276,18 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         12, "VERIFIED PLAYER PROPS (SPORTSBOOK LINE REQUIRED)", player_props,
         "No verified sportsbook player-prop lines were available for this matchup."
     )
+    next_pick_row = write_pick_section(
+        next_pick_row,
+        "VERIFIED SPORTSBOOK MARKET CANDIDATES (NOT YET AI-RECOMMENDED)",
+        analysis.get("verified_market_candidates", []),
+        "No roster-validated sportsbook quotes with ESPN game-log context were found."
+    )
     model_only_props = analysis.get("model_only_picks", [])
     next_pick_row = write_pick_section(
         next_pick_row,
-        "MODEL-ONLY PROP LEANS (NOT VERIFIED SPORTSBOOK BETS)",
+        "UNVERIFIED PLAYER MARKETS / MODEL LEANS (NOT BETTING PICKS)",
         model_only_props,
-        "No model-only player-prop leans met the evidence threshold."
+        "No supported player market watchlist or model-only leans were available."
     )
     next_pick_row = write_pick_section(
         next_pick_row, "GAME-LEVEL BETS (FULL GAME / 1ST HALF / 1ST QUARTER)", game_picks,
@@ -314,15 +326,15 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(td_start, 1, "ANYTIME TOUCHDOWN SCORERS")
     sheet.cell(td_start, 1).font = white_bold
     sheet.cell(td_start, 1).fill = navy
-    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=10)
+    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=11)
     td_headers = ["Rank", "Player", "Team", "Availability", "Availability Evidence",
         "Offensive TDs/G (Season / Last 3)", "Estimated TD Probability",
-        "Confidence (1–10)", "Rationale", "Risk Factors"]
+        "Confidence (1–10)", "Rationale", "Risk Factors", "Verified Anytime TD Market" ]
     for col, value in enumerate(td_headers, 1):
         _style_header(sheet.cell(td_start + 1, col, value))
     scorers = analysis.get("touchdown_scorers", [])
     if not scorers:
-        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=10)
+        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=11)
         sheet.cell(td_start + 2, 1, "No touchdown scorer met the evidence threshold.")
     for row_num, scorer in enumerate(scorers, td_start + 2):
         values = [
@@ -333,6 +345,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             f"{scorer.get('estimated_td_probability', 0):.1f}%",
             scorer.get("confidence", ""), scorer.get("rationale", ""),
             scorer.get("risk_factors", ""),
+            scorer.get("market_line", "NOT VERIFIED — do not treat as a sportsbook bet"),
         ]
         for col, value in enumerate(values, 1):
             cell = sheet.cell(row=row_num, column=col, value=value)
@@ -506,8 +519,19 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
             "title": "The Odds API market discovery and live NFL sportsbook odds",
             "url": "https://the-odds-api.com/sports/nfl-odds.html",
         })
+    listed_player_markets = [
+        key for key in available if str(key).startswith("player_")
+    ]
+    market_availability = (
+        "NO PLAYER MARKETS POSTED BY THE ODDS API"
+        if not listed_player_markets
+        else "PLAYER MARKETS LISTED BUT NO PLAYER QUOTES RETURNED"
+        if not player_quotes else "player quotes available"
+    )
     research["odds_api_status"] = (
-        f"Discovery: {len(available)} listed markets; "
+        f"{market_availability}; "
+        f"Discovery: {len(available)} listed markets "
+        f"({', '.join(available) if available else 'none'}); "
         f"player quotes: {len(player_quotes)}; game quotes: {len(game_quotes)}; "
         f"Pass 1: {pass1.get('status', 'unknown')}; Pass 2 first TD: {pass2_status}"
     )
@@ -738,7 +762,7 @@ def _cached_analysis_is_complete(cached: dict | None) -> bool:
         isinstance(cached.get("picks"), list)
         and isinstance(cached.get("touchdown_scorers"), list)
         and len(cached["touchdown_scorers"]) <= 5
-        and cached.get("analysis_version") == 14
+        and cached.get("analysis_version") == 15
         and isinstance(cached.get("underdog_analysis"), list)
         and isinstance(cached.get("player_research_summary"), list)
         and bool(cached.get("ai_provider"))
@@ -838,8 +862,20 @@ def main() -> int:
     reset_research_cache()
     log_path = application_directory() / "Betting_Spreads.log"
     try:
+        if "--configure-ai" in sys.argv[1:]:
+            configured_names = configure_providers()
+            message = (
+                "AI provider credentials saved. Available providers: "
+                + (", ".join(configured_names) if configured_names else "none")
+            )
+            log_path.write_text(message + "\n", encoding="utf-8")
+            if sys.stdout is not None:
+                print(message)
+            return 0
+
         reuse_cache = "--reuse-cache" in sys.argv[1:]
         refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
+        startup_configured_names: list[str] = []
         selected_week = requested_week(sys.argv[1:])
         data = fetch_scoreboard(week=selected_week)
         games, season, week = extract_games(data)
@@ -848,7 +884,9 @@ def main() -> int:
         if not any(flag in command_args for flag in ('--matchup', '--week', '--reuse-cache', '--refresh-incomplete', '--no-gui')):
             games = select_games_gui(games)
         if not reuse_cache:
-            ensure_configured()
+            startup_configured_names = [
+                provider.name for provider, _key in ensure_configured()
+            ]
             cli_mode = any(
                 flag in command_args
                 for flag in ("--matchup", "--week", "--refresh-incomplete", "--no-gui")
@@ -938,6 +976,27 @@ def main() -> int:
                "Fresh independent research and multi-provider analysis completed; results were saved to the local cache.\n")
             + f"\nSaved to:\n{output}"
         )
+        verified_player_prop_count = sum(
+            1 for analysis in analyses for pick in analysis.get("picks", [])
+            if isinstance(pick, dict) and pick.get("market_type") == "Player Prop"
+        )
+        verified_touchdown_count = sum(
+            len(analysis.get("touchdown_scorers", [])) for analysis in analyses
+        )
+        quote_candidates_count = sum(
+            len(analysis.get("verified_market_candidates", []))
+            for analysis in analyses
+        )
+        message += (
+            f"\n\nVerified betting output: {verified_player_prop_count} player props, "
+            f"{verified_touchdown_count} anytime-TD props; "
+            f"{quote_candidates_count} research-only sportsbook candidates."
+        )
+        if not verified_player_prop_count and not verified_touchdown_count and quote_candidates_count:
+            message += (
+                "\nWARNING: Models found no qualifying verified player/TD recommendations. "
+                "Research-only sportsbook quotes are NOT betting recommendations."
+            )
         provider_usage = get_provider_usage_stats()
         usage_lines = []
         for provider_name, stats in sorted(provider_usage.items()):
@@ -952,10 +1011,12 @@ def main() -> int:
                 )
             usage_lines.append(usage_line)
         usage_report = "\n".join(usage_lines) or "No AI provider requests were made."
-        configured_names = sorted({
-            name for analysis in analyses
-            for name in analysis.get("ai_providers_configured", [])
-        })
+        configured_names = sorted(
+            set(startup_configured_names) | {
+                name for analysis in analyses
+                for name in analysis.get("ai_providers_configured", [])
+            }
+        )
         used_names = sorted({
             name for analysis in analyses
             for name in analysis.get("ai_providers_used", [])

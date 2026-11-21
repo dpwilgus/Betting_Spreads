@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ai_providers import generate_json_ensemble
+from ai_providers import NoUsableAnalysisError, generate_json, generate_json_ensemble
 from live_research import collect_game_research
 from prop_averages import attach_per_game_averages
 
@@ -395,6 +395,191 @@ def _build_player_research_summary(
             )
             rows.append(row)
     return rows
+
+
+def _rank_quoted_player_markets(
+    quotes: list[dict[str, Any]],
+    usage: dict[str, dict[str, Any]],
+    rosters: dict[str, list[str]],
+    teams: tuple[str, str],
+    limit: int = 12,
+    injury_statuses: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Prioritize consequential offensive roles, not obscure alternate lines.
+
+    Season-average/line gaps are ONLY a screening signal. One exact quote per
+    player is displayed, preventing a reserve's alternate lines from crowding
+    out leading QB/RB/WR/TE opportunities.
+    """
+    stats = {
+        "player_pass_yds": "passingYards",
+        "player_rush_yds": "rushingYards",
+        "player_reception_yds": "receivingYards",
+        "player_receptions": "receptions",
+        "player_pass_attempts": "passingAttempts",
+        "player_pass_completions": "completions",
+        "player_rush_attempts": "rushingAttempts",
+    }
+    roster_team = {
+        _normalize_name(name): team
+        for team in teams for name in (rosters.get(team) or [])
+        if isinstance(name, str)
+    }
+    unavailable = {
+        _normalize_name(str(report.get("player") or ""))
+        for report in (injury_statuses or [])
+        if isinstance(report, dict) and _is_unavailable_status(
+            report.get("status") or report.get("availability") or ""
+        )
+    }
+    ranked: list[tuple[float, dict[str, Any]]] = []
+    for q in quotes or []:
+        if not isinstance(q, dict) or q.get("market_key") not in stats:
+            continue
+        player = str(q.get("player") or "").strip()
+        key = _normalize_name(player)
+        if key not in roster_team or key in unavailable:
+            continue
+        record = usage.get(key, {})
+        season = record.get("season") if isinstance(record.get("season"), dict) else {}
+        try:
+            games = int(record.get("games_available") or 0)
+            point = float(q["point"])
+            average = _stat_number(season, stats[q["market_key"]]) / games
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            continue
+        if games < 3 or point <= 0 or average <= 0 or stats[q["market_key"]] not in season:
+            continue
+        side = str(q.get("side") or "").casefold()
+        if side not in {"over", "under"} or q.get("price") in (None, ""):
+            continue
+        if not all(q.get(field) for field in ("sportsbook", "line", "source_url", "retrieved_at")):
+            continue
+        position = str(record.get("position") or "").upper()
+        carries = _stat_number(season, "rushingAttempts") / games
+        targets = _stat_number(season, "receivingTargets") / games
+        receptions = _stat_number(season, "receptions") / games
+        rec_yards = _stat_number(season, "receivingYards") / games
+        pass_attempts = _stat_number(season, "passingAttempts") / games
+        # Current-season opportunities are a reproducible proxy for a key
+        # offensive role. A famous name alone is not evidence of usage.
+        if position == "QB":
+            role_score = 3.0 + min(pass_attempts / 18.0, 2.0)
+            if q["market_key"] in {"player_rush_yds", "player_rush_attempts"}:
+                if carries < 3.0:
+                    continue
+            elif pass_attempts < 15.0:
+                continue
+        elif position == "RB":
+            opportunities = carries + targets
+            if opportunities < 7.0:
+                continue
+            role_score = 2.0 + min(opportunities / 9.0, 2.5)
+        elif position in {"WR", "TE"}:
+            if targets < 3.5 and receptions < 2.5 and rec_yards < 35:
+                continue
+            role_score = 2.0 + min(max(targets / 4.0, rec_yards / 45.0), 2.5)
+            if q["market_key"] not in {"player_reception_yds", "player_receptions"}:
+                continue
+        else:
+            continue
+        difference = (average - point) / max(average, point)
+        alignment = difference if side == "over" else -difference
+        try:
+            price = float(str(q["price"]).replace("+", ""))
+        except (TypeError, ValueError):
+            continue
+        # Prefer standard -110-ish prices to extreme alternate lines.
+        price_penalty = min(abs(price + 110) / 300.0, 1.0)
+        score = (
+            role_score + min(games, 12) / 20.0
+            + max(-0.25, min(alignment, 0.35))
+            - price_penalty
+        )
+        ranked.append((score, {
+            "player": player, "team": roster_team[key],
+            "position": position, "market_key": q["market_key"],
+            "side": side.title(), "point": point, "price": q["price"],
+            "sportsbook": q["sportsbook"],
+            "season_average": round(average, 2), "games": games,
+            "line": q["line"], "source_url": q["source_url"],
+            "retrieved_at": q["retrieved_at"],
+            "opportunities_per_game": round(
+                pass_attempts if position == "QB" else
+                carries + targets if position == "RB" else targets, 2
+            ),
+        }))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    selected = []
+    used_players: set[str] = set()
+    team_counts: dict[str, int] = {}
+    per_team_limit = max(1, (limit + len(teams) - 1) // max(len(teams), 1))
+    for _, candidate in ranked:
+        key = _normalize_name(candidate["player"])
+        team = candidate["team"]
+        if key in used_players or team_counts.get(team, 0) >= per_team_limit:
+            continue
+        selected.append(candidate)
+        used_players.add(key)
+        team_counts[team] = team_counts.get(team, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _build_unquoted_market_watchlist(
+    player_summary: list[dict[str, Any]],
+    injury_statuses: list[dict[str, Any]] | None,
+    limit: int = 6,
+) -> list[dict[str, Any]]:
+    """Surface evidence-backed markets to monitor without inventing lines or edges."""
+    blocked = {
+        _normalize_name(str(report.get("player") or ""))
+        for report in (injury_statuses or [])
+        if isinstance(report, dict) and _is_unavailable_status(report.get("status") or report.get("availability") or "")
+    }
+    options = {
+        "QB": (("passing_yards_per_game", "passing_yards_recent", "passing yards"),),
+        "RB": (("rushing_yards_per_game", "rushing_yards_recent", "rushing yards"),),
+        "WR": (("receiving_yards_per_game", "receiving_yards_recent", "receiving yards"),),
+        "TE": (("receiving_yards_per_game", "receiving_yards_recent", "receiving yards"),),
+    }
+    candidates = []
+    seen = set()
+    for row in player_summary:
+        if not isinstance(row, dict):
+            continue
+        player = str(row.get("player") or "")
+        key = _normalize_name(player)
+        if not key or key in blocked or key in seen:
+            continue
+        if int(row.get("games") or 0) < 3:
+            continue
+        for season_key, recent_key, market in options.get(str(row.get("position") or ""), ()):
+            season_avg, recent_avg = row.get(season_key), row.get(recent_key)
+            if not isinstance(season_avg, (int, float)) or season_avg <= 0:
+                continue
+            if not isinstance(recent_avg, (int, float)):
+                continue
+            seen.add(key)
+            candidates.append((season_avg, {
+                "market_type": "Player Prop", "player_or_team": player,
+                "bet_description": f"Monitor {market} market — line not posted",
+                "market_line": "NOT VERIFIED — no sportsbook player-prop quote",
+                "play_threshold": "Await exact sportsbook line",
+                "estimated_hit_probability": None,
+                "confidence": None,
+                "statistical_rationale": (
+                    f"ESPN season {season_avg:.1f}/game; last three {recent_avg:.1f}/game. "
+                    "Compare with the posted line before selecting a side."
+                ),
+                "risk_factors": "No line, odds, edge or confirmed active status; not a bet",
+                "data_quality": "Limited",
+                "average_per_game": f"{market.title()}: {season_avg:.1f} season / {recent_avg:.1f} last 3",
+            }))
+            break
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in candidates[:limit]]
 
 
 def _apply_independent_injury_statuses(
@@ -838,8 +1023,19 @@ def _validate_analysis(
     # Keep require_underdog accepted for existing callers, but treat this
     # supplemental section as optional so its omission cannot erase valid picks.
     data.setdefault("underdog_analysis", [])
-    if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
-        raise RuntimeError("AI response is missing the matchup summary or game script.")
+    # Summary and game script are narrative presentation, not proof of a bet.
+    # Preserve otherwise usable structured selections if a model omits one.
+    for field, fallback in (
+        ("summary", "Matchup summary unavailable from this AI provider."),
+        ("game_script", "Game-script narrative unavailable from this AI provider."),
+    ):
+        if not isinstance(data.get(field), str) or not data[field].strip():
+            data[field] = fallback
+            data.setdefault("data_gaps", [])
+            if isinstance(data["data_gaps"], list):
+                data["data_gaps"].append(
+                    f"AI provider omitted {field}; no narrative was inferred."
+                )
     # Underdog analysis is valuable, but it is a supplemental section. A
     # malformed or omitted underdog row must never discard otherwise usable
     # matchup analysis; the sanitizer records a visible data-gap warning.
@@ -952,53 +1148,103 @@ def _validate_analysis(
                 continue
             valid_injury_response = True
             break
+    # Isolate invalid model picks rather than rejecting an entire provider's
+    # otherwise usable analysis. Never coerce unsupported probabilities or
+    # silently change a sportsbook market; invalid rows are removed.
+    valid_picks = []
+    for item in picks:
+        reason = None
+        if not isinstance(item, dict):
+            reason = "pick was not a JSON object"
+        else:
+            try:
+                probability = float(item.get("estimated_hit_probability", -1))
+                confidence = int(item.get("confidence", 0))
+                if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+                    reason = "invalid pick probability or confidence"
+            except (TypeError, ValueError, OverflowError):
+                reason = "non-numeric pick probability or confidence"
+            if reason is None and item.get("market_type") not in ("Player Prop", "Game Prop"):
+                reason = "unsupported betting market type"
+            if reason is None and item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
+                reason = "unsupported data-quality label"
+            if reason is None:
+                for field in ("market_type", "player_or_team", "bet_description",
+                              "market_line", "play_threshold", "statistical_rationale",
+                              "risk_factors"):
+                    if not item.get(field):
+                        reason = f"missing required pick field: {field}"
+                        break
+            if reason is None and rosters is not None and item.get("market_type") == "Player Prop":
+                known_players = {
+                    _normalize_name(player)
+                    for roster in rosters.values()
+                    for player in roster
+                }
+                if not known_players or _normalize_name(item.get("player_or_team", "")) not in known_players:
+                    reason = "player not found on either current ESPN roster"
+        if reason:
+            player = item.get("player_or_team", "unknown") if isinstance(item, dict) else "unknown"
+            data["data_gaps"].append(f"Removed model pick for {player}: {reason}.")
+            continue
+        valid_picks.append(item)
+    data["picks"] = valid_picks
+    picks = valid_picks
+
+    # Do not accept a narrative-only response when all actionable and
+    # supplemental evidence was discarded.
     if not any((
         picks, scorers, sneaky_response if isinstance(sneaky_response, list) else [],
         valid_injury_response, underdog_response,
     )):
-        raise RuntimeError(
+        raise NoUsableAnalysisError(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
             "injury impacts, sneaky props, and underdog assessment are empty."
         )
-    for item in picks:
-        probability = float(item.get("estimated_hit_probability", -1))
-        confidence = int(item.get("confidence", 0))
-        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
-            raise RuntimeError("AI returned an invalid pick probability or confidence.")
-        if item.get("market_type") not in ("Player Prop", "Game Prop"):
-            raise RuntimeError("AI returned an unsupported betting market type.")
-        if item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
-            raise RuntimeError("AI returned an unsupported data-quality label.")
-        for field in ("market_type", "player_or_team", "bet_description",
-                      "market_line", "play_threshold", "statistical_rationale", "risk_factors"):
-            if not item.get(field):
-                raise RuntimeError(f"AI response is missing a required pick field: {field}")
-        if rosters is not None and item.get("market_type") == "Player Prop":
-            known_players = {
-                _normalize_name(player)
-                for roster in rosters.values()
-                for player in roster
-            }
-            if not known_players or _normalize_name(item.get("player_or_team", "")) not in known_players:
-                raise RuntimeError(
-                    "AI suggested a player prop for someone not found on either current ESPN roster: "
-                    + str(item.get("player_or_team", ""))
-                )
-    sneaky = data.setdefault("sneaky_props", [])
-    if not isinstance(sneaky, list) or len(sneaky) > 8:
-        raise RuntimeError("AI sneaky_props must be a list of at most eight ideas.")
-    for item in sneaky:
-        probability = float(item.get("estimated_hit_probability", -1))
-        confidence = int(item.get("confidence", 0))
-        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
-            raise RuntimeError("AI returned an invalid sneaky-prop probability or confidence.")
-        if item.get("market_type") not in ("Player Prop", "Game Prop"):
-            raise RuntimeError("AI returned an unsupported sneaky-prop market type.")
-        if not all(item.get(field) for field in (
-            "player_or_team", "bet_description", "market_line", "play_threshold",
-            "statistical_rationale", "risk_factors", "data_quality",
-        )):
-            raise RuntimeError("AI sneaky prop is missing required evidence fields.")
+    # Sneaky ideas are optional. Sanitize them row by row, just as primary
+    # picks and TD scorers are sanitized above; never reject a provider's
+    # valid main picks because one supplemental idea has malformed numbers.
+    sneaky = data.get("sneaky_props", [])
+    if not isinstance(sneaky, list):
+        data["data_gaps"].append("Removed sneaky-prop section: expected a list.")
+        sneaky = []
+    valid_sneaky = []
+    for item in sneaky[:8]:
+        reason = None
+        if not isinstance(item, dict):
+            reason = "not an object"
+        else:
+            try:
+                probability = float(item.get("estimated_hit_probability", -1))
+                confidence = int(item.get("confidence", 0))
+                if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+                    reason = "invalid probability or confidence"
+            except (TypeError, ValueError, OverflowError):
+                reason = "non-numeric probability or confidence"
+            if reason is None and item.get("market_type") not in ("Player Prop", "Game Prop"):
+                reason = "unsupported market type"
+            if reason is None and item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
+                reason = "unsupported data-quality label"
+            if reason is None and not all(item.get(field) for field in (
+                "player_or_team", "bet_description", "market_line", "play_threshold",
+                "statistical_rationale", "risk_factors",
+            )):
+                reason = "missing required evidence"
+            if reason is None and rosters is not None and item.get("market_type") == "Player Prop":
+                known_players = {
+                    _normalize_name(player) for roster in rosters.values() for player in roster
+                }
+                if _normalize_name(item.get("player_or_team", "")) not in known_players:
+                    reason = "player not found on ESPN rosters"
+        if reason:
+            data["data_gaps"].append(
+                f"Removed sneaky prop for {item.get('player_or_team', 'unknown') if isinstance(item, dict) else 'unknown'}: {reason}."
+            )
+        else:
+            valid_sneaky.append(item)
+    if len(sneaky) > 8:
+        data["data_gaps"].append("Limited sneaky-prop ideas to the first eight rows.")
+    data["sneaky_props"] = valid_sneaky
     for item in scorers:
         probability = float(item.get("estimated_td_probability", -1))
         confidence = int(item.get("confidence", 0))
@@ -1294,6 +1540,19 @@ def _best_matching_quote(
     return max(matches, key=price_score)
 
 
+def _american_odds_implied_probability(price: Any) -> float | None:
+    """Break-even probability (percent) for a quoted American sportsbook price."""
+    try:
+        odds = float(str(price).replace("+", ""))
+    except (TypeError, ValueError):
+        return None
+    if odds == 0:
+        return None
+    return (10000.0 / (odds + 100.0)) if odds > 0 else (
+        (-odds * 100.0) / (-odds + 100.0)
+    )
+
+
 def _separate_unverified_player_props(
     data: dict[str, Any],
     research: dict[str, Any],
@@ -1399,6 +1658,37 @@ def _separate_unverified_player_props(
         pick["market_retrieved_at"] = matched["retrieved_at"]
         retained_sneaky.append(pick)
     data["sneaky_props"] = retained_sneaky
+    return gaps
+
+
+
+def _verify_anytime_td_quotes(
+    data: dict[str, Any], research: dict[str, Any]
+) -> list[str]:
+    """Never display a touchdown scorer as a bet without an exact sportsbook price."""
+    quotes = research.get("verified_player_prop_markets", [])
+    if not isinstance(quotes, list):
+        quotes = []
+    retained = []
+    gaps = []
+    for scorer in data.get("touchdown_scorers", []):
+        player = str(scorer.get("player") or "")
+        quote = _best_matching_quote(
+            {"player_or_team": player, "bet_description": "Anytime touchdown scorer"},
+            quotes,
+        )
+        if not quote:
+            gaps.append(
+                f"Removed unquoted anytime touchdown candidate {player}: no exact sportsbook offer and price."
+            )
+            continue
+        scorer["market_line"] = (
+            f"{quote['line']} ({quote['price']}) — {quote['sportsbook']}"
+        )
+        scorer["market_source"] = quote["source_url"]
+        scorer["market_retrieved_at"] = quote["retrieved_at"]
+        retained.append(scorer)
+    data["touchdown_scorers"] = retained
     return gaps
 
 
@@ -1945,6 +2235,280 @@ def _merge_provider_analyses(
     return data, primary_name
 
 
+
+def _rank_quoted_touchdown_markets(
+    quotes: list[dict[str, Any]],
+    usage: dict[str, dict[str, Any]],
+    rosters: dict[str, list[str]],
+    teams: tuple[str, str],
+    injury_statuses: list[dict[str, Any]] | None = None,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    """Verified anytime-TD offers for high-opportunity offensive players only."""
+    team_by_player = {
+        _normalize_name(player): team
+        for team in teams for player in rosters.get(team, [])
+    }
+    unavailable = {
+        _normalize_name(str(report.get("player") or ""))
+        for report in (injury_statuses or [])
+        if isinstance(report, dict) and _is_unavailable_status(
+            report.get("status") or report.get("availability") or ""
+        )
+    }
+    ranked = []
+    for quote in quotes or []:
+        if not isinstance(quote, dict) or quote.get("market_key") != "player_anytime_td":
+            continue
+        key = _normalize_name(str(quote.get("player") or ""))
+        if key not in team_by_player or key in unavailable:
+            continue
+        if str(quote.get("side") or "").casefold() not in {"yes", "over"}:
+            continue
+        if quote.get("price") in (None, "") or not all(
+            quote.get(field) for field in ("line", "sportsbook", "source_url", "retrieved_at")
+        ):
+            continue
+        record = usage.get(key, {})
+        season = record.get("season") if isinstance(record.get("season"), dict) else {}
+        try:
+            games = int(record.get("games_available") or 0)
+        except (TypeError, ValueError):
+            continue
+        if games < 3:
+            continue
+        position = str(record.get("position") or "").upper()
+        carries = _stat_number(season, "rushingAttempts") / games
+        targets = _stat_number(season, "receivingTargets") / games
+        rush_td = _stat_number(season, "rushingTouchdowns")
+        rec_td = _stat_number(season, "receivingTouchdowns")
+        if position == "QB":
+            opportunities = carries
+            eligible = carries >= 3 and rush_td >= 2
+        elif position == "RB":
+            opportunities = carries + targets
+            eligible = opportunities >= 10
+        elif position in {"WR", "TE"}:
+            opportunities = targets
+            eligible = targets >= 4 and (rec_td >= 1 or targets >= 7)
+        else:
+            continue
+        if not eligible:
+            continue
+        try:
+            price = float(str(quote["price"]).replace("+", ""))
+        except (TypeError, ValueError):
+            continue
+        score = opportunities / 12 + (rush_td + rec_td) / games * 2 - min(abs(price + 110) / 500, 1)
+        ranked.append((score, {
+            "player": quote["player"], "team": team_by_player[key],
+            "position": position, "games": games,
+            "offensive_tds_per_game": round((rush_td + rec_td) / games, 2),
+            "opportunities_per_game": round(opportunities, 2),
+            "line": quote["line"], "price": quote["price"],
+            "sportsbook": quote["sportsbook"], "source_url": quote["source_url"],
+            "retrieved_at": quote["retrieved_at"],
+        }))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    result = []
+    used = set()
+    for _score, item in ranked:
+        key = _normalize_name(item["player"])
+        if key in used:
+            continue
+        result.append(item)
+        used.add(key)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _recover_verified_props_from_focused_review(
+    data: dict[str, Any],
+    quoted_shortlist: list[dict[str, Any]],
+    research: dict[str, Any],
+    usage: dict[str, dict[str, Any]],
+    teams: tuple[str, str],
+    provider_name: str,
+) -> None:
+    """Use a compact second review when full-game model output has no real props.
+
+    The model is never allowed to introduce lines. Its selections must map to
+    the exact independent sportsbook quotes in the focused candidate pools.
+    An empty review remains a pass, not fabricated betting opportunities.
+    """
+    quotes = research.get("verified_player_prop_markets", [])
+    if not isinstance(quotes, list):
+        quotes = []
+    already_verified = any(
+        isinstance(pick, dict)
+        and pick.get("market_type") == "Player Prop"
+        and _best_matching_quote(pick, quotes)
+        for pick in data.get("picks", [])
+    )
+    td_pool = _rank_quoted_touchdown_markets(
+        quotes, usage, research.get("rosters") or {}, teams,
+        injury_statuses=research.get("injury_statuses", []),
+    )
+    needs_td = not data.get("touchdown_scorers") and bool(td_pool)
+    if (already_verified or not quoted_shortlist) and not needs_td:
+        return
+    if not quoted_shortlist and not td_pool:
+        return
+    # Unlike the full research prompt, this is bounded to key players and
+    # their exact offers so the provider cannot lose them to truncation.
+    context = []
+    for item in quoted_shortlist:
+        record = usage.get(_normalize_name(item["player"]), {})
+        recent = record.get("recent") if isinstance(record.get("recent"), list) else []
+        stat = {
+            "player_pass_yds": "passingYards", "player_rush_yds": "rushingYards",
+            "player_reception_yds": "receivingYards", "player_receptions": "receptions",
+            "player_pass_attempts": "passingAttempts", "player_pass_completions": "completions",
+            "player_rush_attempts": "rushingAttempts",
+        }.get(item["market_key"])
+        recent_values = [
+            _stat_number(game["stats"], stat)
+            for game in recent[:3]
+            if isinstance(game, dict) and isinstance(game.get("stats"), dict)
+            and stat in game["stats"]
+        ]
+        context.append({
+            "quote": item,
+            "recent_per_game": round(sum(recent_values) / len(recent_values), 2)
+            if recent_values else None,
+            "recent_games": len(recent_values),
+        })
+    injuries = [
+        report for report in (research.get("injury_statuses") or [])
+        if isinstance(report, dict)
+        and _normalize_name(str(report.get("player") or "")) in {
+            _normalize_name(item["player"]) for item in quoted_shortlist + td_pool
+        }
+    ][:12]
+    request = json.dumps({
+        "matchup": list(teams),
+        "key_player_quotes": context if not already_verified else [],
+        "verified_anytime_td_quotes": td_pool if needs_td else [],
+        "injury_designations": injuries,
+    }, ensure_ascii=False, separators=(",", ":"))
+    system = (
+        "You are an NFL player-prop analyst. Return a JSON object with exactly "
+        "two arrays: picks and touchdown_scorers. Review supplied exact sportsbook "
+        "offers for KEY high-usage players only. Select up to four player props and "
+        "three anytime-TD candidates only if evidence supports them; an empty "
+        "array is acceptable. Do not interpret an average above a line as proof "
+        "of positive expected value. Only recommend offers whose conservative "
+        "estimated hit probability exceeds the American-odds break-even "
+        "probability by at least two percentage points. Consider sample size, recent production, "
+        "injuries, volume, role and price. Never invent a player, line, price, "
+        "sportsbook, injury, source or numerical stat. Each pick MUST use the "
+        "exact player, market, Over/Under side and point of one key_player_quotes "
+        "entry. Player picks need rank, market_type='Player Prop', player_or_team, "
+        "bet_description ('Over 50.5 receiving yards' format), market_line, "
+        "play_threshold, estimated_hit_probability (0-100), confidence (1-10), "
+        "statistical_rationale, risk_factors, data_quality ('Strong', 'Moderate', "
+        "'Limited'). Use actual season and recent numbers from the supplied data. "
+        "TD candidates need rank, player, team, availability ('No injury "
+        "designation found' unless explicitly documented), availability_evidence, "
+        "estimated_td_probability (0-100), confidence (1-10), rationale and "
+        "risk_factors. A TD candidate MUST match a verified_anytime_td_quotes entry. "
+        "Never claim confirmed active status without actual game-day confirmation. "
+        "Do not output anything besides JSON."
+    )
+    try:
+        result, provider = generate_json(
+            system, request,
+            validator=lambda output: (
+                None if isinstance(output.get("picks"), list)
+                and isinstance(output.get("touchdown_scorers"), list)
+                else (_ for _ in ()).throw(ValueError("Expected picks and touchdown_scorers arrays"))
+            ),
+            provider_filter=provider_name,
+        )
+    except Exception as exc:
+        data.setdefault("data_gaps", []).append(
+            "Focused sportsbook-prop model review unavailable: " + str(exc)[:180]
+        )
+        return
+    valid_props = []
+    pool_keys = {
+        (_normalize_name(item["player"]), item["market_key"],
+         item["side"].casefold(), item["point"])
+        for item in quoted_shortlist
+    }
+    for pick in result.get("picks", [])[:4]:
+        if not isinstance(pick, dict):
+            continue
+        quote = _best_matching_quote(pick, quotes)
+        if quote is None:
+            continue
+        try:
+            market_identity = (
+                _normalize_name(str(quote["player"])), quote["market_key"],
+                str(quote["side"]).casefold(), float(quote["point"]),
+            )
+            prob = float(pick["estimated_hit_probability"])
+            confidence = int(pick["confidence"])
+        except (TypeError, ValueError, KeyError, OverflowError):
+            continue
+        breakeven = _american_odds_implied_probability(quote.get("price"))
+        if (market_identity not in pool_keys or not (0 <= prob <= 100 and 1 <= confidence <= 10)
+                or breakeven is None or prob < breakeven + 2.0):
+            continue
+        if pick.get("data_quality") not in {"Strong", "Moderate", "Limited"}:
+            continue
+        if not all(pick.get(field) for field in (
+            "player_or_team", "bet_description", "play_threshold",
+            "statistical_rationale", "risk_factors",
+        )):
+            continue
+        pick = dict(pick)
+        pick["market_type"] = "Player Prop"
+        pick["market_line"] = f"{quote['line']} ({quote['price']}) — {quote['sportsbook']}"
+        pick["market_source"] = quote["source_url"]
+        pick["market_retrieved_at"] = quote["retrieved_at"]
+        valid_props.append(pick)
+    valid_tds = []
+    td_lookup = {_normalize_name(item["player"]): item for item in td_pool}
+    for scorer in result.get("touchdown_scorers", [])[:3]:
+        if not isinstance(scorer, dict):
+            continue
+        matched = td_lookup.get(_normalize_name(str(scorer.get("player") or "")))
+        if matched is None or _team_key(str(scorer.get("team") or "")) != _team_key(matched["team"]):
+            continue
+        try:
+            probability = float(scorer["estimated_td_probability"])
+            confidence = int(scorer["confidence"])
+        except (TypeError, ValueError, KeyError, OverflowError):
+            continue
+        breakeven = _american_odds_implied_probability(matched.get("price"))
+        if (not (0 <= probability <= 100 and 1 <= confidence <= 10)
+                or breakeven is None or probability < breakeven + 2.0):
+            continue
+        if not scorer.get("rationale") or not scorer.get("risk_factors"):
+            continue
+        scorer = dict(scorer)
+        scorer["team"] = matched["team"]
+        scorer["availability"] = "No injury designation found"
+        scorer["availability_evidence"] = (
+            "No confirmed game-day active status; check final inactive report."
+        )
+        scorer["market_line"] = (
+            f"{matched['line']} ({matched['price']}) — {matched['sportsbook']}"
+        )
+        scorer["market_source"] = matched["source_url"]
+        scorer["market_retrieved_at"] = matched["retrieved_at"]
+        valid_tds.append(scorer)
+    data.setdefault("picks", []).extend(valid_props)
+    data.setdefault("touchdown_scorers", []).extend(valid_tds)
+    data["focused_prop_review_provider"] = provider
+    if not valid_props and not valid_tds:
+        data.setdefault("data_gaps", []).append(
+            "Focused model review did not identify an adequately supported exact sportsbook prop."
+        )
+
+
 def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -> dict[str, Any]:
     """Collect independent evidence, query every configured AI provider, and reconcile their picks."""
     research = research or collect_game_research(game)
@@ -1961,14 +2525,41 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     # Compute and feed the same per-game averages that will be displayed in the
     # workbook, so they are part of prop selection rather than post-hoc decoration.
     player_usage = _research_player_usage(original_research)
+    # The candidate selector can include stale ESPN associations. Only
+    # research players explicitly present on the current matchup team roster.
+    rosters = research.get("rosters") or {}
+    raw_candidates = research.get("selected_player_candidates", {})
+    vetted_candidates = {
+        team: [
+            candidate for candidate in candidates
+            if isinstance(candidate, dict)
+            and _normalize_name(str(candidate.get("name") or "")) in {
+                _normalize_name(str(name)) for name in (rosters.get(team) or [])
+            }
+        ]
+        for team, candidates in raw_candidates.items()
+        if team in team_names and isinstance(candidates, list)
+    } if isinstance(raw_candidates, dict) else {}
     player_research_summary = _build_player_research_summary(
-        player_usage, research.get("selected_player_candidates", {})
+        player_usage, vetted_candidates
     )
     if player_research_summary:
         original_research += (
             "\n\nSELECTED PLAYER PER-GAME AVERAGES (season / last three games): "
             + json.dumps(player_research_summary, ensure_ascii=False, separators=(",", ":"))
         )
+
+    quoted_shortlist = _rank_quoted_player_markets(
+        research.get("verified_player_prop_markets", []),
+        player_usage, rosters, team_names,
+        injury_statuses=research.get("injury_statuses", []),
+    )
+    quote_focus = (
+        "\nEXACT VERIFIED SPORTSBOOK PROP CANDIDATES (prioritize these; "
+        "evaluate, do not assume they are profitable):\n"
+        + json.dumps(quoted_shortlist, ensure_ascii=False, separators=(",", ":"))
+        if quoted_shortlist else ""
+    )
 
     user_prefix = (
         f"Analyze this upcoming NFL matchup: {matchup}. Kickoff: {game.get('Game Date (ET)', 'Not supplied')}. "
@@ -2019,7 +2610,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             output_tokens = max(
                 256, min(int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")), 1600)
             )
-            input_token_budget = max(1000, 6500 - output_tokens - 500)
+            # Reserve headroom for other requests inside Groq's rolling
+            # 8k TPM window, including validation retries.
+            input_token_budget = max(1000, 5000 - output_tokens - 500)
             combined_budget = int(input_token_budget * 3.5)
         else:
             combined_budget = len(instructions) + len(user_prefix) + MAX_RESEARCH_PROMPT_CHARS
@@ -2035,10 +2628,23 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         underdog_format = _underdog_format_instruction(
             expected_underdog, expected_spread
         )
+        # Put the structured exact quotes at the end so long ESPN research
+        # cannot truncate the actionable candidates out of the prompt.
+        focus = quote_focus
+        if focus:
+            bounded, was_truncated = _bounded_research_text(
+                bounded, max(1000, research_budget - len(focus))
+            )
+            prompt_metadata[provider_name] = (
+                was_truncated or prompt_metadata[provider_name][0],
+                prompt_metadata[provider_name][1],
+                len(bounded),
+            )
         return (
             instructions,
             user_prefix + underdog_format
-            + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded,
+            + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded
+            + focus,
         )
 
     rosters = research.get("rosters")
@@ -2075,6 +2681,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     data, primary_provider = _merge_provider_analyses(
         provider_results, research.get("verified_player_prop_markets", [])
     )
+    _recover_verified_props_from_focused_review(
+        data, quoted_shortlist, research, player_usage, team_names, primary_provider
+    )
     used_provider_names = [name for _result, name in provider_results]
     provider_name = "ensemble: " + " + ".join(used_provider_names)
     used_prompt_metadata = [
@@ -2096,6 +2705,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     sneaky_usage_gaps = _filter_player_props_by_usage(sneaky_usage_data, player_usage)
     data["sneaky_props"] = sneaky_usage_data.get("picks", [])
     td_gaps = _filter_td_scorers_by_usage(data, player_usage)
+    td_market_gaps = _verify_anytime_td_quotes(data, research)
     news_evidence_text = "\n".join(
         line for line in str(research.get("research_text", "")).splitlines()
         if "ESPN RECENT TEAM NEWS" in line or "ADAM SCHEFTER PRIORITY NEWS" in line
@@ -2110,7 +2720,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     contradiction_gaps = _remove_contradictory_period_game_picks(data, team_names)
     quality_gaps = (
         injury_gaps + sneaky_status_gaps + prop_gaps + sneaky_usage_gaps
-        + td_gaps + impact_gaps + market_gaps + game_market_gaps + contradiction_gaps
+        + td_gaps + td_market_gaps + impact_gaps + market_gaps + game_market_gaps + contradiction_gaps
     )
     if moved_sneaky_games:
         quality_gaps.append("Moved 1Q/1H game-line ideas from Sneaky Props into the game-level bets section.")
@@ -2136,8 +2746,46 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
     attach_per_game_averages(data, player_usage, _expected_market_key)
+    # When the sportsbook has not posted player lines, do not return a blank
+    # sheet: show researched markets as explicitly non-bet watchlist entries.
+    if not research.get("verified_player_prop_markets") and not data.get("model_only_picks"):
+        data["model_only_picks"] = _build_unquoted_market_watchlist(
+            player_research_summary, research.get("injury_statuses", [])
+        )
+        if data["model_only_picks"]:
+            data.setdefault("data_gaps", []).append(
+                "Sportsbook player props are not posted; the watchlist has no betting line, odds, side or estimated edge."
+            )
+    # Quotes are source facts, independent of whether a model can produce picks.
+    # Keep these visible when a provider emits an empty or unusable slate.
+    data["verified_market_candidates"] = [
+        {
+            "player_or_team": item["player"],
+            "bet_description": f"{item['side']} {item['point']:g} "
+                + {
+                    "player_pass_yds": "passing yards",
+                    "player_rush_yds": "rushing yards",
+                    "player_reception_yds": "receiving yards",
+                    "player_receptions": "receptions",
+                    "player_pass_attempts": "passing attempts",
+                    "player_pass_completions": "pass completions",
+                    "player_rush_attempts": "rushing attempts",
+                }.get(item["market_key"], item["market_key"]),
+            "market_line": f"{item['line']} ({item['price']}) — {item['sportsbook']}",
+            "market_retrieved_at": item.get("retrieved_at"),
+            "market_source": item["source_url"],
+            "average_per_game": f"{item['season_average']:.1f} over {item['games']} games",
+            "play_threshold": "Research candidate — not a betting recommendation",
+            "estimated_hit_probability": None,
+            "confidence": None,
+            "statistical_rationale": "Exact sportsbook quote; season average is context, not an estimated edge.",
+            "risk_factors": "AI has not validated an edge; do not treat as a recommended bet",
+            "data_quality": "Limited",
+        }
+        for item in quoted_shortlist
+    ]
     data["player_research_summary"] = player_research_summary
-    data["analysis_version"] = 14
+    data["analysis_version"] = 15
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
     data["odds_api_usage"] = research.get("odds_api_usage", {})
     data["selected_player_candidates"] = research.get("selected_player_candidates", {})

@@ -7,9 +7,9 @@ from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_t
                          _filter_injury_impacts, _filter_player_props_by_usage, _filter_td_scorers_by_usage,
                          _research_player_usage, _separate_unverified_player_props,
                          _normalize_name, _validate_analysis, analyze_game)
-from ai_providers import (Provider, _call_provider, _response_text, generate_json,
+from ai_providers import (Provider, NoUsableAnalysisError, _call_provider, _response_text, generate_json,
                           generate_json_ensemble, get_provider_usage_stats,
-                          reset_provider_run_state)
+                          reset_provider_run_state, configure_providers)
 from live_research import collect_game_research, _extract_roster_names
 
 
@@ -38,6 +38,18 @@ def valid_analysis():
 
 
 class ProviderFallbackTests(unittest.TestCase):
+
+    def test_configure_providers_reopens_editor_when_a_provider_is_already_saved(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        gemini = Provider("gemini", "GEMINI_API_KEY", "gemini", "url", "model", "gemini")
+        configured = [(groq, "groq-key"), (gemini, "gemini-key")]
+        with patch("ai_providers._configure_keys") as configure, patch(
+            "ai_providers._CONFIGURED_PROVIDERS_CACHE", None
+        ), patch("ai_providers._configured_providers", return_value=configured):
+            names = configure_providers()
+
+        configure.assert_called_once_with()
+        self.assertEqual(names, ["groq", "gemini"])
 
     def test_provider_order_override_does_not_exclude_other_configured_models(self):
         keys = {"groq": "groq-key", "gemini": "gemini-key", "nvidia": "nvidia-key"}
@@ -203,8 +215,31 @@ class ProviderFallbackTests(unittest.TestCase):
             result, provider = generate_json("system", "user")
         self.assertEqual(result["summary"], "recovered")
         self.assertEqual(provider, "groq")
-        sleep.assert_called_once_with(14.3125)
+        sleep.assert_called_once_with(60.0)
         self.assertEqual(call.call_count, 2)
+
+    def test_groq_tpm_millisecond_retry_hint_uses_safety_window(self):
+        first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        rate_error = urllib.error.HTTPError(
+            "https://example.test", 429, "rate limit", {},
+            io.BytesIO(
+                b"Rate limit reached: tokens per minute (TPM): "
+                b"Limit 8000, Used 3795, Requested 4293. "
+                b"Please try again in 659.999999ms."
+            )
+        )
+        with patch(
+            "ai_providers.ensure_configured", return_value=[(first, "key-one")]
+        ), patch("ai_providers._SKIP_PROVIDER_FOR_RUN", set()), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[rate_error, {"summary": "recovered"}],
+        ):
+            result, provider = generate_json("system", "user")
+        self.assertEqual(provider, "groq")
+        self.assertEqual(result["summary"], "recovered")
+        sleep.assert_called_once_with(60.0)
 
     def test_temporary_tpm_failure_does_not_disable_provider_for_next_game(self):
         first = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
@@ -230,6 +265,50 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(result["summary"], "next game")
         self.assertEqual(provider, "groq")
         self.assertEqual(call.call_count, 4)
+
+    def test_empty_groq_analysis_does_not_retry_and_uses_nvidia(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        nvidia = Provider("nvidia", "NVIDIA_API_KEY", "nvidia", "url", "model", "openai")
+        with patch(
+            "ai_providers.ensure_configured",
+            return_value=[(groq, "groq-key"), (nvidia, "nvidia-key")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[NoUsableAnalysisError("empty slate"), {"picks": [{"confidence": 6}]}]
+        ) as call:
+            result, provider = generate_json("system", "user")
+        self.assertEqual(provider, "nvidia")
+        self.assertEqual(len(result["picks"]), 1)
+        self.assertEqual(call.call_count, 2)
+        sleep.assert_not_called()
+
+    def test_groq_429_immediately_falls_back_without_second_rate_limited_request(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        nvidia = Provider("nvidia", "NVIDIA_API_KEY", "nvidia", "url", "model", "openai")
+        error = urllib.error.HTTPError(
+            "https://example.test", 429, "rate limit", {},
+            io.BytesIO(b"tokens per minute (TPM): Limit 8000, Used 4306, Requested 4947.")
+        )
+        with patch(
+            "ai_providers.ensure_configured",
+            return_value=[(groq, "groq-key"), (nvidia, "nvidia-key")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[error, {"summary": "NVIDIA result"}]
+        ) as call:
+            result, selected = generate_json("system", "user")
+        self.assertEqual(selected, "nvidia")
+        self.assertEqual(result["summary"], "NVIDIA result")
+        self.assertEqual(call.call_count, 2)
+        sleep.assert_not_called()
 
     def test_groq_tpm_preflight_skips_oversized_request_and_uses_fallback(self):
         groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
@@ -362,12 +441,19 @@ class ProviderFallbackTests(unittest.TestCase):
     def test_player_prop_must_name_a_current_roster_player(self):
         data = valid_analysis()
         data["picks"][0]["player_or_team"] = "Eli Manning"
-        with self.assertRaisesRegex(RuntimeError, "not found on either current ESPN roster"):
-            _validate_analysis(
-                data,
-                rosters={"Team A": ["Player A"], "Team B": ["Player B"]},
-                team_names=("Team A", "Team B"),
-            )
+        _validate_analysis(
+            data,
+            rosters={"Team A": ["Player A"], "Team B": ["Player B"]},
+            team_names=("Team A", "Team B"),
+        )
+        self.assertFalse(any(
+            pick.get("player_or_team") == "Eli Manning" for pick in data["picks"]
+        ))
+        self.assertEqual(len(data["picks"]), 4)
+        self.assertTrue(any(
+            "player not found on either current ESPN roster" in gap
+            for gap in data["data_gaps"]
+        ))
 
     def test_roster_extractor_reads_nested_espn_athletes(self):
         names = _extract_roster_names({
