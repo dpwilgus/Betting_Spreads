@@ -326,15 +326,15 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(td_start, 1, "ANYTIME TOUCHDOWN SCORERS")
     sheet.cell(td_start, 1).font = white_bold
     sheet.cell(td_start, 1).fill = navy
-    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=10)
+    sheet.merge_cells(start_row=td_start, start_column=1, end_row=td_start, end_column=11)
     td_headers = ["Rank", "Player", "Team", "Availability", "Availability Evidence",
         "Offensive TDs/G (Season / Last 3)", "Estimated TD Probability",
-        "Confidence (1–10)", "Rationale", "Risk Factors"]
+        "Confidence (1–10)", "Rationale", "Risk Factors", "Verified Anytime TD Market" ]
     for col, value in enumerate(td_headers, 1):
         _style_header(sheet.cell(td_start + 1, col, value))
     scorers = analysis.get("touchdown_scorers", [])
     if not scorers:
-        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=10)
+        sheet.merge_cells(start_row=td_start + 2, start_column=1, end_row=td_start + 2, end_column=11)
         sheet.cell(td_start + 2, 1, "No touchdown scorer met the evidence threshold.")
     for row_num, scorer in enumerate(scorers, td_start + 2):
         values = [
@@ -345,6 +345,7 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             f"{scorer.get('estimated_td_probability', 0):.1f}%",
             scorer.get("confidence", ""), scorer.get("rationale", ""),
             scorer.get("risk_factors", ""),
+            scorer.get("market_line", "NOT VERIFIED — do not treat as a sportsbook bet"),
         ]
         for col, value in enumerate(values, 1):
             cell = sheet.cell(row=row_num, column=col, value=value)
