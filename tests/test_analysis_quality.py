@@ -172,6 +172,25 @@ class AnalysisQualityTests(unittest.TestCase):
                 team_names=("San Francisco 49ers", "Dallas Cowboys"),
             )
 
+    def test_missing_nvidia_narratives_do_not_erase_valid_picks(self):
+        analysis = {
+            "picks": [{
+                "market_type": "Game Prop", "player_or_team": "Houston Texans",
+                "bet_description": "Houston moneyline",
+                "market_line": "Not verified", "play_threshold": "Houston to win",
+                "estimated_hit_probability": 55, "confidence": 5,
+                "statistical_rationale": "Example research-based rationale",
+                "risk_factors": "Price unavailable", "data_quality": "Limited",
+            }],
+            "touchdown_scorers": [], "sneaky_props": [],
+            "injury_impact": [], "data_gaps": [],
+        }
+        _validate_analysis(analysis)
+        self.assertIn("unavailable", analysis["summary"])
+        self.assertIn("unavailable", analysis["game_script"])
+        self.assertEqual(len(analysis["picks"]), 1)
+        self.assertTrue(any("omitted summary" in gap for gap in analysis["data_gaps"]))
+
     def test_invalid_pick_probability_does_not_discard_valid_verified_candidate(self):
         valid = {
             "rank": 1, "market_type": "Player Prop",
