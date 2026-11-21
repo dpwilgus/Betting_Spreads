@@ -1540,6 +1540,19 @@ def _best_matching_quote(
     return max(matches, key=price_score)
 
 
+def _american_odds_implied_probability(price: Any) -> float | None:
+    """Break-even probability (percent) for a quoted American sportsbook price."""
+    try:
+        odds = float(str(price).replace("+", ""))
+    except (TypeError, ValueError):
+        return None
+    if odds == 0:
+        return None
+    return (10000.0 / (odds + 100.0)) if odds > 0 else (
+        (-odds * 100.0) / (-odds + 100.0)
+    )
+
+
 def _separate_unverified_player_props(
     data: dict[str, Any],
     research: dict[str, Any],
@@ -2385,7 +2398,9 @@ def _recover_verified_props_from_focused_review(
         "offers for KEY high-usage players only. Select up to four player props and "
         "three anytime-TD candidates only if evidence supports them; an empty "
         "array is acceptable. Do not interpret an average above a line as proof "
-        "of positive expected value. Consider sample size, recent production, "
+        "of positive expected value. Only recommend offers whose conservative "
+        "estimated hit probability exceeds the American-odds break-even "
+        "probability by at least two percentage points. Consider sample size, recent production, "
         "injuries, volume, role and price. Never invent a player, line, price, "
         "sportsbook, injury, source or numerical stat. Each pick MUST use the "
         "exact player, market, Over/Under side and point of one key_player_quotes "
@@ -2437,7 +2452,9 @@ def _recover_verified_props_from_focused_review(
             confidence = int(pick["confidence"])
         except (TypeError, ValueError, KeyError, OverflowError):
             continue
-        if market_identity not in pool_keys or not (0 <= prob <= 100 and 1 <= confidence <= 10):
+        breakeven = _american_odds_implied_probability(quote.get("price"))
+        if (market_identity not in pool_keys or not (0 <= prob <= 100 and 1 <= confidence <= 10)
+                or breakeven is None or prob < breakeven + 2.0):
             continue
         if pick.get("data_quality") not in {"Strong", "Moderate", "Limited"}:
             continue
@@ -2465,7 +2482,9 @@ def _recover_verified_props_from_focused_review(
             confidence = int(scorer["confidence"])
         except (TypeError, ValueError, KeyError, OverflowError):
             continue
-        if not (0 <= probability <= 100 and 1 <= confidence <= 10):
+        breakeven = _american_odds_implied_probability(matched.get("price"))
+        if (not (0 <= probability <= 100 and 1 <= confidence <= 10)
+                or breakeven is None or probability < breakeven + 2.0):
             continue
         if not scorer.get("rationale") or not scorer.get("risk_factors"):
             continue
