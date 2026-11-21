@@ -1138,21 +1138,50 @@ def _validate_analysis(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
             "injury impacts, sneaky props, and underdog assessment are empty."
         )
-    sneaky = data.setdefault("sneaky_props", [])
-    if not isinstance(sneaky, list) or len(sneaky) > 8:
-        raise RuntimeError("AI sneaky_props must be a list of at most eight ideas.")
-    for item in sneaky:
-        probability = float(item.get("estimated_hit_probability", -1))
-        confidence = int(item.get("confidence", 0))
-        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
-            raise RuntimeError("AI returned an invalid sneaky-prop probability or confidence.")
-        if item.get("market_type") not in ("Player Prop", "Game Prop"):
-            raise RuntimeError("AI returned an unsupported sneaky-prop market type.")
-        if not all(item.get(field) for field in (
-            "player_or_team", "bet_description", "market_line", "play_threshold",
-            "statistical_rationale", "risk_factors", "data_quality",
-        )):
-            raise RuntimeError("AI sneaky prop is missing required evidence fields.")
+    # Sneaky ideas are optional. Sanitize them row by row, just as primary
+    # picks and TD scorers are sanitized above; never reject a provider's
+    # valid main picks because one supplemental idea has malformed numbers.
+    sneaky = data.get("sneaky_props", [])
+    if not isinstance(sneaky, list):
+        data["data_gaps"].append("Removed sneaky-prop section: expected a list.")
+        sneaky = []
+    valid_sneaky = []
+    for item in sneaky[:8]:
+        reason = None
+        if not isinstance(item, dict):
+            reason = "not an object"
+        else:
+            try:
+                probability = float(item.get("estimated_hit_probability", -1))
+                confidence = int(item.get("confidence", 0))
+                if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+                    reason = "invalid probability or confidence"
+            except (TypeError, ValueError, OverflowError):
+                reason = "non-numeric probability or confidence"
+            if reason is None and item.get("market_type") not in ("Player Prop", "Game Prop"):
+                reason = "unsupported market type"
+            if reason is None and item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
+                reason = "unsupported data-quality label"
+            if reason is None and not all(item.get(field) for field in (
+                "player_or_team", "bet_description", "market_line", "play_threshold",
+                "statistical_rationale", "risk_factors",
+            )):
+                reason = "missing required evidence"
+            if reason is None and rosters is not None and item.get("market_type") == "Player Prop":
+                known_players = {
+                    _normalize_name(player) for roster in rosters.values() for player in roster
+                }
+                if _normalize_name(item.get("player_or_team", "")) not in known_players:
+                    reason = "player not found on ESPN rosters"
+        if reason:
+            data["data_gaps"].append(
+                f"Removed sneaky prop for {item.get('player_or_team', 'unknown') if isinstance(item, dict) else 'unknown'}: {reason}."
+            )
+        else:
+            valid_sneaky.append(item)
+    if len(sneaky) > 8:
+        data["data_gaps"].append("Limited sneaky-prop ideas to the first eight rows.")
+    data["sneaky_props"] = valid_sneaky
     for item in scorers:
         probability = float(item.get("estimated_td_probability", -1))
         confidence = int(item.get("confidence", 0))
