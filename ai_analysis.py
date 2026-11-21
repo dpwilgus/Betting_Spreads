@@ -397,6 +397,61 @@ def _build_player_research_summary(
     return rows
 
 
+def _build_unquoted_market_watchlist(
+    player_summary: list[dict[str, Any]],
+    injury_statuses: list[dict[str, Any]] | None,
+    limit: int = 6,
+) -> list[dict[str, Any]]:
+    """Surface evidence-backed markets to monitor without inventing lines or edges."""
+    blocked = {
+        _normalize_name(str(report.get("player") or ""))
+        for report in (injury_statuses or [])
+        if isinstance(report, dict) and _is_unavailable_status(report.get("status") or report.get("availability") or "")
+    }
+    options = {
+        "QB": (("passing_yards_per_game", "passing_yards_recent", "passing yards"),),
+        "RB": (("rushing_yards_per_game", "rushing_yards_recent", "rushing yards"),),
+        "WR": (("receiving_yards_per_game", "receiving_yards_recent", "receiving yards"),),
+        "TE": (("receiving_yards_per_game", "receiving_yards_recent", "receiving yards"),),
+    }
+    candidates = []
+    seen = set()
+    for row in player_summary:
+        if not isinstance(row, dict):
+            continue
+        player = str(row.get("player") or "")
+        key = _normalize_name(player)
+        if not key or key in blocked or key in seen:
+            continue
+        if int(row.get("games") or 0) < 3:
+            continue
+        for season_key, recent_key, market in options.get(str(row.get("position") or ""), ()):
+            season_avg, recent_avg = row.get(season_key), row.get(recent_key)
+            if not isinstance(season_avg, (int, float)) or season_avg <= 0:
+                continue
+            if not isinstance(recent_avg, (int, float)):
+                continue
+            seen.add(key)
+            candidates.append((season_avg, {
+                "market_type": "Player Prop", "player_or_team": player,
+                "bet_description": f"Monitor {market} market — line not posted",
+                "market_line": "NOT VERIFIED — no sportsbook player-prop quote",
+                "play_threshold": "Await exact sportsbook line",
+                "estimated_hit_probability": None,
+                "confidence": None,
+                "statistical_rationale": (
+                    f"ESPN season {season_avg:.1f}/game; last three {recent_avg:.1f}/game. "
+                    "Compare with the posted line before selecting a side."
+                ),
+                "risk_factors": "No line, odds, edge or confirmed active status; not a bet",
+                "data_quality": "Limited",
+                "average_per_game": f"{market.title()}: {season_avg:.1f} season / {recent_avg:.1f} last 3",
+            }))
+            break
+    candidates.sort(key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in candidates[:limit]]
+
+
 def _apply_independent_injury_statuses(
     data: dict[str, Any],
     injury_statuses: list[dict[str, Any]] | None,
@@ -2170,6 +2225,16 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             _normalize_name(str(item.get("bet_description") or ""))) not in top_market_keys
     ]
     attach_per_game_averages(data, player_usage, _expected_market_key)
+    # When the sportsbook has not posted player lines, do not return a blank
+    # sheet: show researched markets as explicitly non-bet watchlist entries.
+    if not research.get("verified_player_prop_markets") and not data.get("model_only_picks"):
+        data["model_only_picks"] = _build_unquoted_market_watchlist(
+            player_research_summary, research.get("injury_statuses", [])
+        )
+        if data["model_only_picks"]:
+            data.setdefault("data_gaps", []).append(
+                "Sportsbook player props are not posted; the watchlist has no betting line, odds, side or estimated edge."
+            )
     data["player_research_summary"] = player_research_summary
     data["analysis_version"] = 14
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
