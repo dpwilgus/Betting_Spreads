@@ -988,13 +988,13 @@ def main() -> int:
             for analysis in analyses
         )
         message += (
-            f"\\n\\nVerified betting output: {verified_player_prop_count} player props, "
+            f"\n\nVerified betting output: {verified_player_prop_count} player props, "
             f"{verified_touchdown_count} anytime-TD props; "
             f"{quote_candidates_count} research-only sportsbook candidates."
         )
         if not verified_player_prop_count and not verified_touchdown_count and quote_candidates_count:
             message += (
-                "\\nWARNING: Models found no qualifying verified player/TD recommendations. "
+                "\nWARNING: Models found no qualifying verified player/TD recommendations. "
                 "Research-only sportsbook quotes are NOT betting recommendations."
             )
         provider_usage = get_provider_usage_stats()
