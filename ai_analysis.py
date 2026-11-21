@@ -2051,12 +2051,6 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     # The candidate selector can include stale ESPN associations. Only
     # research players explicitly present on the current matchup team roster.
     rosters = research.get("rosters") or {}
-    eligible_names = {
-        _normalize_name(str(name))
-        for team in team_names
-        for name in (rosters.get(team) or [])
-        if isinstance(name, str)
-    }
     raw_candidates = research.get("selected_player_candidates", {})
     vetted_candidates = {
         team: [
