@@ -102,7 +102,7 @@ class PropReportIntegrationTests(unittest.TestCase):
                 "team": "Jacksonville Jaguars",
                 "availability": "No injury designation found",
                 "availability_evidence": "Final game-day active status pending.",
-                "estimated_td_probability": 35, "confidence": 5,
+                "estimated_td_probability": 48, "confidence": 5,
                 "rationale": "Five receiving touchdowns over nine games, nine targets per game.",
                 "risk_factors": "Red-zone opportunity variance.",
             }],
