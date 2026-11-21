@@ -402,9 +402,15 @@ def _rank_quoted_player_markets(
     usage: dict[str, dict[str, Any]],
     rosters: dict[str, list[str]],
     teams: tuple[str, str],
-    limit: int = 18,
+    limit: int = 12,
+    injury_statuses: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Build a small, exact-line candidate pool before asking the AI to rank it."""
+    """Prioritize consequential offensive roles, not obscure alternate lines.
+
+    Season-average/line gaps are ONLY a screening signal. One exact quote per
+    player is displayed, preventing a reserve's alternate lines from crowding
+    out leading QB/RB/WR/TE opportunities.
+    """
     stats = {
         "player_pass_yds": "passingYards",
         "player_rush_yds": "rushingYards",
@@ -414,54 +420,111 @@ def _rank_quoted_player_markets(
         "player_pass_completions": "completions",
         "player_rush_attempts": "rushingAttempts",
     }
-    roster_names = {
-        _normalize_name(name)
+    roster_team = {
+        _normalize_name(name): team
         for team in teams for name in (rosters.get(team) or [])
         if isinstance(name, str)
     }
-    ranked = []
-    seen = set()
+    unavailable = {
+        _normalize_name(str(report.get("player") or ""))
+        for report in (injury_statuses or [])
+        if isinstance(report, dict) and _is_unavailable_status(
+            report.get("status") or report.get("availability") or ""
+        )
+    }
+    ranked: list[tuple[float, dict[str, Any]]] = []
     for q in quotes or []:
         if not isinstance(q, dict) or q.get("market_key") not in stats:
             continue
-        player = str(q.get("player") or "")
+        player = str(q.get("player") or "").strip()
         key = _normalize_name(player)
-        if key not in roster_names:
+        if key not in roster_team or key in unavailable:
             continue
         record = usage.get(key, {})
         season = record.get("season") if isinstance(record.get("season"), dict) else {}
-        games = int(record.get("games_available") or 0)
-        stat = stats[q["market_key"]]
-        if games < 3 or stat not in season or q.get("point") is None:
-            continue
         try:
+            games = int(record.get("games_available") or 0)
             point = float(q["point"])
-            average = _stat_number(season, stat) / games
-        except (ValueError, TypeError, ZeroDivisionError):
+            average = _stat_number(season, stats[q["market_key"]]) / games
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
             continue
-        if point <= 0 or average <= 0:
+        if games < 3 or point <= 0 or average <= 0 or stats[q["market_key"]] not in season:
             continue
         side = str(q.get("side") or "").casefold()
-        if side not in {"over", "under"} or not q.get("price") or not q.get("sportsbook"):
+        if side not in {"over", "under"} or q.get("price") in (None, ""):
             continue
-        # An average alone is not a betting edge. This prioritizes markets
-        # for independent model evaluation, not automatic recommendations.
+        if not all(q.get(field) for field in ("sportsbook", "line", "source_url", "retrieved_at")):
+            continue
+        position = str(record.get("position") or "").upper()
+        carries = _stat_number(season, "rushingAttempts") / games
+        targets = _stat_number(season, "receivingTargets") / games
+        receptions = _stat_number(season, "receptions") / games
+        rec_yards = _stat_number(season, "receivingYards") / games
+        pass_attempts = _stat_number(season, "passingAttempts") / games
+        # Current-season opportunities are a reproducible proxy for a key
+        # offensive role. A famous name alone is not evidence of usage.
+        if position == "QB":
+            role_score = 3.0 + min(pass_attempts / 18.0, 2.0)
+            if q["market_key"] in {"player_rush_yds", "player_rush_attempts"}:
+                if carries < 3.0:
+                    continue
+            elif pass_attempts < 15.0:
+                continue
+        elif position == "RB":
+            opportunities = carries + targets
+            if opportunities < 7.0:
+                continue
+            role_score = 2.0 + min(opportunities / 9.0, 2.5)
+        elif position in {"WR", "TE"}:
+            if targets < 3.5 and receptions < 2.5 and rec_yards < 35:
+                continue
+            role_score = 2.0 + min(max(targets / 4.0, rec_yards / 45.0), 2.5)
+            if q["market_key"] not in {"player_reception_yds", "player_receptions"}:
+                continue
+        else:
+            continue
         difference = (average - point) / max(average, point)
         alignment = difference if side == "over" else -difference
-        identity = (key, q["market_key"], side, point)
-        if identity in seen:
+        try:
+            price = float(str(q["price"]).replace("+", ""))
+        except (TypeError, ValueError):
             continue
-        seen.add(identity)
-        ranked.append((alignment, {
-            "player": player, "market_key": q["market_key"],
-            "side": side.title(), "point": point,
-            "price": q["price"], "sportsbook": q["sportsbook"],
-            "season_average": round(average, 2),
-            "games": games, "line": q.get("line"),
-            "retrieved_at": q.get("retrieved_at"),
+        # Prefer standard -110-ish prices to extreme alternate lines.
+        price_penalty = min(abs(price + 110) / 300.0, 1.0)
+        score = (
+            role_score + min(games, 12) / 20.0
+            + max(-0.25, min(alignment, 0.35))
+            - price_penalty
+        )
+        ranked.append((score, {
+            "player": player, "team": roster_team[key],
+            "position": position, "market_key": q["market_key"],
+            "side": side.title(), "point": point, "price": q["price"],
+            "sportsbook": q["sportsbook"],
+            "season_average": round(average, 2), "games": games,
+            "line": q["line"], "source_url": q["source_url"],
+            "retrieved_at": q["retrieved_at"],
+            "opportunities_per_game": round(
+                pass_attempts if position == "QB" else
+                carries + targets if position == "RB" else targets, 2
+            ),
         }))
     ranked.sort(key=lambda item: item[0], reverse=True)
-    return [row for _, row in ranked[:limit]]
+    selected = []
+    used_players: set[str] = set()
+    team_counts: dict[str, int] = {}
+    per_team_limit = max(1, (limit + len(teams) - 1) // max(len(teams), 1))
+    for _, candidate in ranked:
+        key = _normalize_name(candidate["player"])
+        team = candidate["team"]
+        if key in used_players or team_counts.get(team, 0) >= per_team_limit:
+            continue
+        selected.append(candidate)
+        used_players.add(key)
+        team_counts[team] = team_counts.get(team, 0) + 1
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def _build_unquoted_market_watchlist(
@@ -2171,6 +2234,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
     quoted_shortlist = _rank_quoted_player_markets(
         research.get("verified_player_prop_markets", []),
         player_usage, rosters, team_names,
+        injury_statuses=research.get("injury_statuses", []),
     )
     quote_focus = (
         "\nEXACT VERIFIED SPORTSBOOK PROP CANDIDATES (prioritize these; "
@@ -2387,18 +2451,7 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
                 }.get(item["market_key"], item["market_key"]),
             "market_line": f"{item['line']} ({item['price']}) — {item['sportsbook']}",
             "market_retrieved_at": item.get("retrieved_at"),
-            "market_source": next(
-                (
-                    quote.get("source_url")
-                    for quote in research.get("verified_player_prop_markets", [])
-                    if _normalize_name(str(quote.get("player") or "")) ==
-                        _normalize_name(item["player"])
-                    and quote.get("market_key") == item["market_key"]
-                    and str(quote.get("side") or "").casefold() == item["side"].casefold()
-                    and quote.get("point") is not None
-                    and abs(float(quote["point"]) - item["point"]) < 0.0001
-                ), None
-            ),
+            "market_source": item["source_url"],
             "average_per_game": f"{item['season_average']:.1f} over {item['games']} games",
             "play_threshold": "Research candidate — not a betting recommendation",
             "estimated_hit_probability": None,
@@ -2408,16 +2461,6 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             "data_quality": "Limited",
         }
         for item in quoted_shortlist
-        if any(
-            isinstance(quote, dict)
-            and _normalize_name(str(quote.get("player") or "")) == _normalize_name(item["player"])
-            and quote.get("market_key") == item["market_key"]
-            and str(quote.get("side") or "").casefold() == item["side"].casefold()
-            and quote.get("point") is not None
-            and abs(float(quote["point"]) - item["point"]) < 0.0001
-            and quote.get("source_url") and quote.get("retrieved_at")
-            for quote in research.get("verified_player_prop_markets", [])
-        )
     ]
     data["player_research_summary"] = player_research_summary
     data["analysis_version"] = 14
