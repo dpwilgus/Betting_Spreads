@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ai_providers import generate_json_ensemble
+from ai_providers import NoUsableAnalysisError, generate_json, generate_json_ensemble
 from live_research import collect_game_research
 from prop_averages import attach_per_game_averages
 
@@ -1197,7 +1197,7 @@ def _validate_analysis(
         picks, scorers, sneaky_response if isinstance(sneaky_response, list) else [],
         valid_injury_response, underdog_response,
     )):
-        raise RuntimeError(
+        raise NoUsableAnalysisError(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
             "injury impacts, sneaky props, and underdog assessment are empty."
         )
