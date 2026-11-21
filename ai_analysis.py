@@ -838,8 +838,19 @@ def _validate_analysis(
     # Keep require_underdog accepted for existing callers, but treat this
     # supplemental section as optional so its omission cannot erase valid picks.
     data.setdefault("underdog_analysis", [])
-    if not isinstance(data.get("summary"), str) or not isinstance(data.get("game_script"), str):
-        raise RuntimeError("AI response is missing the matchup summary or game script.")
+    # Summary and game script are narrative presentation, not proof of a bet.
+    # Preserve otherwise usable structured selections if a model omits one.
+    for field, fallback in (
+        ("summary", "Matchup summary unavailable from this AI provider."),
+        ("game_script", "Game-script narrative unavailable from this AI provider."),
+    ):
+        if not isinstance(data.get(field), str) or not data[field].strip():
+            data[field] = fallback
+            data.setdefault("data_gaps", [])
+            if isinstance(data["data_gaps"], list):
+                data["data_gaps"].append(
+                    f"AI provider omitted {field}; no narrative was inferred."
+                )
     # Underdog analysis is valuable, but it is a supplemental section. A
     # malformed or omitted underdog row must never discard otherwise usable
     # matchup analysis; the sanitizer records a visible data-gap warning.
@@ -2040,7 +2051,9 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             output_tokens = max(
                 256, min(int(os.environ.get("GROQ_MAX_COMPLETION_TOKENS", "1600")), 1600)
             )
-            input_token_budget = max(1000, 6500 - output_tokens - 500)
+            # Reserve headroom for other requests inside Groq's rolling
+            # 8k TPM window, including validation retries.
+            input_token_budget = max(1000, 5000 - output_tokens - 500)
             combined_budget = int(input_token_budget * 3.5)
         else:
             combined_budget = len(instructions) + len(user_prefix) + MAX_RESEARCH_PROMPT_CHARS
