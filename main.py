@@ -762,7 +762,7 @@ def _cached_analysis_is_complete(cached: dict | None) -> bool:
         isinstance(cached.get("picks"), list)
         and isinstance(cached.get("touchdown_scorers"), list)
         and len(cached["touchdown_scorers"]) <= 5
-        and cached.get("analysis_version") == 14
+        and cached.get("analysis_version") == 15
         and isinstance(cached.get("underdog_analysis"), list)
         and isinstance(cached.get("player_research_summary"), list)
         and bool(cached.get("ai_provider"))
