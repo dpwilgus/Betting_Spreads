@@ -276,6 +276,12 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         12, "VERIFIED PLAYER PROPS (SPORTSBOOK LINE REQUIRED)", player_props,
         "No verified sportsbook player-prop lines were available for this matchup."
     )
+    next_pick_row = write_pick_section(
+        next_pick_row,
+        "VERIFIED SPORTSBOOK MARKET CANDIDATES (NOT YET AI-RECOMMENDED)",
+        analysis.get("verified_market_candidates", []),
+        "No roster-validated sportsbook quotes with ESPN game-log context were found."
+    )
     model_only_props = analysis.get("model_only_picks", [])
     next_pick_row = write_pick_section(
         next_pick_row,
