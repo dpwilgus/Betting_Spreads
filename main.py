@@ -512,8 +512,19 @@ def attach_sportsbook_quotes(game: dict, research: dict) -> None:
             "title": "The Odds API market discovery and live NFL sportsbook odds",
             "url": "https://the-odds-api.com/sports/nfl-odds.html",
         })
+    listed_player_markets = [
+        key for key in available if str(key).startswith("player_")
+    ]
+    market_availability = (
+        "NO PLAYER MARKETS POSTED BY THE ODDS API"
+        if not listed_player_markets
+        else "PLAYER MARKETS LISTED BUT NO PLAYER QUOTES RETURNED"
+        if not player_quotes else "player quotes available"
+    )
     research["odds_api_status"] = (
-        f"Discovery: {len(available)} listed markets; "
+        f"{market_availability}; "
+        f"Discovery: {len(available)} listed markets "
+        f"({', '.join(available) if available else 'none'}); "
         f"player quotes: {len(player_quotes)}; game quotes: {len(game_quotes)}; "
         f"Pass 1: {pass1.get('status', 'unknown')}; Pass 2 first TD: {pass2_status}"
     )
