@@ -197,6 +197,32 @@ class AnalysisQualityTests(unittest.TestCase):
         self.assertEqual(result[0]["point"], 50.5)
         self.assertEqual(result[0]["season_average"], 70)
 
+    def test_invalid_sneaky_probability_does_not_erase_valid_main_pick(self):
+        analysis = {
+            "summary": "Matchup", "game_script": "Competitive game",
+            "picks": [{
+                "market_type": "Game Prop", "player_or_team": "Jacksonville Jaguars",
+                "bet_description": "Jacksonville moneyline",
+                "market_line": "Not verified", "play_threshold": "Jacksonville to win",
+                "estimated_hit_probability": 55, "confidence": 5,
+                "statistical_rationale": "Game matchup analysis",
+                "risk_factors": "Price unavailable", "data_quality": "Limited",
+            }],
+            "sneaky_props": [{
+                "market_type": "Player Prop", "player_or_team": "Player A",
+                "bet_description": "Over 40.5 rushing yards",
+                "market_line": "Not verified", "play_threshold": "Over 40.5",
+                "estimated_hit_probability": 200, "confidence": 12,
+                "statistical_rationale": "Bad numbers",
+                "risk_factors": "Uncertain", "data_quality": "Limited",
+            }],
+            "touchdown_scorers": [], "injury_impact": [], "data_gaps": [],
+        }
+        _validate_analysis(analysis)
+        self.assertEqual(len(analysis["picks"]), 1)
+        self.assertEqual(analysis["sneaky_props"], [])
+        self.assertTrue(any("Removed sneaky prop" in gap for gap in analysis["data_gaps"]))
+
     def test_no_odds_watchlist_uses_espn_averages_without_invented_bets(self):
         rows = [
             {"player": "Player A", "position": "RB", "games": 8,
