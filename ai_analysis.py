@@ -397,6 +397,73 @@ def _build_player_research_summary(
     return rows
 
 
+def _rank_quoted_player_markets(
+    quotes: list[dict[str, Any]],
+    usage: dict[str, dict[str, Any]],
+    rosters: dict[str, list[str]],
+    teams: tuple[str, str],
+    limit: int = 18,
+) -> list[dict[str, Any]]:
+    """Build a small, exact-line candidate pool before asking the AI to rank it."""
+    stats = {
+        "player_pass_yds": "passingYards",
+        "player_rush_yds": "rushingYards",
+        "player_reception_yds": "receivingYards",
+        "player_receptions": "receptions",
+        "player_pass_attempts": "passingAttempts",
+        "player_pass_completions": "completions",
+        "player_rush_attempts": "rushingAttempts",
+    }
+    roster_names = {
+        _normalize_name(name)
+        for team in teams for name in (rosters.get(team) or [])
+        if isinstance(name, str)
+    }
+    ranked = []
+    seen = set()
+    for q in quotes or []:
+        if not isinstance(q, dict) or q.get("market_key") not in stats:
+            continue
+        player = str(q.get("player") or "")
+        key = _normalize_name(player)
+        if key not in roster_names:
+            continue
+        record = usage.get(key, {})
+        season = record.get("season") if isinstance(record.get("season"), dict) else {}
+        games = int(record.get("games_available") or 0)
+        stat = stats[q["market_key"]]
+        if games < 3 or stat not in season or q.get("point") is None:
+            continue
+        try:
+            point = float(q["point"])
+            average = _stat_number(season, stat) / games
+        except (ValueError, TypeError, ZeroDivisionError):
+            continue
+        if point <= 0 or average <= 0:
+            continue
+        side = str(q.get("side") or "").casefold()
+        if side not in {"over", "under"} or not q.get("price") or not q.get("sportsbook"):
+            continue
+        # An average alone is not a betting edge. This prioritizes markets
+        # for independent model evaluation, not automatic recommendations.
+        difference = (average - point) / max(average, point)
+        alignment = difference if side == "over" else -difference
+        identity = (key, q["market_key"], side, point)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        ranked.append((alignment, {
+            "player": player, "market_key": q["market_key"],
+            "side": side.title(), "point": point,
+            "price": q["price"], "sportsbook": q["sportsbook"],
+            "season_average": round(average, 2),
+            "games": games, "line": q.get("line"),
+            "retrieved_at": q.get("retrieved_at"),
+        }))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [row for _, row in ranked[:limit]]
+
+
 def _build_unquoted_market_watchlist(
     player_summary: list[dict[str, Any]],
     injury_statuses: list[dict[str, Any]] | None,
@@ -2072,6 +2139,17 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             + json.dumps(player_research_summary, ensure_ascii=False, separators=(",", ":"))
         )
 
+    quoted_shortlist = _rank_quoted_player_markets(
+        research.get("verified_player_prop_markets", []),
+        player_usage, rosters, team_names,
+    )
+    quote_focus = (
+        "\\nEXACT VERIFIED SPORTSBOOK PROP CANDIDATES (prioritize these; "
+        "evaluate, do not assume they are profitable):\\n"
+        + json.dumps(quoted_shortlist, ensure_ascii=False, separators=(",", ":"))
+        if quoted_shortlist else ""
+    )
+
     user_prefix = (
         f"Analyze this upcoming NFL matchup: {matchup}. Kickoff: {game.get('Game Date (ET)', 'Not supplied')}. "
         f"ESPN line: {game.get('Betting Line', 'Unavailable')}. "
@@ -2139,10 +2217,23 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         underdog_format = _underdog_format_instruction(
             expected_underdog, expected_spread
         )
+        # Put the structured exact quotes at the end so long ESPN research
+        # cannot truncate the actionable candidates out of the prompt.
+        focus = quote_focus
+        if focus:
+            bounded, was_truncated = _bounded_research_text(
+                bounded, max(1000, research_budget - len(focus))
+            )
+            prompt_metadata[provider_name] = (
+                was_truncated or prompt_metadata[provider_name][0],
+                prompt_metadata[provider_name][1],
+                len(bounded),
+            )
         return (
             instructions,
             user_prefix + underdog_format
-            + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded,
+            + "\nINDEPENDENT RESEARCH AND SOURCE MATERIAL:\n" + bounded
+            + focus,
         )
 
     rosters = research.get("rosters")
