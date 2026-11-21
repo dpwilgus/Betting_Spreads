@@ -952,6 +952,51 @@ def _validate_analysis(
                 continue
             valid_injury_response = True
             break
+    # Isolate invalid model picks rather than rejecting an entire provider's
+    # otherwise usable analysis. Never coerce unsupported probabilities or
+    # silently change a sportsbook market; invalid rows are removed.
+    valid_picks = []
+    for item in picks:
+        reason = None
+        if not isinstance(item, dict):
+            reason = "pick was not a JSON object"
+        else:
+            try:
+                probability = float(item.get("estimated_hit_probability", -1))
+                confidence = int(item.get("confidence", 0))
+                if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
+                    reason = "invalid pick probability or confidence"
+            except (TypeError, ValueError, OverflowError):
+                reason = "non-numeric pick probability or confidence"
+            if reason is None and item.get("market_type") not in ("Player Prop", "Game Prop"):
+                reason = "unsupported betting market type"
+            if reason is None and item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
+                reason = "unsupported data-quality label"
+            if reason is None:
+                for field in ("market_type", "player_or_team", "bet_description",
+                              "market_line", "play_threshold", "statistical_rationale",
+                              "risk_factors"):
+                    if not item.get(field):
+                        reason = f"missing required pick field: {field}"
+                        break
+            if reason is None and rosters is not None and item.get("market_type") == "Player Prop":
+                known_players = {
+                    _normalize_name(player)
+                    for roster in rosters.values()
+                    for player in roster
+                }
+                if not known_players or _normalize_name(item.get("player_or_team", "")) not in known_players:
+                    reason = "player not found on either current ESPN roster"
+        if reason:
+            player = item.get("player_or_team", "unknown") if isinstance(item, dict) else "unknown"
+            data["data_gaps"].append(f"Removed model pick for {player}: {reason}.")
+            continue
+        valid_picks.append(item)
+    data["picks"] = valid_picks
+    picks = valid_picks
+
+    # Do not accept a narrative-only response when all actionable and
+    # supplemental evidence was discarded.
     if not any((
         picks, scorers, sneaky_response if isinstance(sneaky_response, list) else [],
         valid_injury_response, underdog_response,
@@ -960,30 +1005,6 @@ def _validate_analysis(
             "AI response contains no usable matchup analysis: all picks, touchdown candidates, "
             "injury impacts, sneaky props, and underdog assessment are empty."
         )
-    for item in picks:
-        probability = float(item.get("estimated_hit_probability", -1))
-        confidence = int(item.get("confidence", 0))
-        if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
-            raise RuntimeError("AI returned an invalid pick probability or confidence.")
-        if item.get("market_type") not in ("Player Prop", "Game Prop"):
-            raise RuntimeError("AI returned an unsupported betting market type.")
-        if item.get("data_quality") not in ("Strong", "Moderate", "Limited"):
-            raise RuntimeError("AI returned an unsupported data-quality label.")
-        for field in ("market_type", "player_or_team", "bet_description",
-                      "market_line", "play_threshold", "statistical_rationale", "risk_factors"):
-            if not item.get(field):
-                raise RuntimeError(f"AI response is missing a required pick field: {field}")
-        if rosters is not None and item.get("market_type") == "Player Prop":
-            known_players = {
-                _normalize_name(player)
-                for roster in rosters.values()
-                for player in roster
-            }
-            if not known_players or _normalize_name(item.get("player_or_team", "")) not in known_players:
-                raise RuntimeError(
-                    "AI suggested a player prop for someone not found on either current ESPN roster: "
-                    + str(item.get("player_or_team", ""))
-                )
     sneaky = data.setdefault("sneaky_props", [])
     if not isinstance(sneaky, list) or len(sneaky) > 8:
         raise RuntimeError("AI sneaky_props must be a list of at most eight ideas.")
