@@ -35,6 +35,10 @@ class IncompleteResponseError(RuntimeError):
     """A provider explicitly reported that its generated response was truncated."""
 
 
+class NoUsableAnalysisError(RuntimeError):
+    """A syntactically valid model response contains no actionable or contextual evidence."""
+
+
 def _estimate_prompt_tokens(system_prompt: str, user_prompt: str) -> int:
     """Conservative character-based estimate used for provider TPM preflight checks."""
     return math.ceil((len(system_prompt or "") + len(user_prompt or "")) / 3.5)
@@ -486,6 +490,12 @@ def generate_json(
                     time.sleep(1)
                     continue
                 failures.append(f"{provider.name}: connection error: {exc}")
+                break
+            except NoUsableAnalysisError as exc:
+                # This is a content failure, not a formatting mistake. Sending
+                # the same huge prompt to the same small model wastes the
+                # remaining free-tier TPM budget. Let another provider handle it.
+                failures.append(f"{provider.name}: {exc}")
                 break
             except IncompleteResponseError as exc:
                 # The provider confirmed that the output hit its cap. Repeating the
