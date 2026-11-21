@@ -461,6 +461,17 @@ def generate_json(
                                    "daily limit", "billing")
                 )
                 transient = exc.code >= 500 or (exc.code == 429 and not quota_exhausted)
+                # A second Groq request in the same rolling window usually
+                # repeats the 429 and burns time. If another provider is ready,
+                # hand off immediately instead of retrying a doomed request.
+                if (
+                    provider.name == "groq" and exc.code == 429
+                    and any(other.name != "groq" for other, _ in configured)
+                ):
+                    failures.append(
+                        "groq: rate limited (HTTP 429); handed off to another configured provider."
+                    )
+                    break
                 if transient and attempt < 2:
                     # Respect provider-supplied retry windows instead of retrying too early.
                     time.sleep(min(max(delay, 0.5), 60))
