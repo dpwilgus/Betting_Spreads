@@ -6,6 +6,7 @@ from ai_analysis import (
     ANALYSIS_SCHEMA,
     _bounded_research_text,
     _build_unquoted_market_watchlist,
+    _rank_quoted_player_markets,
     _apply_independent_injury_statuses,
     _deduplicate_correlated_game_picks,
     _separate_unverified_player_props,
@@ -172,6 +173,29 @@ class AnalysisQualityTests(unittest.TestCase):
                 analysis,
                 team_names=("San Francisco 49ers", "Dallas Cowboys"),
             )
+
+    def test_quoted_shortlist_requires_roster_and_real_line(self):
+        quotes = [
+            {"player": "Player A", "market_key": "player_rush_yds",
+             "side": "Over", "point": 50.5, "price": "-110",
+             "sportsbook": "DraftKings", "line": "Over 50.5",
+             "retrieved_at": "2026-11-21T12:00:00Z"},
+            {"player": "Wrong Team", "market_key": "player_rush_yds",
+             "side": "Over", "point": 40.5, "price": "-110",
+             "sportsbook": "DraftKings"},
+        ]
+        usage = {
+            "playera": {"games_available": 5, "season": {"rushingYards": 350}},
+            "wrongteam": {"games_available": 5, "season": {"rushingYards": 400}},
+        }
+        result = _rank_quoted_player_markets(
+            quotes, usage, {"Jaguars": ["Player A"], "Giants": []},
+            ("Jaguars", "Giants"),
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["player"], "Player A")
+        self.assertEqual(result[0]["point"], 50.5)
+        self.assertEqual(result[0]["season_average"], 70)
 
     def test_no_odds_watchlist_uses_espn_averages_without_invented_bets(self):
         rows = [
