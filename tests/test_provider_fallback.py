@@ -7,7 +7,7 @@ from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_t
                          _filter_injury_impacts, _filter_player_props_by_usage, _filter_td_scorers_by_usage,
                          _research_player_usage, _separate_unverified_player_props,
                          _normalize_name, _validate_analysis, analyze_game)
-from ai_providers import (Provider, NoUsableAnalysisError, _call_provider, _response_text, generate_json
+from ai_providers import (Provider, NoUsableAnalysisError, _call_provider, _response_text, generate_json,
                           generate_json_ensemble, get_provider_usage_stats,
                           reset_provider_run_state, configure_providers)
 from live_research import collect_game_research, _extract_roster_names
