@@ -5,6 +5,7 @@ from prop_averages import attach_per_game_averages
 from ai_analysis import (
     ANALYSIS_SCHEMA,
     _bounded_research_text,
+    _build_unquoted_market_watchlist,
     _apply_independent_injury_statuses,
     _deduplicate_correlated_game_picks,
     _separate_unverified_player_props,
@@ -171,6 +172,24 @@ class AnalysisQualityTests(unittest.TestCase):
                 analysis,
                 team_names=("San Francisco 49ers", "Dallas Cowboys"),
             )
+
+    def test_no_odds_watchlist_uses_espn_averages_without_invented_bets(self):
+        rows = [
+            {"player": "Player A", "position": "RB", "games": 8,
+             "rushing_yards_per_game": 71.5, "rushing_yards_recent": 84.0},
+            {"player": "Player B", "position": "WR", "games": 8,
+             "receiving_yards_per_game": 60.0, "receiving_yards_recent": 55.0},
+        ]
+        result = _build_unquoted_market_watchlist(
+            rows, [{"player": "Player B", "status": "Out"}]
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["player_or_team"], "Player A")
+        self.assertIsNone(result[0]["estimated_hit_probability"])
+        self.assertIsNone(result[0]["confidence"])
+        self.assertIn("NOT VERIFIED", result[0]["market_line"])
+        self.assertIn("71.5", result[0]["average_per_game"])
+        self.assertIn("Await exact sportsbook line", result[0]["play_threshold"])
 
     def test_missing_nvidia_narratives_do_not_erase_valid_picks(self):
         analysis = {
