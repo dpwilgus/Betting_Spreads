@@ -7,7 +7,7 @@ from ai_analysis import (_apply_independent_injury_statuses, _bounded_research_t
                          _filter_injury_impacts, _filter_player_props_by_usage, _filter_td_scorers_by_usage,
                          _research_player_usage, _separate_unverified_player_props,
                          _normalize_name, _validate_analysis, analyze_game)
-from ai_providers import (Provider, _call_provider, _response_text, generate_json,
+from ai_providers import (Provider, NoUsableAnalysisError, _call_provider, _response_text, generate_json
                           generate_json_ensemble, get_provider_usage_stats,
                           reset_provider_run_state, configure_providers)
 from live_research import collect_game_research, _extract_roster_names
@@ -265,6 +265,26 @@ class ProviderFallbackTests(unittest.TestCase):
         self.assertEqual(result["summary"], "next game")
         self.assertEqual(provider, "groq")
         self.assertEqual(call.call_count, 4)
+
+    def test_empty_groq_analysis_does_not_retry_and_uses_nvidia(self):
+        groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
+        nvidia = Provider("nvidia", "NVIDIA_API_KEY", "nvidia", "url", "model", "openai")
+        with patch(
+            "ai_providers.ensure_configured",
+            return_value=[(groq, "groq-key"), (nvidia, "nvidia-key")]
+        ), patch(
+            "ai_providers._SKIP_PROVIDER_FOR_RUN", set()
+        ), patch(
+            "ai_providers.time.sleep"
+        ) as sleep, patch(
+            "ai_providers._call_provider",
+            side_effect=[NoUsableAnalysisError("empty slate"), {"picks": [{"confidence": 6}]}]
+        ) as call:
+            result, provider = generate_json("system", "user")
+        self.assertEqual(provider, "nvidia")
+        self.assertEqual(len(result["picks"]), 1)
+        self.assertEqual(call.call_count, 2)
+        sleep.assert_not_called()
 
     def test_groq_429_immediately_falls_back_without_second_rate_limited_request(self):
         groq = Provider("groq", "GROQ_API_KEY", "groq", "url", "model", "openai")
