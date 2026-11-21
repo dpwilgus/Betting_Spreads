@@ -2366,7 +2366,8 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
                         _normalize_name(item["player"])
                     and quote.get("market_key") == item["market_key"]
                     and str(quote.get("side") or "").casefold() == item["side"].casefold()
-                    and str(quote.get("point")) == str(item["point"])
+                    and quote.get("point") is not None
+                    and abs(float(quote["point"]) - item["point"]) < 0.0001
                 ), None
             ),
             "average_per_game": f"{item['season_average']:.1f} over {item['games']} games",
@@ -2378,6 +2379,16 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
             "data_quality": "Limited",
         }
         for item in quoted_shortlist
+        if any(
+            isinstance(quote, dict)
+            and _normalize_name(str(quote.get("player") or "")) == _normalize_name(item["player"])
+            and quote.get("market_key") == item["market_key"]
+            and str(quote.get("side") or "").casefold() == item["side"].casefold()
+            and quote.get("point") is not None
+            and abs(float(quote["point"]) - item["point"]) < 0.0001
+            and quote.get("source_url") and quote.get("retrieved_at")
+            for quote in research.get("verified_player_prop_markets", [])
+        )
     ]
     data["player_research_summary"] = player_research_summary
     data["analysis_version"] = 14
