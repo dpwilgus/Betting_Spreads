@@ -2340,25 +2340,51 @@ def _recover_verified_props_from_focused_review(
     quotes = research.get("verified_player_prop_markets", [])
     if not isinstance(quotes, list):
         quotes = []
-    already_verified = any(
-        isinstance(pick, dict)
-        and pick.get("market_type") == "Player Prop"
+    existing_verified = [
+        pick for pick in data.get("picks", [])
+        if isinstance(pick, dict) and pick.get("market_type") == "Player Prop"
         and _best_matching_quote(pick, quotes)
-        for pick in data.get("picks", [])
-    )
+    ]
+    existing_quote_keys = set()
+    for pick in existing_verified:
+        quote = _best_matching_quote(pick, quotes)
+        try:
+            existing_quote_keys.add((
+                _normalize_name(str(quote.get("player") or "")),
+                str(quote.get("market_key") or ""),
+                str(quote.get("side") or "").casefold(), float(quote.get("point"))
+            ))
+        except (TypeError, ValueError, AttributeError):
+            continue
     td_pool = _rank_quoted_touchdown_markets(
         quotes, usage, research.get("rosters") or {}, teams,
         injury_statuses=research.get("injury_statuses", []),
     )
-    needs_td = not data.get("touchdown_scorers") and bool(td_pool)
-    if (already_verified or not quoted_shortlist) and not needs_td:
+    raw_td_count = sum(
+        1 for quote in quotes
+        if isinstance(quote, dict) and quote.get("market_key") == "player_anytime_td"
+        and str(quote.get("side") or "").casefold() in {"yes", "over"}
+    )
+    data["td_quote_diagnostics"] = {
+        "raw_yes_quotes": raw_td_count, "eligible_players": len(td_pool)
+    }
+    needs_td = len(data.get("touchdown_scorers", [])) < 3 and bool(td_pool)
+    remaining_candidates = [
+        item for item in quoted_shortlist
+        if (_normalize_name(item["player"]), item["market_key"],
+            item["side"].casefold(), float(item["point"])) not in existing_quote_keys
+    ]
+    needs_props = len(existing_verified) < 5 and bool(remaining_candidates)
+    needs_sneaky = not data.get("sneaky_props") and bool(remaining_candidates)
+    needs_summary = str(data.get("summary") or "").startswith("Matchup summary unavailable")
+    if not any((needs_td, needs_props, needs_sneaky, needs_summary and (td_pool or remaining_candidates))):
         return
-    if not quoted_shortlist and not td_pool:
+    if not remaining_candidates and not td_pool:
         return
     # Unlike the full research prompt, this is bounded to key players and
     # their exact offers so the provider cannot lose them to truncation.
     context = []
-    for item in quoted_shortlist:
+    for item in remaining_candidates:
         record = usage.get(_normalize_name(item["player"]), {})
         recent = record.get("recent") if isinstance(record.get("recent"), list) else []
         stat = {
@@ -2383,20 +2409,23 @@ def _recover_verified_props_from_focused_review(
         report for report in (research.get("injury_statuses") or [])
         if isinstance(report, dict)
         and _normalize_name(str(report.get("player") or "")) in {
-            _normalize_name(item["player"]) for item in quoted_shortlist + td_pool
+            _normalize_name(item["player"]) for item in remaining_candidates + td_pool
         }
     ][:12]
     request = json.dumps({
         "matchup": list(teams),
-        "key_player_quotes": context if not already_verified else [],
+        "key_player_quotes": context if needs_props or needs_sneaky else [],
         "verified_anytime_td_quotes": td_pool if needs_td else [],
         "injury_designations": injuries,
+        "existing_verified_prop_count": len(existing_verified),
+        "summary_missing": needs_summary,
     }, ensure_ascii=False, separators=(",", ":"))
     system = (
-        "You are an NFL player-prop analyst. Return a JSON object with exactly "
-        "two arrays: picks and touchdown_scorers. Review supplied exact sportsbook "
-        "offers for KEY high-usage players only. Select up to four player props and "
-        "three anytime-TD candidates only if evidence supports them; an empty "
+        "You are an NFL player-prop analyst. Return JSON with picks, touchdown_scorers, "
+        "sneaky_props and optional matchup_summary. Review supplied exact sportsbook "
+        "offers for KEY high-usage players only. Select up to five ADDITIONAL player props, "
+        "three anytime-TD candidates and up to three DISTINCT sneaky props only if evidence "
+        "supports them; an empty "
         "array is acceptable. Do not interpret an average above a line as proof "
         "of positive expected value. Only recommend offers whose conservative "
         "estimated hit probability exceeds the American-odds break-even "
@@ -2409,6 +2438,10 @@ def _recover_verified_props_from_focused_review(
         "play_threshold, estimated_hit_probability (0-100), confidence (1-10), "
         "statistical_rationale, risk_factors, data_quality ('Strong', 'Moderate', "
         "'Limited'). Use actual season and recent numbers from the supplied data. "
+        "Sneaky props use the same fields and verification rules as picks, must use "
+        "a DIFFERENT exact quoted market, and explain why the angle is overlooked. "
+        "If summary_missing, provide a brief evidence-grounded matchup_summary "
+        "using supplied context only. "
         "TD candidates need rank, player, team, availability ('No injury "
         "designation found' unless explicitly documented), availability_evidence, "
         "estimated_td_probability (0-100), confidence (1-10), rationale and "
@@ -2435,40 +2468,45 @@ def _recover_verified_props_from_focused_review(
     pool_keys = {
         (_normalize_name(item["player"]), item["market_key"],
          item["side"].casefold(), item["point"])
-        for item in quoted_shortlist
+        for item in remaining_candidates
     }
-    for pick in result.get("picks", [])[:4]:
-        if not isinstance(pick, dict):
-            continue
-        quote = _best_matching_quote(pick, quotes)
-        if quote is None:
-            continue
-        try:
-            market_identity = (
-                _normalize_name(str(quote["player"])), quote["market_key"],
-                str(quote["side"]).casefold(), float(quote["point"]),
-            )
-            prob = float(pick["estimated_hit_probability"])
-            confidence = int(pick["confidence"])
-        except (TypeError, ValueError, KeyError, OverflowError):
-            continue
-        breakeven = _american_odds_implied_probability(quote.get("price"))
-        if (market_identity not in pool_keys or not (0 <= prob <= 100 and 1 <= confidence <= 10)
-                or breakeven is None or prob < breakeven + 2.0):
-            continue
-        if pick.get("data_quality") not in {"Strong", "Moderate", "Limited"}:
-            continue
-        if not all(pick.get(field) for field in (
-            "player_or_team", "bet_description", "play_threshold",
-            "statistical_rationale", "risk_factors",
-        )):
-            continue
-        pick = dict(pick)
-        pick["market_type"] = "Player Prop"
-        pick["market_line"] = f"{quote['line']} ({quote['price']}) — {quote['sportsbook']}"
-        pick["market_source"] = quote["source_url"]
-        pick["market_retrieved_at"] = quote["retrieved_at"]
-        valid_props.append(pick)
+    for section_name, raw_picks in (
+        ("picks", result.get("picks") or []),
+        ("sneaky_props", result.get("sneaky_props") or []),
+    ):
+      for pick in raw_picks[:5 if section_name == "picks" else 3]:
+          if not isinstance(pick, dict):
+              continue
+          quote = _best_matching_quote(pick, quotes)
+          if quote is None:
+              continue
+          try:
+              market_identity = (
+                  _normalize_name(str(quote["player"])), quote["market_key"],
+                  str(quote["side"]).casefold(), float(quote["point"]),
+              )
+              prob = float(pick["estimated_hit_probability"])
+              confidence = int(pick["confidence"])
+          except (TypeError, ValueError, KeyError, OverflowError):
+              continue
+          breakeven = _american_odds_implied_probability(quote.get("price"))
+          if (market_identity not in pool_keys or not (0 <= prob <= 100 and 1 <= confidence <= 10)
+                  or breakeven is None or prob < breakeven + 2.0):
+              continue
+          if pick.get("data_quality") not in {"Strong", "Moderate", "Limited"}:
+              continue
+          if not all(pick.get(field) for field in (
+              "player_or_team", "bet_description", "play_threshold",
+              "statistical_rationale", "risk_factors",
+          )):
+              continue
+          pick = dict(pick)
+          pick["market_type"] = "Player Prop"
+          pick["market_line"] = f"{quote['line']} ({quote['price']}) — {quote['sportsbook']}"
+          pick["market_source"] = quote["source_url"]
+          pick["market_retrieved_at"] = quote["retrieved_at"]
+          pick["_focused_section"] = section_name
+          valid_props.append(pick)
     valid_tds = []
     td_lookup = {_normalize_name(item["player"]): item for item in td_pool}
     for scorer in result.get("touchdown_scorers", [])[:3]:
@@ -2500,8 +2538,31 @@ def _recover_verified_props_from_focused_review(
         scorer["market_source"] = matched["source_url"]
         scorer["market_retrieved_at"] = matched["retrieved_at"]
         valid_tds.append(scorer)
-    data.setdefault("picks", []).extend(valid_props)
+    seen_markets = set(existing_quote_keys)
+    for pick in valid_props:
+        quote = _best_matching_quote(pick, quotes)
+        if quote is None:
+            continue
+        try:
+            key = (_normalize_name(str(quote.get("player") or "")),
+                   str(quote.get("market_key") or ""), str(quote.get("side") or "").casefold(),
+                   float(quote.get("point")))
+        except (TypeError, ValueError):
+            continue
+        if key in seen_markets:
+            continue
+        seen_markets.add(key)
+        section = pick.pop("_focused_section", "picks")
+        if section == "sneaky_props":
+            data.setdefault("sneaky_props", []).append(pick)
+        elif len([p for p in data.get("picks", [])
+                  if isinstance(p, dict) and p.get("market_type") == "Player Prop"]) < 5:
+            data.setdefault("picks", []).append(pick)
     data.setdefault("touchdown_scorers", []).extend(valid_tds)
+    if needs_summary:
+        summary = str(result.get("matchup_summary") or "").strip()
+        if len(summary) >= 35:
+            data["summary"] = summary[:900]
     data["focused_prop_review_provider"] = provider
     if not valid_props and not valid_tds:
         data.setdefault("data_gaps", []).append(
