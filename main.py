@@ -992,6 +992,20 @@ def main() -> int:
             f"{verified_touchdown_count} anytime-TD props; "
             f"{quote_candidates_count} research-only sportsbook candidates."
         )
+        td_raw_quotes = sum(
+            (analysis.get("td_quote_diagnostics") or {}).get("raw_yes_quotes", 0)
+            for analysis in analyses
+        )
+        td_eligible = sum(
+            (analysis.get("td_quote_diagnostics") or {}).get("eligible_players", 0)
+            for analysis in analyses
+        )
+        if verified_touchdown_count < 3 * len(games):
+            message += (
+                f"\nAnytime-TD market check: {td_raw_quotes} sportsbook Yes quotes, "
+                f"{td_eligible} roster/usage-eligible player offers. "
+                "Missing TD recommendations are never fabricated."
+            )
         if not verified_player_prop_count and not verified_touchdown_count and quote_candidates_count:
             message += (
                 "\nWARNING: Models found no qualifying verified player/TD recommendations. "
