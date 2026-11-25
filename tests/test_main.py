@@ -38,7 +38,7 @@ class MatchupFilterTests(unittest.TestCase):
             "injury_impact": [],
             "underdog_analysis": [],
             "player_research_summary": [],
-            "analysis_version": 14,
+            "analysis_version": 15,
             "ai_provider": "groq",
         }
         for section in (

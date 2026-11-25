@@ -35,6 +35,10 @@ class IncompleteResponseError(RuntimeError):
     """A provider explicitly reported that its generated response was truncated."""
 
 
+class NoUsableAnalysisError(RuntimeError):
+    """A syntactically valid model response contains no actionable or contextual evidence."""
+
+
 def _estimate_prompt_tokens(system_prompt: str, user_prompt: str) -> int:
     """Conservative character-based estimate used for provider TPM preflight checks."""
     return math.ceil((len(system_prompt or "") + len(user_prompt or "")) / 3.5)
@@ -116,8 +120,8 @@ def _configure_keys() -> None:
         root,
         text=("Add one or more API keys. Gemini, Groq and OpenRouter offer free usage "
               "with limits. NVIDIA NIM is an additional fallback; its limits may vary. "
-              "OpenAI is optional and usage is paid. Keys are stored in your computer's "
-              "secure credential store."),
+              "OpenAI is optional and usage is paid. Leave blank fields unchanged to keep "
+              "previously saved keys. Keys are stored in your computer's secure credential store."),
         wraplength=580, justify="left",
     ).pack(padx=18, pady=(16, 10), anchor="w")
 
@@ -186,6 +190,15 @@ def ensure_configured() -> list[tuple[Provider, str]]:
         )
     _CONFIGURED_PROVIDERS_CACHE = list(configured)
     return list(_CONFIGURED_PROVIDERS_CACHE)
+
+
+def configure_providers() -> list[str]:
+    """Reopen the credential editor even when one or more providers are configured."""
+    global _CONFIGURED_PROVIDERS_CACHE
+    _configure_keys()
+    _CONFIGURED_PROVIDERS_CACHE = None
+    return [provider.name for provider, _key in ensure_configured()]
+
 
 def _configured_providers() -> list[tuple[Provider, str]]:
     configured = []
@@ -421,29 +434,48 @@ def generate_json(
                 # 429 may be a short per-minute throttle or a depleted daily quota.
                 retry_after = exc.headers.get("Retry-After", "") if exc.headers else ""
                 wait_match = re.search(
-                    r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*s",
+                    r"try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s)\b",
                     body,
                     flags=re.I,
                 )
                 try:
-                    delay = float(retry_after) if retry_after else (
-                        float(wait_match.group(1)) if wait_match else 1.0
-                    )
+                    if retry_after:
+                        delay = float(retry_after)
+                    elif wait_match:
+                        delay = float(wait_match.group(1))
+                        if wait_match.group(2).lower() == "ms":
+                            delay /= 1000.0
+                    else:
+                        delay = 1.0
                 except ValueError:
                     delay = 1.0
-                # Groq's TPM response reports the exact refill time, but retrying
-                # at that exact boundary can race the rolling-window counter.
-                # Groq's reported refill estimate can still race its rolling
-                # 60-second TPM window. Wait an additional 10 seconds for explicit
-                # TPM errors; leave all other provider retry behavior unchanged.
-                if exc.code == 429 and "tokens per minute" in body.lower() and wait_match:
-                    delay += 10.0
+                # Groq's rolling TPM window can reject the next full request
+                # despite a subsecond refill hint. Keep a meaningful cushion.
+                if exc.code == 429 and (
+                    "tokens per minute" in body.lower()
+                    or "tpm" in body.lower()
+                ):
+                    # Groq's subsecond hint describes the instant a few tokens
+                    # refill, not the time until a full new request fits.
+                    # Wait one complete rolling minute before retrying.
+                    delay = max(delay, 60.0)
                 quota_exhausted = exc.code == 429 and any(
                     marker in body.lower()
                     for marker in ("quota", "insufficient_quota", "resource_exhausted",
                                    "daily limit", "billing")
                 )
                 transient = exc.code >= 500 or (exc.code == 429 and not quota_exhausted)
+                # A second Groq request in the same rolling window usually
+                # repeats the 429 and burns time. If another provider is ready,
+                # hand off immediately instead of retrying a doomed request.
+                if (
+                    provider.name == "groq" and exc.code == 429
+                    and any(other.name != "groq" for other, _ in configured)
+                ):
+                    failures.append(
+                        "groq: rate limited (HTTP 429); handed off to another configured provider."
+                    )
+                    break
                 if transient and attempt < 2:
                     # Respect provider-supplied retry windows instead of retrying too early.
                     time.sleep(min(max(delay, 0.5), 60))
@@ -458,6 +490,12 @@ def generate_json(
                     time.sleep(1)
                     continue
                 failures.append(f"{provider.name}: connection error: {exc}")
+                break
+            except NoUsableAnalysisError as exc:
+                # This is a content failure, not a formatting mistake. Sending
+                # the same huge prompt to the same small model wastes the
+                # remaining free-tier TPM budget. Let another provider handle it.
+                failures.append(f"{provider.name}: {exc}")
                 break
             except IncompleteResponseError as exc:
                 # The provider confirmed that the output hit its cap. Repeating the
@@ -516,8 +554,8 @@ def generate_json_ensemble(
         except Exception as exc:
             failures.append(f"{provider.name}: {exc}")
     if not results:
-        details = "\\n".join(failures)
+        details = "\n".join(failures)
         raise RuntimeError(
-            "No configured AI provider returned a valid matchup analysis.\\n" + details
+            "No configured AI provider returned a valid matchup analysis.\n" + details
         )
     return results, failures, configured_names

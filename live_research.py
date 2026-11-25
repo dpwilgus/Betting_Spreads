@@ -511,10 +511,15 @@ def _team_depth_chart(team_id: str) -> dict[str, Any]:
 
 
 def _extract_depth_chart_ids(payload: Any) -> dict[str, list[str]]:
-    """Return ESPN depth-chart athlete IDs ordered by listed rank."""
-    result: dict[str, list[tuple[int, str]]] = {}
+    """Return unique ESPN depth-chart athlete IDs in their best listed order.
+
+    ESPN can return several formation charts for a team. The same athlete may
+    appear in more than one chart; keep one entry per position/player and use
+    the best (lowest) rank, preserving the earliest chart as a tie-breaker.
+    """
+    result: dict[str, dict[str, tuple[int, int, int]]] = {}
     charts = payload.get("depthCharts", []) if isinstance(payload, dict) else []
-    for chart in charts:
+    for chart_index, chart in enumerate(charts):
         positions = chart.get("positions", {}) if isinstance(chart, dict) else {}
         for position_data in positions.values():
             if not isinstance(position_data, dict):
@@ -533,17 +538,25 @@ def _extract_depth_chart_ids(payload: Any) -> dict[str, list[str]]:
             }.get(abbreviation, abbreviation)
             if abbreviation not in {"QB", "RB", "WR", "TE"}:
                 continue
-            for item in position_data.get("athletes", []):
+            for item_index, item in enumerate(position_data.get("athletes", [])):
                 athlete = item.get("athlete") or {}
                 athlete_id = str(athlete.get("id") or "")
-                if athlete_id:
-                    try:
-                        rank = int(item.get("rank", 999))
-                    except (TypeError, ValueError):
-                        rank = 999
-                    result.setdefault(abbreviation, []).append((rank, athlete_id))
+                if not athlete_id:
+                    continue
+                try:
+                    rank = int(item.get("rank", 999))
+                except (TypeError, ValueError):
+                    rank = 999
+                order = (rank, chart_index, item_index)
+                by_id = result.setdefault(abbreviation, {})
+                prior = by_id.get(athlete_id)
+                if prior is None or order < prior:
+                    by_id[athlete_id] = order
     return {
-        position: [athlete_id for _, athlete_id in sorted(entries)]
+        position: [
+            athlete_id
+            for athlete_id, _order in sorted(entries.items(), key=lambda entry: entry[1])
+        ]
         for position, entries in result.items()
     }
 
@@ -713,20 +726,28 @@ def _select_research_players(
         )
     }
 
-    def add_player(athlete_id: str, reason: str) -> None:
+    def add_player(
+        athlete_id: str,
+        reason: str,
+        expected_position: str | None = None,
+    ) -> bool:
+        """Add one eligible, correctly-positioned roster player; report new additions."""
         player = roster_by_id.get(str(athlete_id))
         if player is None or normalize(player.get("name")) in unavailable_names:
-            return
+            return False
+        if expected_position and str(player.get("position") or "").upper() != expected_position:
+            return False
         existing = selected_by_id.get(str(athlete_id))
         if existing is not None:
             prior = existing.get("research_reason", "")
             if reason not in prior:
                 existing["research_reason"] = "; ".join(filter(None, (prior, reason)))
-            return
+            return False
         candidate = dict(player)
         candidate["research_reason"] = reason
         selected_by_id[str(athlete_id)] = candidate
         selected.append(candidate)
+        return True
 
     def find_depth_chart_id(value: Any, wanted_name: str) -> str | None:
         if isinstance(value, dict):
@@ -748,11 +769,18 @@ def _select_research_players(
 
     for position, limit in limits.items():
         added = 0
-        for athlete_id in position_ids[position]:
+        # A deep fifth-string tight end is not a routine research candidate;
+        # injury replacements are handled separately below.
+        core_ids = position_ids[position][:4] if position == "TE" else position_ids[position]
+        for athlete_id in core_ids:
             if athlete_id not in roster_by_id:
                 continue
-            add_player(athlete_id, "Core depth-chart/roster candidate")
-            added += 1
+            if add_player(
+                athlete_id,
+                "Core depth-chart/roster candidate",
+                expected_position=position,
+            ):
+                added += 1
             if added >= limit:
                 break
 
@@ -800,6 +828,7 @@ def _select_research_players(
             add_player(
                 athlete_id,
                 f"Potential replacement for {report.get('player')} ({report.get('status')})",
+                expected_position=position,
             )
 
     return selected
