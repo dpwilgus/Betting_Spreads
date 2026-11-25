@@ -2845,6 +2845,30 @@ def analyze_game(game: dict[str, Any], research: dict[str, Any] | None = None) -
         }
         for item in quoted_shortlist
     ]
+    if str(data.get("summary") or "").startswith("Matchup summary unavailable"):
+        script = str(data.get("game_script") or "").strip()
+        if script and not script.startswith("Game-script narrative unavailable"):
+            data["summary"] = (
+                f"Game-script outlook for {team_names[0]} at {team_names[1]}: "
+                + script[:650]
+            )
+            data.setdefault("data_gaps", []).append(
+                "Full AI matchup summary unavailable; displayed the separately supplied game-script outlook."
+            )
+    td_diag = data.get("td_quote_diagnostics") or {}
+    if not data.get("touchdown_scorers"):
+        if not td_diag.get("raw_yes_quotes"):
+            data.setdefault("data_gaps", []).append(
+                "No verified anytime-TD Yes prices were returned by The Odds API; three verified TD bets cannot be produced."
+            )
+        elif not td_diag.get("eligible_players"):
+            data.setdefault("data_gaps", []).append(
+                f"{td_diag['raw_yes_quotes']} anytime-TD sportsbook quotes found, but none passed current roster, usage and availability checks."
+            )
+        else:
+            data.setdefault("data_gaps", []).append(
+                f"{td_diag['eligible_players']} eligible anytime-TD candidates had quotes, but no model-supported edge was verified."
+            )
     data["player_research_summary"] = player_research_summary
     data["analysis_version"] = 15
     data["odds_api_status"] = research.get("odds_api_status", "not_configured")
