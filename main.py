@@ -485,7 +485,10 @@ def main() -> int:
         refresh_incomplete = args.refresh_incomplete
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
+        weekly_slate = [{key: game.get(key) for key in ("Away Team", "Home Team", "Betting Line", "Game Status")} for game in games]
         games = [game for game in games if not game_is_no_longer_pregame(game)]
+        for game in games:
+            game["weekly_slate"] = weekly_slate
         if not games:
             raise RuntimeError("No upcoming games are available.")
         if not args.no_gui:
@@ -522,6 +525,9 @@ def main() -> int:
                             and len(cached.get("touchdown_scorers", [])) == 3
                             and all(isinstance(cached.get(key), list) for key, _ in EXTRA_SECTIONS)
                             and len(cached.get("game_level_bets", [])) == 4
+                            and 1 <= len(cached.get("sneaky_props", [])) <= 3
+                            and len(cached.get("upset_watch", [])) == 1
+                            and all("no recommendation" not in str(p.get("bet_description", "")).lower() for p in cached.get("game_level_bets", []))
                         )
                         if is_complete:
                             analysis = _load_cached_analysis(game)
