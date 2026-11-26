@@ -276,6 +276,29 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         if not analysis.get(key):
             sheet.append(["No evidence-backed candidates returned."])
 
+    sheet.append([])
+    sheet.append(["TOP INJURY / NEWS IMPACT"])
+    row = sheet.max_row
+    sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+    sheet.cell(row, 1).font = white_bold
+    sheet.cell(row, 1).fill = navy
+    news_keys = ("player", "team", "development", "affected_players_or_units",
+                 "analytical_impact", "status", "reported_at", "source_url")
+    sheet.append(["Player", "Team", "Development", "Affected players / units",
+                  "Analytical impact", "Status", "Reported", "Source"])
+    for cell in sheet[sheet.max_row]:
+        _style_header(cell)
+    for item in analysis.get("injury_news_impact", []):
+        sheet.append([item.get(key, "") for key in news_keys])
+        for cell in sheet[sheet.max_row]:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+        sheet.row_dimensions[sheet.max_row].height = 100
+        url = item.get("source_url", "")
+        if url.startswith(("https://", "http://")):
+            sheet.cell(sheet.max_row, 8).hyperlink = url
+    if not analysis.get("injury_news_impact"):
+        sheet.append(["No top-impact news returned, or older cached analysis."])
+
     source_row = sheet.max_row + 2
     sheet.cell(source_row, 1, "RESEARCH SOURCES")
     sheet.cell(source_row, 1).font = white_bold
@@ -528,6 +551,7 @@ def main() -> int:
                             and 1 <= len(cached.get("sneaky_props", [])) <= 3
                             and any(re.search(r"\b(?:first|1st)\s+(?:(?:team|half)\s+)?(?:touchdown|td)\b", str(p.get("bet_description", "")), re.I) for p in cached.get("sneaky_props", []))
                             and len(cached.get("upset_watch", [])) == 1
+                            and isinstance(cached.get("injury_news_impact"), list)
                             and all("no recommendation" not in str(p.get("bet_description", "")).lower() for p in cached.get("game_level_bets", []))
                         )
                         if is_complete:
