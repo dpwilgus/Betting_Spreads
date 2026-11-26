@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import re
@@ -21,6 +22,7 @@ from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 from ai_analysis import analyze_game, get_api_key
+from game_selector import select_games_gui
 
 ESPN_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 HEADERS = {"User-Agent": "Betting-Spreads/2.0 (NFL matchup analysis exporter)"}
@@ -90,6 +92,7 @@ def extract_games(data: dict) -> tuple[list[dict], object, object]:
 
         games.append({
             "Game Date (ET)": kickoff_text,
+            "event_start_utc": kickoff,
             "Away Team": away.get("team", {}).get("displayName", "Away team"),
             "Home Team": home.get("team", {}).get("displayName", "Home team"),
             "Betting Line": details,
@@ -407,10 +410,21 @@ def _load_cached_analysis(game: dict) -> dict:
 def main() -> int:
     log_path = application_directory() / "Betting_Spreads.log"
     try:
-        reuse_cache = "--reuse-cache" in sys.argv[1:]
-        refresh_incomplete = "--refresh-incomplete" in sys.argv[1:]
+        parser = argparse.ArgumentParser()
+        modes = parser.add_mutually_exclusive_group()
+        modes.add_argument("--reuse-cache", action="store_true")
+        modes.add_argument("--refresh-incomplete", action="store_true")
+        parser.add_argument("--no-gui", action="store_true")
+        args = parser.parse_args()
+        reuse_cache = args.reuse_cache
+        refresh_incomplete = args.refresh_incomplete
         data = fetch_scoreboard()
         games, season, week = extract_games(data)
+        games = [game for game in games if not game_is_no_longer_pregame(game)]
+        if not games:
+            raise RuntimeError("No upcoming games are available.")
+        if not args.no_gui:
+            games = select_games_gui(games)
         api_key = None if reuse_cache else get_api_key()
         analyses = []
         failures = []
