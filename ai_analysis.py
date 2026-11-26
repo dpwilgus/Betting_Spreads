@@ -116,6 +116,17 @@ for section in ("sneaky_props", "game_level_bets", "upset_watch"):
     }
     ANALYSIS_SCHEMA["required"].append(section)
 
+ANALYSIS_SCHEMA["properties"]["injury_news_impact"] = {
+    "type": "array", "maxItems": 3,
+    "items": {"type": "object", "additionalProperties": False,
+        "properties": {key: {"type": "string"} for key in (
+            "player", "team", "development", "affected_players_or_units",
+            "analytical_impact", "source_url", "reported_at", "status")},
+        "required": ["player", "team", "development", "affected_players_or_units",
+                     "analytical_impact", "source_url", "reported_at", "status"]},
+}
+ANALYSIS_SCHEMA["required"].append("injury_news_impact")
+
 def _extract_output_text(response: dict[str, Any]) -> str:
     chunks = []
     for item in response.get("output", []):
@@ -166,6 +177,17 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
         "Select the strongest supported candidate, not an artificially high probability; "
         "do not substitute anytime TD rates for event-specific rates or invent missing statistics. "
         "Prefer DraftKings, then Bovada, and mark unavailable lines unverified."
+    )
+    user_input += (
+        "\nResearch up to three TOP-impact injury or news developments per matchup. "
+        "Prioritize starting quarterbacks, elite offensive players, defensive leaders, "
+        "and clustered injuries to key units. Include consequential departures, roster changes "
+        "and confirmed availability updates, not just injuries. Check official team and NFL "
+        "reports and credible reporting by ESPN's Adam Schefter; distinguish confirmed news "
+        "from rumors and verify current team affiliation, date and status. Identify affected "
+        "teammates, opposing players or units and explain how the news changes usage, protection, "
+        "scoring, spread or total projections. Incorporate the impact into the actual predictions. "
+        "Provide direct source URLs and report dates; never invent news or fill the section with minor injuries."
     )
     user_input += "\nFull weekly schedule (context only): " + json.dumps(game.get("weekly_slate", []))
     payload = {
