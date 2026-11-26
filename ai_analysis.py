@@ -155,6 +155,18 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
         "(full-game spread, first-half spread, full-game total, first-half total), and one conditional underdog upset candidate (not necessarily a recommended wager). "
         "For each game-level entry give a directional analytical lean, even at low confidence. Research home/away splits, opponent-adjusted scoring, first-half scoring and margin, and ATS records with sample sizes. If a market is unavailable, mark market_line Not verified and distinguish the model threshold from a sportsbook quote. Prefer publicly verifiable DraftKings lines, including ESPN attribution where explicit; use Bovada as backup and identify the book in market_line. Never invent a line or statistic. For upset watch distinguish outright win from spread cover, research current-season weekly underdog win and cover rates with denominators and compare the matchup with the full weekly slate supplied below. Clearly label speculative candidates and missing evidence; avoid duplicates across sections."
     )
+    user_input += (
+        "\nMandatory sneaky touchdown market: at least one of the one to three sneaky props "
+        "must be a player First Touchdown (game), First Team Touchdown, or First Half Touchdown. "
+        "Use exactly one of those labels in bet_description for each such pick. "
+        "Compare eligible players using season-to-date counts and percentages with denominators "
+        "for the specific event, early-drive and first-half red-zone usage, opponent defensive "
+        "splits, injuries, and expected game script. Distinguish first team TD from first game TD "
+        "and first-half TD from anytime TD. Account for games with no qualifying touchdown. "
+        "Select the strongest supported candidate, not an artificially high probability; "
+        "do not substitute anytime TD rates for event-specific rates or invent missing statistics. "
+        "Prefer DraftKings, then Bovada, and mark unavailable lines unverified."
+    )
     user_input += "\nFull weekly schedule (context only): " + json.dumps(game.get("weekly_slate", []))
     payload = {
         "model": MODEL, "reasoning": {"effort": "low"},
