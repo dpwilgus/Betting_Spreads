@@ -111,7 +111,7 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
 for section in ("sneaky_props", "game_level_bets", "upset_watch"):
     ANALYSIS_SCHEMA["properties"][section] = {
         "type": "array", "maxItems": 4 if section == "game_level_bets" else 3 if section != "upset_watch" else 1,
-        **({"minItems": 4} if section == "game_level_bets" else {}),
+        **({"minItems": 4} if section == "game_level_bets" else {"minItems": 1}),
         "items": ANALYSIS_SCHEMA["properties"]["picks"]["items"],
     }
     ANALYSIS_SCHEMA["required"].append(section)
@@ -151,10 +151,11 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
         "clearly lower their confidence, mark data quality Limited where appropriate, and disclose "
         "the uncertainty. Never invent players, statistics, injuries, lines, odds, or sources. "
         "Do not assume an unverified market line is available. "
-        "Additionally return up to three sneaky player props, exactly four game-level entries in this order "
-        "(full-game spread, first-half spread, full-game total, first-half total), and up to one underdog upset candidate. "
-        "For game-level entries with insufficient evidence, identify the required market, explicitly say No recommendation, mark market_line Not verified and data_quality Limited, and explain the gap; never invent a line. Use empty arrays for other additional sections if evidence is insufficient; avoid duplicates across sections."
+        "Additionally return one to three distinct sneaky player props based on usage, role changes, or matchup evidence, exactly four game-level entries in this order "
+        "(full-game spread, first-half spread, full-game total, first-half total), and one conditional underdog upset candidate (not necessarily a recommended wager). "
+        "For each game-level entry give a directional analytical lean, even at low confidence. Research home/away splits, opponent-adjusted scoring, first-half scoring and margin, and ATS records with sample sizes. If a market is unavailable, mark market_line Not verified and distinguish the model threshold from a sportsbook quote. Prefer publicly verifiable DraftKings lines, including ESPN attribution where explicit; use Bovada as backup and identify the book in market_line. Never invent a line or statistic. For upset watch distinguish outright win from spread cover, research current-season weekly underdog win and cover rates with denominators and compare the matchup with the full weekly slate supplied below. Clearly label speculative candidates and missing evidence; avoid duplicates across sections."
     )
+    user_input += "\nFull weekly schedule (context only): " + json.dumps(game.get("weekly_slate", []))
     payload = {
         "model": MODEL, "reasoning": {"effort": "low"},
         "tools": [{"type": "web_search"}], "tool_choice": "auto",
