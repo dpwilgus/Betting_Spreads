@@ -107,6 +107,14 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
     "required": ["summary", "game_script", "picks", "touchdown_scorers", "data_gaps"]
 }
 
+# Additional sections share the original validated pick structure.
+for section in ("sneaky_props", "game_level_bets", "upset_watch"):
+    ANALYSIS_SCHEMA["properties"][section] = {
+        "type": "array", "maxItems": 3 if section != "upset_watch" else 1,
+        "items": ANALYSIS_SCHEMA["properties"]["picks"]["items"],
+    }
+    ANALYSIS_SCHEMA["required"].append(section)
+
 def _extract_output_text(response: dict[str, Any]) -> str:
     chunks = []
     for item in response.get("output", []):
@@ -141,7 +149,10 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
         "five or three candidates have strong evidence, include the next-best plausible candidates but "
         "clearly lower their confidence, mark data quality Limited where appropriate, and disclose "
         "the uncertainty. Never invent players, statistics, injuries, lines, odds, or sources. "
-        "Do not assume an unverified market line is available."
+        "Do not assume an unverified market line is available. "
+        "Additionally return up to three sneaky player props, up to three game-level bets "
+        "(spread, total, moneyline or first-half markets), and up to one underdog upset candidate. "
+        "Use empty arrays if evidence is insufficient; avoid duplicates across sections."
     )
     payload = {
         "model": MODEL, "reasoning": {"effort": "low"},
@@ -184,7 +195,7 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
                     sources.append({"title": source.get("title") or url, "url": url})
     if len(analysis.get("picks", [])) > 5 or len(analysis.get("touchdown_scorers", [])) > 3:
         raise RuntimeError("The AI returned more recommendations than the workbook supports.")
-    for pick in analysis.get("picks", []):
+    for pick in [p for section in ("picks", "sneaky_props", "game_level_bets", "upset_watch") for p in analysis.get(section, [])]:
         probability = float(pick.get("estimated_hit_probability", -1))
         confidence = int(pick.get("confidence", 0))
         if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
