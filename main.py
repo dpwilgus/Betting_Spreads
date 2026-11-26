@@ -268,11 +268,75 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
         cell.hyperlink = source.get("url")
         cell.style = "Hyperlink"
 
+    for key, title in EXTRA_SECTIONS:
+        sheet.append([])
+        sheet.append([title])
+        row = sheet.max_row
+        sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+        sheet.cell(row, 1).font = white_bold
+        sheet.cell(row, 1).fill = navy
+        sheet.append(headers)
+        for cell in sheet[sheet.max_row]:
+            _style_header(cell)
+        for pick in analysis.get(key, []):
+            sheet.append([pick.get("rank"), pick.get("market_type"), pick.get("player_or_team"),
+                          pick.get("bet_description"), pick.get("market_line"), pick.get("play_threshold"),
+                          pick.get("estimated_hit_probability"), pick.get("confidence"),
+                          pick.get("statistical_rationale"), pick.get("risk_factors")])
+            for cell in sheet[sheet.max_row]:
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+            sheet.row_dimensions[sheet.max_row].height = 82
+        if not analysis.get(key):
+            sheet.append(["No evidence-backed candidates returned."])
+
     widths = [8, 15, 22, 30, 22, 28, 18, 16, 58, 42]
     for col, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(col)].width = width
     sheet.freeze_panes = "A14"
 
+
+EXTRA_SECTIONS = (
+    ("sneaky_props", "SNEAKY PROPS"),
+    ("game_level_bets", "GAME-LEVEL BETS"),
+    ("upset_watch", "UNDERDOG / UPSET WATCH"),
+)
+
+def write_overall(workbook, games, analyses):
+    sheet = workbook.create_sheet("Best Overall Bets")
+    sheet.append(["Research shortlist — confidence ranking, not expected value"])
+    sheet.append(["Matchup", "Section", "Player / Team", "Bet", "Reported market line",
+                  "Model probability (%)", "Confidence", "Rationale", "Risks"])
+    for cell in sheet[2]:
+        _style_header(cell)
+    candidates = []
+    seen = set()
+    for game, analysis in zip(games, analyses):
+        if game_is_no_longer_pregame(game) or analysis.get("cache_reused"):
+            continue
+        matchup = f"{game['Away Team']} at {game['Home Team']}"
+        for key, title in (("picks", "Top opportunities"),) + EXTRA_SECTIONS:
+            for pick in analysis.get(key, []):
+                line = str(pick.get("market_line", "")).strip()
+                if not line or any(x in line.lower() for x in ("not verified", "unverified", "unavailable", "unknown")):
+                    continue
+                identity = (matchup, str(pick.get("player_or_team", "")).lower(), str(pick.get("bet_description", "")).lower())
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                candidates.append([matchup, title, pick.get("player_or_team"), pick.get("bet_description"),
+                                   line, pick.get("estimated_hit_probability", 0), pick.get("confidence", 0),
+                                   pick.get("statistical_rationale"), pick.get("risk_factors")])
+    candidates.sort(key=lambda row: (row[6], row[5]), reverse=True)
+    for row in candidates[:10]:
+        sheet.append(row)
+        for cell in sheet[sheet.max_row]:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+        sheet.row_dimensions[sheet.max_row].height = 75
+    if not candidates:
+        sheet.append(["No fresh candidates with reported market lines."])
+    for col, width in enumerate([40, 24, 24, 35, 25, 20, 15, 55, 45], 1):
+        sheet.column_dimensions[get_column_letter(col)].width = width
+    sheet.freeze_panes = "A3"
 
 def write_workbook(games: list[dict], analyses: list[dict], season: object, week: object) -> Path:
     output = application_directory() / "NFL_Weekly_Matchups.xlsx"
@@ -311,6 +375,7 @@ def write_workbook(games: list[dict], analyses: list[dict], season: object, week
     for game, analysis in zip(games, analyses):
         _write_matchup_sheet(workbook, game, analysis, used)
 
+    write_overall(workbook, games, analyses)
     workbook.save(output)
     return output
 
@@ -455,6 +520,7 @@ def main() -> int:
                             cached is not None
                             and len(cached.get("picks", [])) == 5
                             and len(cached.get("touchdown_scorers", [])) == 3
+                            and all(isinstance(cached.get(key), list) for key, _ in EXTRA_SECTIONS)
                         )
                         if is_complete:
                             analysis = _load_cached_analysis(game)
