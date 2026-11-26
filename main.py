@@ -526,6 +526,7 @@ def main() -> int:
                             and all(isinstance(cached.get(key), list) for key, _ in EXTRA_SECTIONS)
                             and len(cached.get("game_level_bets", [])) == 4
                             and 1 <= len(cached.get("sneaky_props", [])) <= 3
+                            and any(re.search(r"\b(?:first|1st)\s+(?:(?:team|half)\s+)?(?:touchdown|td)\b", str(p.get("bet_description", "")), re.I) for p in cached.get("sneaky_props", []))
                             and len(cached.get("upset_watch", [])) == 1
                             and all("no recommendation" not in str(p.get("bet_description", "")).lower() for p in cached.get("game_level_bets", []))
                         )
