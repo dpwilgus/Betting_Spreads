@@ -191,7 +191,7 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
     )
     user_input += "\nFull weekly schedule (context only): " + json.dumps(game.get("weekly_slate", []))
     payload = {
-        "model": MODEL, "reasoning": {"effort": "low"},
+        "model": os.environ.get("BETTING_OPENAI_MODEL", MODEL), "reasoning": {"effort": "low"},
         "tools": [{"type": "web_search"}], "tool_choice": "auto",
         "include": ["web_search_call.action.sources"],
         "text": {"format": {"type": "json_schema", "name": "nfl_matchup_analysis",
@@ -241,5 +241,9 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
         confidence = int(scorer.get("confidence", 0))
         if not 0 <= probability <= 100 or not 1 <= confidence <= 10:
             raise RuntimeError("The AI returned an invalid touchdown probability or confidence score.")
+    analysis["api_usage"] = {"model": result.get("model", payload["model"]),
+                             "tokens": result.get("usage", {}),
+                             "web_search_calls": sum(item.get("type") == "web_search_call" for item in result.get("output", []))}
+    print("OpenAI usage:", json.dumps(analysis["api_usage"]), flush=True) if __import__("sys").stdout is not None else None
     analysis["sources"] = sources
     return analysis
