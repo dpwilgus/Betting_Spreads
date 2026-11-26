@@ -255,19 +255,6 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
     sheet.cell(gap_row + 1, 1, "\n".join(f"• {gap}" for gap in gaps) if gaps else "No material data gaps were reported.")
     sheet.cell(gap_row + 1, 1).alignment = Alignment(wrap_text=True, vertical="top")
 
-    source_row = gap_row + 4
-    sheet.cell(source_row, 1, "RESEARCH SOURCES")
-    sheet.cell(source_row, 1).font = white_bold
-    sheet.cell(source_row, 1).fill = navy
-    sheet.merge_cells(start_row=source_row, start_column=1, end_row=source_row, end_column=10)
-    sources = analysis.get("sources", [])
-    if not sources:
-        sheet.cell(source_row + 1, 1, "No source URLs were returned by the research tool.")
-    for offset, source in enumerate(sources, 1):
-        cell = sheet.cell(source_row + offset, 1, source.get("title", source.get("url", "")))
-        cell.hyperlink = source.get("url")
-        cell.style = "Hyperlink"
-
     for key, title in EXTRA_SECTIONS:
         sheet.append([])
         sheet.append([title])
@@ -288,6 +275,19 @@ def _write_matchup_sheet(workbook: Workbook, game: dict, analysis: dict, used: s
             sheet.row_dimensions[sheet.max_row].height = 82
         if not analysis.get(key):
             sheet.append(["No evidence-backed candidates returned."])
+
+    source_row = sheet.max_row + 2
+    sheet.cell(source_row, 1, "RESEARCH SOURCES")
+    sheet.cell(source_row, 1).font = white_bold
+    sheet.cell(source_row, 1).fill = navy
+    sheet.merge_cells(start_row=source_row, start_column=1, end_row=source_row, end_column=10)
+    sources = analysis.get("sources", [])
+    if not sources:
+        sheet.cell(source_row + 1, 1, "No source URLs were returned by the research tool.")
+    for offset, source in enumerate(sources, 1):
+        cell = sheet.cell(source_row + offset, 1, source.get("title", source.get("url", "")))
+        cell.hyperlink = source.get("url")
+        cell.style = "Hyperlink"
 
     widths = [8, 15, 22, 30, 22, 28, 18, 16, 58, 42]
     for col, width in enumerate(widths, 1):
@@ -521,6 +521,7 @@ def main() -> int:
                             and len(cached.get("picks", [])) == 5
                             and len(cached.get("touchdown_scorers", [])) == 3
                             and all(isinstance(cached.get(key), list) for key, _ in EXTRA_SECTIONS)
+                            and len(cached.get("game_level_bets", [])) == 4
                         )
                         if is_complete:
                             analysis = _load_cached_analysis(game)
