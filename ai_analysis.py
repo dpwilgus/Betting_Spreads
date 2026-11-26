@@ -110,7 +110,8 @@ ANALYSIS_SCHEMA: dict[str, Any] = {
 # Additional sections share the original validated pick structure.
 for section in ("sneaky_props", "game_level_bets", "upset_watch"):
     ANALYSIS_SCHEMA["properties"][section] = {
-        "type": "array", "maxItems": 3 if section != "upset_watch" else 1,
+        "type": "array", "maxItems": 4 if section == "game_level_bets" else 3 if section != "upset_watch" else 1,
+        **({"minItems": 4} if section == "game_level_bets" else {}),
         "items": ANALYSIS_SCHEMA["properties"]["picks"]["items"],
     }
     ANALYSIS_SCHEMA["required"].append(section)
@@ -150,9 +151,9 @@ def analyze_game(game: dict[str, Any], api_key: str) -> dict[str, Any]:
         "clearly lower their confidence, mark data quality Limited where appropriate, and disclose "
         "the uncertainty. Never invent players, statistics, injuries, lines, odds, or sources. "
         "Do not assume an unverified market line is available. "
-        "Additionally return up to three sneaky player props, up to three game-level bets "
-        "(spread, total, moneyline or first-half markets), and up to one underdog upset candidate. "
-        "Use empty arrays if evidence is insufficient; avoid duplicates across sections."
+        "Additionally return up to three sneaky player props, exactly four game-level entries in this order "
+        "(full-game spread, first-half spread, full-game total, first-half total), and up to one underdog upset candidate. "
+        "For game-level entries with insufficient evidence, identify the required market, explicitly say No recommendation, mark market_line Not verified and data_quality Limited, and explain the gap; never invent a line. Use empty arrays for other additional sections if evidence is insufficient; avoid duplicates across sections."
     )
     payload = {
         "model": MODEL, "reasoning": {"effort": "low"},
